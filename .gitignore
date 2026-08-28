@@ -8,3 +8,10 @@
 /3rdparty/newui/
 
 *.log
+
+# extension/ - codetools++ VSIX build output (C# bin/obj, native vcxproj x64/obj, VS's own .vs/)
+extension/**/bin/
+extension/**/obj/
+extension/**/x64/
+extension/**/*.user
+extension/.vs/

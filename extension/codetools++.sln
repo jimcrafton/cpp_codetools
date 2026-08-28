@@ -1,0 +1,32 @@
+
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 18
+VisualStudioVersion = 18.8.12023.21 stable
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "CodeToolsVsix", "CodeToolsVsix\CodeToolsVsix.csproj", "{B9361CD7-7969-40DC-82C9-4FB7694DBF11}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "NativeEditControl", "NativeEditControl\NativeEditControl.vcxproj", "{7452C600-1EE8-4FC1-B9F0-86EAB31692C9}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{B9361CD7-7969-40DC-82C9-4FB7694DBF11}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B9361CD7-7969-40DC-82C9-4FB7694DBF11}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B9361CD7-7969-40DC-82C9-4FB7694DBF11}.Debug|Any CPU.Deploy.0 = Debug|Any CPU
+		{B9361CD7-7969-40DC-82C9-4FB7694DBF11}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B9361CD7-7969-40DC-82C9-4FB7694DBF11}.Release|Any CPU.Build.0 = Release|Any CPU
+		{7452C600-1EE8-4FC1-B9F0-86EAB31692C9}.Debug|Any CPU.ActiveCfg = Debug|x64
+		{7452C600-1EE8-4FC1-B9F0-86EAB31692C9}.Debug|Any CPU.Build.0 = Debug|x64
+		{7452C600-1EE8-4FC1-B9F0-86EAB31692C9}.Release|Any CPU.ActiveCfg = Release|x64
+		{7452C600-1EE8-4FC1-B9F0-86EAB31692C9}.Release|Any CPU.Build.0 = Release|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectDependencies) = postSolution
+		{B9361CD7-7969-40DC-82C9-4FB7694DBF11} = {7452C600-1EE8-4FC1-B9F0-86EAB31692C9}
+	EndGlobalSection
+EndGlobal

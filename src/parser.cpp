@@ -1,4 +1,5 @@
 #include "cpptools/parser.h"
+#include "cpptools/log.h"
 
 #include <clang-c/Index.h>
 
@@ -217,6 +218,7 @@ ParseResult Parser::parseBuffer(const std::string& filePath, const std::string& 
         diagnostic.message = "failed to parse translation unit (libclang error code " +
             std::to_string(static_cast<int>(error)) + ")";
         diagnostic.location.file = filePath;
+        log(Severity::Fatal, diagnostic.message + " [" + filePath + "]");
         result.diagnostics.push_back(std::move(diagnostic));
         return result;
     }
@@ -243,6 +245,7 @@ ParseResult Parser::parseFile(const std::string& filePath,
         diagnostic.severity = Severity::Fatal;
         diagnostic.message = "failed to open file";
         diagnostic.location.file = filePath;
+        log(Severity::Fatal, diagnostic.message + " [" + filePath + "]");
         result.diagnostics.push_back(std::move(diagnostic));
         return result;
     }
@@ -251,5 +254,6 @@ ParseResult Parser::parseFile(const std::string& filePath,
     buffer << stream.rdbuf();
     return parseBuffer(filePath, buffer.str(), compileArgs);
 }
+
 
 } // namespace cpptools
