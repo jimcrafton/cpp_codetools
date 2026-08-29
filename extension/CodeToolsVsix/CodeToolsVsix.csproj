@@ -38,18 +38,18 @@
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
     <Deterministic>true</Deterministic>
 
-    <!-- Passed through to NativeEditControl.vcxproj (which links cpptools.lib directly - see
-         its own LLVMInstallDir property) and used below to locate libclang.dll for deployment.
-         Override with /p:LLVMInstallDir=... if LLVM isn't installed at the default location -
-         same property name/default as this repo's root CMakeLists.txt (CPPCODETOOLS_LLVM_ROOT). -->
+    <!-- Used both to configure the CMake build below (-DCPPCODETOOLS_LLVM_ROOT=...) and to locate
+         libclang.dll for deployment. Override with /p:LLVMInstallDir=... if LLVM isn't installed
+         at the default location - same property name/default as this repo's root CMakeLists.txt
+         (CPPCODETOOLS_LLVM_ROOT), kept in sync via -D below so an override actually reaches the
+         native build, not just the deployment-file lookup. -->
     <LLVMInstallDir Condition="'$(LLVMInstallDir)'==''">C:\Program Files\LLVM</LLVMInstallDir>
 
     <!-- cpp_codetools' own repo root and CMake build directory (extension/CodeToolsVsix -> up
-         two levels). cpptools (the CMake-built static lib NativeEditControl.vcxproj links
-         directly - see extension/NativeEditControl/NativeEditControl.vcxproj) is built by
-         invoking cmake directly against that build tree before NativeEditControl.vcxproj is
-         built, since it isn't an MSBuild project and so isn't picked up by the .sln's
-         ProjectDependencies ordering. -->
+         two levels). NativeEditControl.dll is a CMake target (root CMakeLists.txt), built by
+         invoking cmake directly against this build tree before deploying its output alongside
+         this assembly - it isn't an MSBuild project and so isn't picked up by the .sln's
+         ProjectDependencies ordering (indeed, it isn't in the .sln at all). -->
     <!-- No trailing backslash: one right before a closing quote in an Exec Command escapes the
          quote itself (classic Windows command-line argument parsing gotcha) and corrupts the
          next argument - observed first-hand getting the cmake build invocation below working. -->
@@ -74,37 +74,39 @@
     <None Include="source.extension.vsixmanifest" SubType="Designer" />
   </ItemGroup>
 
-  <!-- NativeEditControl.dll (native, edit-surface HWND - links cpptools.lib directly, see its
-       own vcxproj) and libclang.dll (cpptools's own runtime dependency) are native code
-       NativeEditHost.cs P/Invokes into or that NativeEditControl.dll needs alongside it. They
-       need to sit next to CodeToolsVsix.dll at runtime and travel inside the .vsix, since VS
-       loads them from the extension's install folder, not from this project's own build output.
-       There is no separate C API/bridge DLL - NativeEditControl.dll calls cpptools::Parser
-       in-process (see StandInEditControl.cpp).
+  <!-- NativeEditControl.dll (native, edit-surface HWND - a CMake target, root CMakeLists.txt)
+       and libclang.dll (cpptools's own runtime dependency) are native code NativeEditHost.cs
+       P/Invokes into or that NativeEditControl.dll needs alongside it. They need to sit next to
+       CodeToolsVsix.dll at runtime and travel inside the .vsix, since VS loads them from the
+       extension's install folder, not from this project's own build output. There is no separate
+       C API/bridge DLL - NativeEditControl.dll calls cpptools::Parser in-process (see
+       CppEditorControl.cpp), and hosts a real newui::RootView the same way (see
+       EditThreadHost.cpp).
 
        This is done as an imperative Target rather than plain <Content Include> items pointing at
-       the other projects' output paths: a static Content item's Exists() condition is evaluated
+       the CMake build's own output path: a static Content item's Exists() condition is evaluated
        when this project is first loaded, before any build has actually happened, so on a clean
-       checkout it would (wrongly) evaluate to false and silently omit the DLLs. Building cpptools
-       via CMake explicitly here, before NativeEditControl.vcxproj (which links the resulting
-       .lib) - rather than relying on the .sln's ProjectDependencies ordering, which only helps
-       IDE/solution-level builds and doesn't apply to a CMake target at all - also means
-       `dotnet build` on just this .csproj still produces a working, deployable extension on a
-       machine with the VC++ toolset and CMake available. -->
+       checkout it would (wrongly) evaluate to false and silently omit the DLLs. Building
+       NativeEditControl via CMake explicitly here - which transitively builds cpptools/newui too,
+       since it links both - rather than relying on any MSBuild-level project ordering (there is
+       none; NativeEditControl isn't in the .sln at all) - also means `dotnet build` on just this
+       .csproj still produces a working, deployable extension on a machine with the VC++ toolset
+       and CMake available. -->
   <Target Name="BuildAndIncludeNativeDependencies" BeforeTargets="CoreCompile;GetVsixSourceItems" Condition="'$(DesignTimeBuild)' != 'true'">
     <!-- First-time configure, mirroring the repo's own documented "cmake -S . -B build" step -
-         lets a clean checkout of this repo build the extension without a manual CMake step first. -->
-    <Exec Command="&quot;$(CMakeExe)&quot; -S &quot;$(RepoRoot)&quot; -B &quot;$(RepoBuildDir)&quot;"
+         lets a clean checkout of this repo build the extension without a manual CMake step first.
+         -DCPPCODETOOLS_LLVM_ROOT keeps a /p:LLVMInstallDir=... override in sync with the actual
+         native build, not just the deployment-file lookup below. -->
+    <Exec Command="&quot;$(CMakeExe)&quot; -S &quot;$(RepoRoot)&quot; -B &quot;$(RepoBuildDir)&quot; -DCPPCODETOOLS_LLVM_ROOT=&quot;$(LLVMInstallDir)&quot;"
           Condition="!Exists('$(RepoBuildDir)\CMakeCache.txt')" />
 
-    <!-- cpptools.lib must exist before NativeEditControl.vcxproj (below) links it. -->
-    <Exec Command="&quot;$(CMakeExe)&quot; --build &quot;$(RepoBuildDir)&quot; --config $(Configuration) --target cpptools" />
-
-    <MSBuild Projects="$(MSBuildThisFileDirectory)..\NativeEditControl\NativeEditControl.vcxproj"
-             Properties="Configuration=$(Configuration);Platform=x64;LLVMInstallDir=$(LLVMInstallDir)" />
+    <!-- Builds NativeEditControl.dll - transitively builds cpptools and newui too, since it
+         links both (target_link_libraries(NativeEditControl PRIVATE cpptools newui), root
+         CMakeLists.txt) - one call covers everything this project needs from the native side. -->
+    <Exec Command="&quot;$(CMakeExe)&quot; --build &quot;$(RepoBuildDir)&quot; --config $(Configuration) --target NativeEditControl" />
 
     <ItemGroup>
-      <_NativeDeploymentFile Include="$(MSBuildThisFileDirectory)..\NativeEditControl\x64\$(Configuration)\NativeEditControl.dll" />
+      <_NativeDeploymentFile Include="$(RepoBuildDir)\$(Configuration)\NativeEditControl.dll" />
       <_NativeDeploymentFile Include="$(LLVMInstallDir)\bin\libclang.dll" />
     </ItemGroup>
 

@@ -31,7 +31,7 @@ namespace CodeToolsVsix
     /// call (<see cref="NativeEditHost.ExecCommand"/>, mirroring NativeEditControl.h's
     /// EditorCommand/EditorCommandArgs) rather than a P/Invoke per command - the stub behavior
     /// itself (currently just an OutputDebugStringW log) lives natively in
-    /// StandInEditControl::ExecCommand, not in this class, same lifecycle/dispatch-only principle
+    /// CppEditorControl::ExecCommand, not in this class, same lifecycle/dispatch-only principle
     /// as Load/Save/IsDirty. That's deliberate scoping, not an oversight - the standard command
     /// sets these are drawn from (VSStd97CmdID/VSStd2KCmdID) have 986 and 1131 members respectively
     /// (2117 combined, counted directly off the restored VS SDK assembly), and the overwhelming
@@ -206,7 +206,7 @@ namespace CodeToolsVsix
             {
                 // Recognized and claimed (returns S_OK) so it doesn't fall through to some other
                 // handler that would also do nothing useful. The actual stub behavior (logging,
-                // for now) lives natively - see StandInEditControl::ExecCommand - not here: this
+                // for now) lives natively - see CppEditorControl::ExecCommand - not here: this
                 // class stays lifecycle/dispatch-only, same principle as Load/Save/IsDirty.
                 // EditorCommandArgs is left at its default (all zero) - pvaIn isn't decoded yet,
                 // so there's no real text1/text2/number to populate. A real Find/Replace/GotoLine

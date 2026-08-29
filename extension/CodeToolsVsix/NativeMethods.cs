@@ -5,7 +5,7 @@ namespace CodeToolsVsix
 {
     /// <summary>Mirrors cpptools/diagnostic.h's Severity (cpptools::Severity) exactly - this is
     /// the type NativeEditControl_SetLogSink's callback receives, since NativeEditControl.dll's
-    /// Log() (and, through it, cpptools's own logging - see StandInEditControl.cpp's
+    /// Log() (and, through it, cpptools's own logging - see CppEditorControl.cpp's
     /// EnsureCpptoolsLogSinkRegistered) is typed in terms of cpptools::Severity directly rather
     /// than a second, separate severity concept.</summary>
     internal enum Severity
@@ -60,15 +60,26 @@ namespace CodeToolsVsix
     /// from or save to, ask if it's dirty, dispatch an editing command, destroy it. No document
     /// content (text, symbols, or otherwise) crosses this boundary - NativeEditControl.dll owns
     /// its own file I/O and its own call into cpptools::Parser entirely on the native side (see
-    /// StandInEditControl.cpp).</summary>
+    /// CppEditorControl.cpp).</summary>
     internal static class NativeMethods
     {
-        /// <summary>StandInEditControl::Create, exported by the sibling NativeEditControl native
-        /// project (NativeEditControl.dll, deployed alongside this assembly - see the csproj's
-        /// Target for NativeEditControl.dll). Returns the new control's HWND, or IntPtr.Zero on
-        /// failure.</summary>
+        /// <summary>CppEditorControl::Create (via EditThreadHost - see NativeEditControl.h's own
+        /// comment), exported by the sibling NativeEditControl native project
+        /// (NativeEditControl.dll, deployed alongside this assembly - see the csproj's Target for
+        /// NativeEditControl.dll). The returned HWND lives on NativeEditControl.dll's own
+        /// dedicated background thread, not this thread - close it via
+        /// <see cref="NativeEditControl_RequestClose"/>, never <see cref="DestroyWindow"/>
+        /// directly. Returns the new control's HWND, or IntPtr.Zero on failure.</summary>
         [DllImport("NativeEditControl.dll", EntryPoint = "NativeEditControl_Create", CallingConvention = CallingConvention.StdCall, SetLastError = true)]
         public static extern IntPtr NativeEditControl_Create(IntPtr hwndParent, int x, int y, int width, int height, IntPtr hInstance);
+
+        /// <summary>Destroys the control behind hwnd - must be used instead of
+        /// <see cref="DestroyWindow"/> (see <see cref="NativeEditControl_Create"/>'s own comment
+        /// on why: the window lives on a different thread than this one, and DestroyWindow()
+        /// must be called from the thread that created the window).</summary>
+        [DllImport("NativeEditControl.dll", EntryPoint = "NativeEditControl_RequestClose", CallingConvention = CallingConvention.StdCall)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool NativeEditControl_RequestClose(IntPtr hwnd);
 
         /// <summary>Reads filePath (native file I/O) and populates the control - including, for
         /// C/C++ source, a cpptools-derived outline - entirely in native code. filePathLength is

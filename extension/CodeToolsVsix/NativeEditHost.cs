@@ -14,10 +14,10 @@ namespace CodeToolsVsix
     /// Deliberately kept to a lifecycle-only surface: this class (and the managed layer above it)
     /// never sees document content - no text, no symbols, nothing richer. NativeEditControl.dll
     /// owns its own file I/O and, for C/C++ source, its own call into cpptools::Parser, entirely
-    /// on the native side (see StandInEditControl.cpp). That's deliberate, not just today's
-    /// shortcut: it's what lets a future, much richer native document model (e.g. a newui view
-    /// layout) plug in behind the same four calls without this class - or anything above it -
-    /// ever needing to represent that model in managed code.
+    /// on the native side (see CppEditorControl.cpp). That's deliberate: it's what let the
+    /// native document model become a real newui::RootView/TextControl (see
+    /// EditThreadHost.cpp/CppEditorControl.cpp) behind the same four calls, with this class - and
+    /// everything above it - never needing to represent that model in managed code.
     /// </summary>
     internal sealed class NativeEditHost : IDisposable
     {
@@ -120,7 +120,13 @@ namespace CodeToolsVsix
         {
             if (_hwnd != IntPtr.Zero)
             {
-                NativeMethods.DestroyWindow(_hwnd);
+                // NativeEditControl_RequestClose, not DestroyWindow directly - the control's
+                // real HWND lives on NativeEditControl.dll's own dedicated background thread
+                // (see NativeMethods.NativeEditControl_Create's own comment), and DestroyWindow()
+                // must be called from the thread that created the window. This blocks until the
+                // native side has really torn it down on that thread, same as a direct
+                // DestroyWindow() call would have guaranteed.
+                NativeMethods.NativeEditControl_RequestClose(_hwnd);
                 _hwnd = IntPtr.Zero;
             }
         }

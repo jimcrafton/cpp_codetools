@@ -9,7 +9,7 @@ namespace CodeToolsVsix
     /// Creates a dedicated "codetools++" pane in VS's Output window and registers it as
     /// NativeEditControl.dll's log sink (see NativeMethods.NativeEditControl_SetLogSink), so
     /// native log output - including cpptools's own internal logging, bubbled up via
-    /// StandInEditControl's EnsureCpptoolsLogSinkRegistered - is visible even when nothing's
+    /// CppEditorControl.cpp's EnsureCpptoolsLogSinkRegistered - is visible even when nothing's
     /// attached to catch OutputDebugString (the always-on baseline Logging.cpp already provides
     /// on the native side). This class only adds that second destination; it doesn't replace the
     /// native baseline.

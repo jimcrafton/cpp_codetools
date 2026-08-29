@@ -11,7 +11,7 @@ namespace CodeToolsVsix
     // from another VS instance - the same mechanism System.Diagnostics.Debug.WriteLine uses on
     // the managed side), and optionally also relayed to a managed sink (see SetManagedLogSink)
     // for when nothing is attached to catch OutputDebugString. cpptools::setLogSink is wired
-    // (see EnsureCpptoolsLogSinkRegistered in StandInEditControl.cpp) to call this too, so
+    // (see EnsureCpptoolsLogSinkRegistered in CppEditorControl.cpp) to call this too, so
     // cpptools's own internal logging (e.g. a parse failure) ends up here alongside this DLL's
     // own log calls.
     void Log(cpptools::Severity severity, const std::string& message);

@@ -13,7 +13,7 @@
 // The whole native<->managed boundary for this control: create it, tell it a path to load from
 // or save to, ask if it's dirty, destroy it. No document content (text, symbols, or otherwise)
 // ever crosses this boundary - the control owns its own file I/O and, for C/C++ source files,
-// its own call into cpptools::Parser (see StandInEditControl.cpp) entirely on the native side.
+// its own call into cpptools::Parser (see CppEditorControl.cpp) entirely on the native side.
 // The managed host (NativeEditHost.cs) only ever sees an HWND and pass/fail booleans.
 //
 // filePath/filePathLength: filePathLength is the number of wchar_t characters in filePath, not
@@ -22,10 +22,27 @@
 // is an exported native entry point another caller could reach without that guarantee, so nothing
 // here scans for a terminator in an untrusted buffer.
 
-// Creates a new StandInEditControl as a child of hwndParent, filling (x, y, width, height).
-// Returns the control's HWND, or nullptr on failure.
+// Creates a new CppEditorControl - a real newui::RootView (standalone, no Application/Frame) -
+// as a child of hwndParent, filling (x, y, width, height). The returned HWND lives on this DLL's
+// own dedicated background thread (see EditThreadHost.h, "win32 loop in VSIX.docx" (D:\code\newui)
+// for the hosting model this follows), not the calling thread - this call blocks until that
+// thread's RootView is actually constructed and ready. hInstance is accepted for ABI
+// compatibility but not used for the window class itself (that needs to be this DLL's own module
+// handle, not the caller's - see EditThreadHost::ModuleHandle()). Returns the control's HWND, or
+// nullptr on failure.
+//
+// The returned HWND must be closed via NativeEditControl_RequestClose(), never DestroyWindow()
+// directly - DestroyWindow() must be called from the thread that created the window, which is no
+// longer the caller's own thread once this returns.
 NATIVEEDITCONTROL_API HWND __stdcall NativeEditControl_Create(
     HWND hwndParent, int x, int y, int width, int height, HINSTANCE hInstance);
+
+// Destroys the control behind hwnd - must be used instead of DestroyWindow() (see
+// NativeEditControl_Create's own comment on why). Marshals the real teardown onto the dedicated
+// thread that owns hwnd and blocks until it's done, so the window is genuinely gone by the time
+// this returns, same as a direct DestroyWindow() call would have guaranteed. Returns FALSE if
+// hwnd isn't one of ours.
+NATIVEEDITCONTROL_API BOOL __stdcall NativeEditControl_RequestClose(HWND hwnd);
 
 // Reads filePath from disk (UTF-8), parses it with cpptools::Parser if it looks like a C/C++
 // source file, and populates the control's display - all in native code. Returns FALSE if the
@@ -37,10 +54,9 @@ NATIVEEDITCONTROL_API BOOL __stdcall NativeEditControl_Load(
 NATIVEEDITCONTROL_API BOOL __stdcall NativeEditControl_Save(
     HWND hwnd, const wchar_t* filePath, size_t filePathLength);
 
-// TRUE if the control's content has changed since the last Load/Save. Always FALSE today - this
-// stand-in control has no keyboard/mouse editing yet (see StandInEditControl.h) - but the export
-// exists now so IVsPersistDocData.IsDocDataDirty (CodeToolsEditorPane.cs) never needs to change
-// once real editing is added.
+// TRUE if the control's content has changed since the last Load/Save - tracks real edits now
+// (backed by newui::TextControl's own text::TextModel::onChanged, see CppEditorControl.cpp),
+// used by IVsPersistDocData.IsDocDataDirty (CodeToolsEditorPane.cs).
 NATIVEEDITCONTROL_API BOOL __stdcall NativeEditControl_IsDirty(HWND hwnd);
 
 // Generic dispatch for editor-level editing commands that VS's IOleCommandTarget world routes
@@ -79,7 +95,7 @@ struct EditorCommandArgs
 
 // Dispatches command to the control behind hwnd. Returns FALSE if hwnd isn't one of ours;
 // otherwise TRUE, regardless of whether the specific command has a real implementation yet - see
-// StandInEditControl::ExecCommand, where today every command is a logged no-op stub. args may be
+// CppEditorControl::ExecCommand, where today every command is a logged no-op stub. args may be
 // null (equivalent to an all-zero EditorCommandArgs); flags is a reserved bitmask, currently
 // unused by any command (a real future use: MatchCase/WholeWord modifiers on Find).
 NATIVEEDITCONTROL_API BOOL __stdcall NativeEditControl_ExecCommand(
