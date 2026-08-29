@@ -17,11 +17,14 @@
 namespace CodeToolsVsix
 {
     // Hosts a real newui::RootView (standalone - no Application/Frame, see newui's HANDOFF.md
-    // Part 91) with one newui::TextControl child filling it, as a child of hwndParent. Replaces
-    // StandInEditControl's hand-rolled Win32 window - see "win32 loop in VSIX.docx"
-    // (D:\code\newui) for the hosting architecture this follows: this control's RootView lives
-    // entirely on EditThreadHost's dedicated background thread, never on the caller's (VS's UI)
-    // thread.
+    // Part 91) with two newui::TextControl children stacked vertically, as a child of hwndParent:
+    // the editable source buffer (textControl_, most of the space) and a read-only outline pane
+    // below it (outlineControl_) - kept as two separate controls, not one buffer with the outline
+    // text appended, specifically so Save() only ever writes real source text (see Load()'s own
+    // comment). Replaces StandInEditControl's hand-rolled Win32 window - see "win32 loop in
+    // VSIX.docx" (D:\code\newui) for the hosting architecture this follows: this control's
+    // RootView lives entirely on EditThreadHost's dedicated background thread, never on the
+    // caller's (VS's UI) thread.
     //
     // Every public method here (aside from the constructor/destructor, which are only ever
     // called from EditThreadHost::RunAndWait() - see CppEditorControlApi's own wrappers in
@@ -45,18 +48,15 @@ namespace CodeToolsVsix
 
         HWND windowHandle() const { return rootView_ ? rootView_->windowHandle() : nullptr; }
 
-        // Reads filePath (UTF-8), sets it as the TextControl's text, and appends a cpptools
-        // outline if parsing finds any symbols - same file-I/O/outline logic
-        // StandInEditControl.cpp had, just writing into a real newui::TextControl instead of a
-        // raw Win32 edit control. Returns false only on I/O failure.
+        // Reads filePath (UTF-8), sets it as the editable TextControl's text, and separately
+        // populates the read-only outline pane with a cpptools outline if parsing finds any
+        // symbols - same file-I/O/outline logic StandInEditControl.cpp had, just writing into
+        // two real newui::TextControls instead of one raw Win32 edit control with the outline
+        // appended as trailing text. Returns false only on I/O failure.
         bool Load(const wchar_t* filePath, std::size_t filePathLength);
 
-        // Writes the TextControl's current text to filePath (UTF-8). Returns false on I/O
-        // failure. Note: this writes out the outline appended by Load() too if it's still
-        // present in the buffer - same as the stand-in control's own pre-existing behavior
-        // (WM_SETTEXT-backed storage had the same property) - not addressed by this phase, real
-        // editing (which would let a user delete the outline like any other text) is what
-        // ultimately makes this moot.
+        // Writes the editable TextControl's current text to filePath (UTF-8) - never the outline
+        // pane, which is a separate, read-only control. Returns false on I/O failure.
         bool Save(const wchar_t* filePath, std::size_t filePathLength);
 
         bool IsDirty() const { return dirty_; }
@@ -67,7 +67,8 @@ namespace CodeToolsVsix
 
     private:
         std::unique_ptr<newui::RootView> rootView_;
-        newui::TextControl* textControl_ = nullptr;  // owned by rootView_'s own child tree
+        newui::TextControl* textControl_ = nullptr;     // owned by rootView_'s own child tree - editable source
+        newui::TextControl* outlineControl_ = nullptr;  // owned by rootView_'s own child tree - read-only outline
         bool dirty_ = false;
     };
 }

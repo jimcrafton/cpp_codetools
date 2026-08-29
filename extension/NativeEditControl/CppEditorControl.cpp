@@ -193,17 +193,31 @@ namespace CodeToolsVsix
 
         auto* textControl = new newui::TextControl();
         textControl->setVisible(true);
-        textControl->setLayoutParams(std::make_unique<newui::FlexLayoutParams>(1.0f));
+        // Most of the space - the outline pane below gets the rest.
+        textControl->setLayoutParams(std::make_unique<newui::FlexLayoutParams>(3.0f));
         root->addChild(textControl);
+
+        auto* outlineControl = new newui::TextControl();
+        outlineControl->setVisible(true);
+        outlineControl->setLayoutParams(std::make_unique<newui::FlexLayoutParams>(1.0f));
+        outlineControl->inputTraits().setReadOnly(true);
+        // Visually distinct from the editable pane above it, so it doesn't read as "more of the
+        // same editable buffer" - same UIColorManager pattern the root's own background uses.
+        outlineControl->style().setBackgroundColor(newui::UIColorManager::colorFor(newui::UIColorRole::ControlBackground));
+        root->addChild(outlineControl);
 
         if (!root->initialize())
         {
-            // Leave rootView_/textControl_ null - windowHandle() reports failure the same way
-            // StandInEditControl::Create() used to (a null HWND), and Load/Save/ExecCommand all
-            // already guard on textControl_ being null before touching it.
+            // Leave rootView_/textControl_/outlineControl_ null - windowHandle() reports failure
+            // the same way StandInEditControl::Create() used to (a null HWND), and
+            // Load/Save/ExecCommand all already guard on textControl_ being null before touching
+            // it.
             return;
         }
 
+        // Only the editable pane's changes count as "dirty" - outlineControl_'s own setText()
+        // calls (Load(), below) fire this same delegate too, but nothing should ever mark the
+        // document dirty just because the outline was refreshed.
         textControl->model().onChanged.add([this](newui::Model&) {
             dirty_ = true;
             return newui::SyncReturn::Handled;
@@ -211,6 +225,7 @@ namespace CodeToolsVsix
 
         rootView_ = std::move(root);
         textControl_ = textControl;
+        outlineControl_ = outlineControl;
     }
 
     CppEditorControl::~CppEditorControl()
@@ -240,15 +255,20 @@ namespace CodeToolsVsix
             return false;
         }
 
-        std::wstring text = Utf8ToWide(contentUtf8);
-        std::wstring outline = BuildOutline(path, contentUtf8);
-        if (!outline.empty())
-        {
-            text += L"\r\n\r\n" + outline;
-        }
-
-        textControl_->setText(text);
+        textControl_->setText(Utf8ToWide(contentUtf8));
         dirty_ = false;
+
+        if (outlineControl_)
+        {
+            // TextController::handleModelBeforeRangeChanged() (controls.cpp) vetoes *any* model
+            // change - including a programmatic setText(), not just user keystrokes - while
+            // isReadOnly() is true. Lift it only for this call, then restore it immediately, so
+            // the pane can still be refreshed on every Load() while staying non-editable to the
+            // user the rest of the time.
+            outlineControl_->inputTraits().setReadOnly(false);
+            outlineControl_->setText(BuildOutline(path, contentUtf8));
+            outlineControl_->inputTraits().setReadOnly(true);
+        }
 
         return true;
     }
