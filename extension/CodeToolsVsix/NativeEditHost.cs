@@ -48,8 +48,16 @@ namespace CodeToolsVsix
             if (_hwnd == IntPtr.Zero)
             {
                 int error = System.Runtime.InteropServices.Marshal.GetLastWin32Error();
+                OutputWindowLogger.LogFromManaged($"codetools++ NativeEditControl_Create FAILED (hwndParent=0x{hwndParent.ToInt64():X}, size={width}x{height}, Win32 error {error})");
                 throw new InvalidOperationException($"NativeEditControl_Create failed with Win32 error {error}.");
             }
+
+            // Confirms codetools++ specifically is what handled this file (not a same-purposed,
+            // unrelated extension registered for the same file types - confirmed live, 2026-08-29,
+            // that this can happen silently otherwise). Logged from here (managed code, this
+            // call's own thread), not from native code on EditThreadHost's dedicated thread - see
+            // OutputWindowLogger.Initialize()'s own comment on why that's the unsafe direction.
+            OutputWindowLogger.LogFromManaged($"codetools++ NativeEditControl_Create: hwnd=0x{_hwnd.ToInt64():X} size={width}x{height}");
 
             return _hwnd;
         }

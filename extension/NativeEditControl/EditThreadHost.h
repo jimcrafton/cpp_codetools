@@ -3,6 +3,8 @@
 
 #include <newui/runloop.h>
 
+#include "Logging.h"
+
 #include <atomic>
 #include <mutex>
 #include <thread>
@@ -20,26 +22,26 @@ namespace CodeToolsVsix
     class EditThreadHost
     {
     public:
-        static EditThreadHost& Instance();
+        static EditThreadHost& instance();
 
         // Records this DLL's own module handle - captured once, in DllMain's DLL_PROCESS_ATTACH.
         // NativeEditControl_Create's own hInstance parameter is the *host* process's
         // (devenv.exe's) module handle (see NativeEditHost.cs's CreateChildWindow -
         // GetModuleHandle(null) from managed code) - the wrong one for a window class whose
         // WndProc lives inside this DLL. This is the correct one to use instead.
-        static void SetModuleHandle(HINSTANCE hInstance);
-        static HINSTANCE ModuleHandle();
+        static void setModuleHandle(HINSTANCE hInstance);
+        static HINSTANCE moduleHandle();
 
         // Starts the dedicated thread if it isn't already running - safe to call more than once,
         // every call after the first is a no-op. Blocks until the thread's RunLoop is actually
         // pumping (RunLoop::waitUntilStarted()) before returning, so a caller can safely
-        // RunAndWait() immediately afterward.
-        void EnsureStarted();
+        // runAndWait() immediately afterward.
+        void ensureStarted();
 
         // Runs fn() on the dedicated thread and blocks the calling thread until it completes,
         // returning fn()'s own result (or nothing, if fn() returns void). The only place raw
         // RunLoop::post() is used directly - every native export
-        // (Create/Load/Save/IsDirty/ExecCommand/RequestClose) marshals through this, since VS
+        // (Create/load/save/isDirty/execCommand/RequestClose) marshals through this, since VS
         // calls them from its own UI thread but the RootView/TextControl state they touch only
         // ever lives on the dedicated thread.
         //
@@ -55,7 +57,7 @@ namespace CodeToolsVsix
         // condition_variable-based version of this function hung Visual Studio's UI thread solid
         // on the very first NativeEditControl_Create() call for exactly this reason.
         template <typename Func>
-        auto RunAndWait(Func&& fn) -> decltype(fn())
+        auto runAndWait(Func&& fn) -> decltype(fn())
         {
             using ReturnType = decltype(fn());
 
@@ -68,8 +70,12 @@ namespace CodeToolsVsix
                     ::SetEvent(doneEvent);
                     });
 
-                PumpUntilSignaled(doneEvent);
+                pumpUntilSignaled(doneEvent);
+
                 ::CloseHandle(doneEvent);
+                // Back on the calling (safe) thread now - deliver anything fn() logged from the
+                // dedicated thread (log()'s own queuing behavior, Logging.h) to the managed sink.
+                flushQueuedLogs();
             }
             else
             {
@@ -80,30 +86,43 @@ namespace CodeToolsVsix
                     ::SetEvent(doneEvent);
                     });
 
-                PumpUntilSignaled(doneEvent);
+                pumpUntilSignaled(doneEvent);
+
                 ::CloseHandle(doneEvent);
+                flushQueuedLogs();
                 return result;
             }
         }
 
         // Tracked for completeness/future use - not currently used to auto-shutdown the thread
-        // early (see Shutdown()'s own comment on why teardown is deliberately kept to DLL-unload
+        // early (see shutdown()'s own comment on why teardown is deliberately kept to DLL-unload
         // time only for this phase).
-        void ControlCreated();
-        void ControlClosed();
+        void controlCreated();
+        void controlClosed();
 
         // Stops the RunLoop and joins the thread - called once, from DllMain's
         // DLL_PROCESS_DETACH. A thread still running when this DLL is unloaded is a crash risk
         // (its own code pages become invalid mid-unload), so this must run before unload
         // completes. Safe to call even if the thread was never started.
-        void Shutdown();
+        void shutdown();
 
     private:
         EditThreadHost() = default;
 
         // Pumps the calling thread's own message queue until doneEvent is signaled - see
-        // RunAndWait()'s own comment for why this can't be a plain blocking wait.
-        static void PumpUntilSignaled(HANDLE doneEvent)
+        // runAndWait()'s own comment for why this can't be a plain blocking wait.
+        //
+        // Drains via PeekMessageW unconditionally on every wake, not just when
+        // MsgWaitForMultipleObjects's return value claims new input arrived - that signal isn't
+        // fully trustworthy: a thread's queue-status change bits (what it actually checks) can be
+        // silently cleared by other API calls on this same thread (PeekMessage/GetQueueStatus/
+        // IsDialogMessage, etc. - this thread gets reentered by WPF's own Dispatcher while pumping
+        // here) without the message actually being retrieved. Relying on the wait result to decide
+        // whether to check for messages risks missing a real one; checking unconditionally
+        // doesn't. Confirmed as a real contributor to a NativeEditControl_Create hang investigated
+        // 2026-08-29 (10/10 Create calls clean across a real stress test after this fix, alongside
+        // log()'s own separate OutputDebugStringA removal - see that function's own comment).
+        static void pumpUntilSignaled(HANDLE doneEvent)
         {
             for (;;)
             {

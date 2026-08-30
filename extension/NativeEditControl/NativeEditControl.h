@@ -28,7 +28,7 @@
 // for the hosting model this follows), not the calling thread - this call blocks until that
 // thread's RootView is actually constructed and ready. hInstance is accepted for ABI
 // compatibility but not used for the window class itself (that needs to be this DLL's own module
-// handle, not the caller's - see EditThreadHost::ModuleHandle()). Returns the control's HWND, or
+// handle, not the caller's - see EditThreadHost::moduleHandle()). Returns the control's HWND, or
 // nullptr on failure.
 //
 // The returned HWND must be closed via NativeEditControl_RequestClose(), never DestroyWindow()
@@ -95,7 +95,7 @@ struct EditorCommandArgs
 
 // Dispatches command to the control behind hwnd. Returns FALSE if hwnd isn't one of ours;
 // otherwise TRUE, regardless of whether the specific command has a real implementation yet - see
-// CppEditorControl::ExecCommand, where today every command is a logged no-op stub. args may be
+// CppEditorControl::execCommand, where today every command is a logged no-op stub. args may be
 // null (equivalent to an all-zero EditorCommandArgs); flags is a reserved bitmask, currently
 // unused by any command (a real future use: MatchCase/WholeWord modifiers on Find).
 NATIVEEDITCONTROL_API BOOL __stdcall NativeEditControl_ExecCommand(

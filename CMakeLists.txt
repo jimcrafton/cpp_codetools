@@ -4,6 +4,32 @@ project(cpp_codetools VERSION 0.1.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Version header (Major.Minor.Release.Build)
+# ============================================
+# Same scheme as newui's own (see cmake/GenerateVersion.cmake, which mirrors
+# D:\code\newui\cmake\GenerateVersion.cmake) - Build advances by 1 every time the project is
+# *built*, not just configured, via a custom target with no declared OUTPUT so every generator
+# (Ninja, MSBuild, Make) treats it as always out-of-date and reruns it on every build. Build rolls
+# over at 9999 into Release, Release rolls over at 999 into Minor, Minor rolls over at 99 into
+# Major - so Major/Minor/Release aren't fixed at configure time either; they're state that can
+# change purely from accumulated builds. That state is persisted in VERSION.state at the repo
+# root - deliberately a *tracked* source-tree file, not a build-tree one, so version progression
+# survives a build/ wipe-and-reconfigure. project(VERSION) above only seeds VERSION.state the very
+# first time it's created.
+add_custom_target(cpptools_version ALL
+    COMMAND ${CMAKE_COMMAND}
+        -DINITIAL_MAJOR=${cpp_codetools_VERSION_MAJOR}
+        -DINITIAL_MINOR=${cpp_codetools_VERSION_MINOR}
+        -DINITIAL_RELEASE=${cpp_codetools_VERSION_PATCH}
+        -DSTATE_FILE=${CMAKE_CURRENT_SOURCE_DIR}/VERSION.state
+        -DIN_FILE=${CMAKE_CURRENT_SOURCE_DIR}/include/cpptools/version.h.in
+        -DOUT_FILE=${CMAKE_CURRENT_BINARY_DIR}/include/cpptools/version.h
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/GenerateVersion.cmake
+    BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/include/cpptools/version.h
+    COMMENT "Generating cpptools/version.h (incrementing build number)"
+    VERBATIM
+)
+
 # libclang - Dependency
 # ======================
 # Not vendored (unlike newui's blend2d/wil/json5/googletest) - libclang is a large, separately
@@ -120,8 +146,9 @@ add_library(cpptools STATIC
     include/cpptools/log.h
 )
 
-target_include_directories(cpptools PUBLIC include)
+target_include_directories(cpptools PUBLIC include ${CMAKE_CURRENT_BINARY_DIR}/include)
 target_link_libraries(cpptools PUBLIC libclang::libclang)
+add_dependencies(cpptools cpptools_version)
 
 add_subdirectory(tools/cppoutline)
 
@@ -147,6 +174,7 @@ add_library(NativeEditControl SHARED
     extension/NativeEditControl/Logging.h
     extension/NativeEditControl/Logging.cpp
     extension/NativeEditControl/dllmain.cpp
+    extension/NativeEditControl/NativeEditControl.rc
 )
 
 target_compile_definitions(NativeEditControl PRIVATE
@@ -156,6 +184,7 @@ target_compile_definitions(NativeEditControl PRIVATE
     _UNICODE
 )
 target_link_libraries(NativeEditControl PRIVATE cpptools newui user32.lib gdi32.lib)
+add_dependencies(NativeEditControl cpptools_version)
 
 cpptools_copy_libclang_dll(NativeEditControl)
 

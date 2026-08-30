@@ -20,7 +20,7 @@ namespace CodeToolsVsix
         // exactly filePathLength wchar_t characters and builds an internally-owned, properly
         // null-terminated std::wstring from them, so every downstream Win32 call (CreateFileW,
         // etc.) gets a safe buffer regardless of what the caller actually passed.
-        std::wstring CopyPath(const wchar_t* filePath, std::size_t filePathLength)
+        std::wstring copyPath(const wchar_t* filePath, std::size_t filePathLength)
         {
             if (!filePath || filePathLength == 0)
             {
@@ -30,7 +30,7 @@ namespace CodeToolsVsix
             return std::wstring(filePath, filePathLength);
         }
 
-        bool ReadFileUtf8(const std::wstring& path, std::string& outUtf8)
+        bool readFileUtf8(const std::wstring& path, std::string& outUtf8)
         {
             HANDLE file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
                                        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -60,7 +60,7 @@ namespace CodeToolsVsix
             return ok;
         }
 
-        bool WriteFileUtf8(const std::wstring& path, const std::string& utf8)
+        bool writeFileUtf8(const std::wstring& path, const std::string& utf8)
         {
             HANDLE file = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr,
                                        CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -83,7 +83,7 @@ namespace CodeToolsVsix
 
         // Fixed strings for cpptools::SymbolKind - deliberately not libclang's own kind spelling
         // (cpptools::Symbol doesn't retain that), just a readable label for the outline display.
-        const wchar_t* KindSpelling(cpptools::SymbolKind kind)
+        const wchar_t* kindSpelling(cpptools::SymbolKind kind)
         {
             switch (kind)
             {
@@ -104,22 +104,22 @@ namespace CodeToolsVsix
             }
         }
 
-        void AppendSymbols(const std::vector<cpptools::Symbol>& symbols, unsigned depth, std::wstring& out)
+        void appendSymbols(const std::vector<cpptools::Symbol>& symbols, unsigned depth, std::wstring& out)
         {
             for (const cpptools::Symbol& symbol : symbols)
             {
                 out += L"\r\n";
                 out.append(static_cast<std::size_t>(depth) * 2, L' ');
-                out += KindSpelling(symbol.kind);
+                out += kindSpelling(symbol.kind);
                 out += L' ';
-                out += Utf8ToWide(symbol.name);
+                out += utf8ToWide(symbol.name);
                 out += L" @ " + std::to_wstring(symbol.location.line) + L':' + std::to_wstring(symbol.location.column);
 
-                AppendSymbols(symbol.children, depth + 1, out);
+                appendSymbols(symbol.children, depth + 1, out);
             }
         }
 
-        const wchar_t* CommandName(EditorCommand command)
+        const wchar_t* commandName(EditorCommand command)
         {
             switch (command)
             {
@@ -135,14 +135,14 @@ namespace CodeToolsVsix
             }
         }
 
-        // Registers this DLL's Log() as cpptools's log sink (see cpptools/log.h) - once, on first
+        // Registers this DLL's log() as cpptools's log sink (see cpptools/log.h) - once, on first
         // use. A C++11 function-local static's initialization is itself thread-safe/exactly-once,
         // so no separate guard/mutex is needed.
-        void EnsureCpptoolsLogSinkRegistered()
+        void ensureCpptoolsLogSinkRegistered()
         {
             static bool registered = []() {
                 cpptools::setLogSink([](cpptools::Severity severity, const std::string& message) {
-                    Log(severity, message);
+                    CodeToolsVsix::log(severity, message);
                 });
                 return true;
             }();
@@ -152,14 +152,14 @@ namespace CodeToolsVsix
         // Parses contentUtf8 (the buffer just loaded) via cpptools::Parser and formats an
         // indented outline. Never throws - a parse failure just means no outline, not a failure
         // to load the file.
-        std::wstring BuildOutline(const std::wstring& filePath, const std::string& contentUtf8)
+        std::wstring buildOutline(const std::wstring& filePath, const std::string& contentUtf8)
         {
             try
             {
-                EnsureCpptoolsLogSinkRegistered();
+                ensureCpptoolsLogSinkRegistered();
 
                 cpptools::Parser parser;
-                cpptools::ParseResult result = parser.parseBuffer(WideToUtf8(filePath.c_str(), filePath.size()), contentUtf8);
+                cpptools::ParseResult result = parser.parseBuffer(wideToUtf8(filePath.c_str(), filePath.size()), contentUtf8);
 
                 if (result.symbols.empty())
                 {
@@ -167,7 +167,7 @@ namespace CodeToolsVsix
                 }
 
                 std::wstring outline = L"--- Outline (cpptools) ---";
-                AppendSymbols(result.symbols, 0, outline);
+                appendSymbols(result.symbols, 0, outline);
                 return outline;
             }
             catch (...)
@@ -180,7 +180,7 @@ namespace CodeToolsVsix
     CppEditorControl::CppEditorControl(HWND hwndParent, int x, int y, int width, int height)
     {
         auto root = std::make_unique<newui::RootView>(
-            hwndParent, EditThreadHost::ModuleHandle(),
+            hwndParent, EditThreadHost::moduleHandle(),
             newui::Rect(static_cast<float>(x), static_cast<float>(y), static_cast<float>(width), static_cast<float>(height)),
             "cppEditorRoot");
 
@@ -208,107 +208,102 @@ namespace CodeToolsVsix
 
         if (!root->initialize())
         {
-            // Leave rootView_/textControl_/outlineControl_ null - windowHandle() reports failure
-            // the same way StandInEditControl::Create() used to (a null HWND), and
-            // Load/Save/ExecCommand all already guard on textControl_ being null before touching
-            // it.
+            // Leave the base's RootView/textControl_/outlineControl_ null - windowHandle()
+            // reports failure the same way StandInEditControl::Create() used to (a null HWND),
+            // and load/save/execCommand all already guard on textControl_ being null before
+            // touching it.
             return;
         }
 
         // Only the editable pane's changes count as "dirty" - outlineControl_'s own setText()
-        // calls (Load(), below) fire this same delegate too, but nothing should ever mark the
+        // calls (load(), below) fire this same delegate too, but nothing should ever mark the
         // document dirty just because the outline was refreshed.
         textControl->model().onChanged.add([this](newui::Model&) {
-            dirty_ = true;
+            markDirty();
             return newui::SyncReturn::Handled;
             });
 
-        rootView_ = std::move(root);
+        setRootView(std::move(root));
         textControl_ = textControl;
         outlineControl_ = outlineControl;
     }
 
-    CppEditorControl::~CppEditorControl()
-    {
-        if (rootView_)
-        {
-            rootView_->destroy();
-        }
-    }
-
-    bool CppEditorControl::Load(const wchar_t* filePath, std::size_t filePathLength)
+    bool CppEditorControl::load(const wchar_t* filePath, std::size_t filePathLength)
     {
         if (!textControl_)
         {
+            CodeToolsVsix::log(cpptools::Severity::Error, "CppEditorControl::load: textControl_ is null (construction must have failed)");
             return false;
         }
 
-        std::wstring path = CopyPath(filePath, filePathLength);
+        std::wstring path = copyPath(filePath, filePathLength);
         if (path.empty())
         {
+            CodeToolsVsix::log(cpptools::Severity::Error, "CppEditorControl::load: empty path");
             return false;
         }
 
         std::string contentUtf8;
-        if (!ReadFileUtf8(path, contentUtf8))
+        if (!readFileUtf8(path, contentUtf8))
         {
+            CodeToolsVsix::log(cpptools::Severity::Error, "CppEditorControl::load: readFileUtf8 failed for " + wideToUtf8(path.c_str(), path.size()));
             return false;
         }
 
-        textControl_->setText(Utf8ToWide(contentUtf8));
-        dirty_ = false;
+        textControl_->setText(utf8ToWide(contentUtf8));
+        clearDirty();
 
         if (outlineControl_)
         {
             // TextController::handleModelBeforeRangeChanged() (controls.cpp) vetoes *any* model
             // change - including a programmatic setText(), not just user keystrokes - while
             // isReadOnly() is true. Lift it only for this call, then restore it immediately, so
-            // the pane can still be refreshed on every Load() while staying non-editable to the
+            // the pane can still be refreshed on every load() while staying non-editable to the
             // user the rest of the time.
             outlineControl_->inputTraits().setReadOnly(false);
-            outlineControl_->setText(BuildOutline(path, contentUtf8));
+            outlineControl_->setText(buildOutline(path, contentUtf8));
             outlineControl_->inputTraits().setReadOnly(true);
         }
 
         return true;
     }
 
-    bool CppEditorControl::Save(const wchar_t* filePath, std::size_t filePathLength)
+    bool CppEditorControl::save(const wchar_t* filePath, std::size_t filePathLength)
     {
         if (!textControl_)
         {
             return false;
         }
 
-        std::wstring path = CopyPath(filePath, filePathLength);
+        std::wstring path = copyPath(filePath, filePathLength);
         if (path.empty())
         {
             return false;
         }
 
-        if (!WriteFileUtf8(path, WideToUtf8(textControl_->text().c_str(), textControl_->text().size())))
+        if (!writeFileUtf8(path, wideToUtf8(textControl_->text().c_str(), textControl_->text().size())))
         {
             return false;
         }
 
-        dirty_ = false;
+        clearDirty();
         return true;
     }
 
-    bool CppEditorControl::ExecCommand(EditorCommand command, std::uint32_t flags, const EditorCommandArgs* args)
+    bool CppEditorControl::execCommand(EditorCommand command, std::uint32_t flags, const EditorCommandArgs* args)
     {
         // STUB: every command is a logged no-op today, same as StandInEditControl's own
-        // ExecCommand - real per-command behavior is out of scope for this phase.
+        // execCommand - real per-command behavior is out of scope for this phase.
         wchar_t buffer[256];
         if (args)
         {
             swprintf_s(buffer,
-                       L"CppEditorControl::ExecCommand: %s stub (flags=%u, text1Length=%zu, text2Length=%zu, number=%lld)\n",
-                       CommandName(command), flags, args->text1Length, args->text2Length, args->number);
+                       L"CppEditorControl::execCommand: %s stub (flags=%u, text1Length=%zu, text2Length=%zu, number=%lld)\n",
+                       commandName(command), flags, args->text1Length, args->text2Length, args->number);
         }
         else
         {
-            swprintf_s(buffer, L"CppEditorControl::ExecCommand: %s stub (flags=%u, no args)\n", CommandName(command), flags);
+            swprintf_s(buffer, L"CppEditorControl::execCommand: %s stub (flags=%u, no args)\n", commandName(command), flags);
         }
 
         OutputDebugStringW(buffer);

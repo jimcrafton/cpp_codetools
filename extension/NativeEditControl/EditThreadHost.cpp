@@ -4,23 +4,23 @@ namespace CodeToolsVsix
 {
     HINSTANCE EditThreadHost::s_moduleHandle = nullptr;
 
-    EditThreadHost& EditThreadHost::Instance()
+    EditThreadHost& EditThreadHost::instance()
     {
         static EditThreadHost instance;
         return instance;
     }
 
-    void EditThreadHost::SetModuleHandle(HINSTANCE hInstance)
+    void EditThreadHost::setModuleHandle(HINSTANCE hInstance)
     {
         s_moduleHandle = hInstance;
     }
 
-    HINSTANCE EditThreadHost::ModuleHandle()
+    HINSTANCE EditThreadHost::moduleHandle()
     {
         return s_moduleHandle;
     }
 
-    void EditThreadHost::EnsureStarted()
+    void EditThreadHost::ensureStarted()
     {
         std::call_once(startOnce_, [this]() {
             thread_ = std::thread([this]() { runLoop_.run(); });
@@ -28,17 +28,17 @@ namespace CodeToolsVsix
             });
     }
 
-    void EditThreadHost::ControlCreated()
+    void EditThreadHost::controlCreated()
     {
         ++liveControlCount_;
     }
 
-    void EditThreadHost::ControlClosed()
+    void EditThreadHost::controlClosed()
     {
         --liveControlCount_;
     }
 
-    void EditThreadHost::Shutdown()
+    void EditThreadHost::shutdown()
     {
         if (!thread_.joinable())
         {

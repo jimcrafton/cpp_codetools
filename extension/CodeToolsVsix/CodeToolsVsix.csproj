@@ -56,10 +56,33 @@
     <RepoRoot>$(MSBuildThisFileDirectory)..\..</RepoRoot>
     <RepoBuildDir>$(RepoRoot)\build</RepoBuildDir>
 
+    <!-- VERSION.state (repo root, tracked in git) is cpp_codetools' single source of truth for
+         Major.Minor.Release.Build - shared with NativeEditControl.dll's own version (see
+         cmake/GenerateVersion.cmake, NativeEditControl.rc). Read here, at project *evaluation*
+         time (before any target runs) via an MSBuild property function rather than a Target-based
+         file read - tried making a Target set $(Version) after BuildAndIncludeNativeDependencies'
+         own native build bumps this same file (so both DLLs would share the exact same build
+         number), but the SDK's CoreGenerateAssemblyInfo target didn't reliably pick up a
+         Target-time property change (verified empirically: AssemblyInfo.cs kept the SDK's
+         "1.0.0.0" default even across a forced /t:Rebuild), so this reads the value as of the
+         START of this build instead - one build-number behind the native DLL built later in the
+         same invocation, but simple and reliably correct. Both sides keep tracking the same file,
+         just offset by a constant one build apart rather than resynced to the exact same instant. -->
+    <CppCodeToolsVersion Condition="Exists('$(RepoRoot)\VERSION.state')">$([System.IO.File]::ReadAllText('$(RepoRoot)\VERSION.state').Trim())</CppCodeToolsVersion>
+    <CppCodeToolsVersion Condition="'$(CppCodeToolsVersion)' == ''">0.1.0.0</CppCodeToolsVersion>
+    <Version>$(CppCodeToolsVersion)</Version>
+    <AssemblyVersion>$(CppCodeToolsVersion)</AssemblyVersion>
+    <FileVersion>$(CppCodeToolsVersion)</FileVersion>
+    <InformationalVersion>$(CppCodeToolsVersion)</InformationalVersion>
+    <!-- Otherwise the SDK appends "+<git-commit-sha>" to InformationalVersion automatically
+         (SourceLink-driven), making it look inconsistent next to FileVersion/AssemblyVersion. -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+
     <!-- cmake isn't on PATH in a plain shell on this machine (see repo CLAUDE.md) - default to
          VS 2026's own bundled copy rather than requiring a system-wide install. Override with
          /p:CMakeExe=... if yours is elsewhere. -->
     <CMakeExe Condition="'$(CMakeExe)'==''">$(DevEnvDir)CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe</CMakeExe>
+	  <EnableUnmanagedDebugging>true</EnableUnmanagedDebugging>
   </PropertyGroup>
 
   <ItemGroup>
@@ -72,6 +95,21 @@
 
   <ItemGroup>
     <None Include="source.extension.vsixmanifest" SubType="Designer" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Update="Properties\Settings.Designer.cs">
+      <DesignTimeSharedInput>True</DesignTimeSharedInput>
+      <AutoGen>True</AutoGen>
+      <DependentUpon>Settings.settings</DependentUpon>
+    </Compile>
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="Properties\Settings.settings">
+      <Generator>SettingsSingleFileGenerator</Generator>
+      <LastGenOutput>Settings.Designer.cs</LastGenOutput>
+    </None>
   </ItemGroup>
 
   <!-- NativeEditControl.dll (native, edit-surface HWND - a CMake target, root CMakeLists.txt)
@@ -97,21 +135,28 @@
          lets a clean checkout of this repo build the extension without a manual CMake step first.
          -DCPPCODETOOLS_LLVM_ROOT keeps a /p:LLVMInstallDir=... override in sync with the actual
          native build, not just the deployment-file lookup below. -->
-    <Exec Command="&quot;$(CMakeExe)&quot; -S &quot;$(RepoRoot)&quot; -B &quot;$(RepoBuildDir)&quot; -DCPPCODETOOLS_LLVM_ROOT=&quot;$(LLVMInstallDir)&quot;"
-          Condition="!Exists('$(RepoBuildDir)\CMakeCache.txt')" />
+    <Exec Command="&quot;$(CMakeExe)&quot; -S &quot;$(RepoRoot)&quot; -B &quot;$(RepoBuildDir)&quot; -DCPPCODETOOLS_LLVM_ROOT=&quot;$(LLVMInstallDir)&quot;" Condition="!Exists('$(RepoBuildDir)\CMakeCache.txt')" />
 
     <!-- Builds NativeEditControl.dll - transitively builds cpptools and newui too, since it
          links both (target_link_libraries(NativeEditControl PRIVATE cpptools newui), root
          CMakeLists.txt) - one call covers everything this project needs from the native side. -->
     <Exec Command="&quot;$(CMakeExe)&quot; --build &quot;$(RepoBuildDir)&quot; --config $(Configuration) --target NativeEditControl" />
 
+    <!-- Keeps VS's own "Manage Extensions" dialog (Identity Version, source.extension.vsixmanifest)
+         in sync with the same VERSION.state this assembly's own Version/AssemblyVersion/FileVersion
+         are read from (see this project's top-level PropertyGroup) - see
+         UpdateVsixManifestVersion.ps1's own comment for why this is a real XML edit rather than a
+         naive text replace, and why it also happens to fix VSIXInstaller.exe silently no-oping a
+         reinstall (it only reinstalls when Identity Version actually changes). Must run before
+         GetVsixSourceItems packages the manifest - this Target already is (BeforeTargets above). -->
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\UpdateVsixManifestVersion.ps1&quot; -ManifestPath &quot;$(MSBuildProjectDirectory)\source.extension.vsixmanifest&quot; -Version &quot;$(CppCodeToolsVersion)&quot;" />
+
     <ItemGroup>
       <_NativeDeploymentFile Include="$(RepoBuildDir)\$(Configuration)\NativeEditControl.dll" />
       <_NativeDeploymentFile Include="$(LLVMInstallDir)\bin\libclang.dll" />
     </ItemGroup>
 
-    <Error Condition="!Exists('$(LLVMInstallDir)\bin\libclang.dll')"
-           Text="libclang.dll not found under LLVMInstallDir ('$(LLVMInstallDir)\bin'). Install LLVM (https://github.com/llvm/llvm-project/releases) or pass /p:LLVMInstallDir=... pointing at your install." />
+    <Error Condition="!Exists('$(LLVMInstallDir)\bin\libclang.dll')" Text="libclang.dll not found under LLVMInstallDir ('$(LLVMInstallDir)\bin'). Install LLVM (https://github.com/llvm/llvm-project/releases) or pass /p:LLVMInstallDir=... pointing at your install." />
 
     <!-- Belt-and-suspenders: a dynamically-added Content item's CopyToOutputDirectory metadata
          isn't guaranteed to be picked up by the standard output-copy pipeline (AssignTargetPaths

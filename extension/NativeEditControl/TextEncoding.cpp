@@ -2,7 +2,7 @@
 
 namespace CodeToolsVsix
 {
-    std::wstring Utf8ToWide(const std::string& utf8)
+    std::wstring utf8ToWide(const std::string& utf8)
     {
         if (utf8.empty())
         {
@@ -20,7 +20,7 @@ namespace CodeToolsVsix
         return result;
     }
 
-    std::string WideToUtf8(const wchar_t* wide, std::size_t length)
+    std::string wideToUtf8(const wchar_t* wide, std::size_t length)
     {
         if (!wide || length == 0)
         {
