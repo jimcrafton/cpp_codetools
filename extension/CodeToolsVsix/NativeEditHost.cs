@@ -12,7 +12,7 @@ namespace CodeToolsVsix
     /// model behind it looks like.
     ///
     /// Deliberately kept to a lifecycle-only surface: this class (and the managed layer above it)
-    /// never sees document content - no text, no symbols, nothing richer. NativeEditControl.dll
+    /// never sees document content - no text, no symbols, nothing richer. NativeEditControls.dll
     /// owns its own file I/O and, for C/C++ source, its own call into cpptools::Parser, entirely
     /// on the native side (see CppEditorControl.cpp). That's deliberate: it's what let the
     /// native document model become a real newui::RootView/TextControl (see
@@ -35,10 +35,13 @@ namespace CodeToolsVsix
         /// needed for that. <see cref="Resize"/> below is exposed only in case your own control
         /// needs to explicitly reposition itself (e.g. from other native code).
         /// </summary>
-        public IntPtr CreateChildWindow(IntPtr hwndParent, int x, int y, int width, int height)
+        public IntPtr CreateChildWindow(IntPtr hwndParent, int x, int y, int width, int height, Microsoft.VisualStudio.OLE.Interop.IServiceProvider svcPrv)
         {
+
+            NativeMethods.NativeEditControl_SetServiceProvider(svcPrv);
+
             // >>> INTEGRATION POINT <<<
-            // To host a different native control, replace this call (and NativeEditControl.dll
+            // To host a different native control, replace this call (and NativeEditControls.dll
             // it P/Invokes into) with your own. Keep it WS_CHILD, parented to hwndParent, and
             // sized to (x,y,width,height).
             IntPtr hInstance = NativeMethods.GetModuleHandle(null);
@@ -48,7 +51,7 @@ namespace CodeToolsVsix
             if (_hwnd == IntPtr.Zero)
             {
                 int error = System.Runtime.InteropServices.Marshal.GetLastWin32Error();
-                OutputWindowLogger.LogFromManaged($"codetools++ NativeEditControl_Create FAILED (hwndParent=0x{hwndParent.ToInt64():X}, size={width}x{height}, Win32 error {error})");
+                //OutputWindowLogger.LogFromManaged($"codetools++ NativeEditControl_Create FAILED (hwndParent=0x{hwndParent.ToInt64():X}, size={width}x{height}, Win32 error {error})");
                 throw new InvalidOperationException($"NativeEditControl_Create failed with Win32 error {error}.");
             }
 
@@ -57,7 +60,7 @@ namespace CodeToolsVsix
             // that this can happen silently otherwise). Logged from here (managed code, this
             // call's own thread), not from native code on EditThreadHost's dedicated thread - see
             // OutputWindowLogger.Initialize()'s own comment on why that's the unsafe direction.
-            OutputWindowLogger.LogFromManaged($"codetools++ NativeEditControl_Create: hwnd=0x{_hwnd.ToInt64():X} size={width}x{height}");
+            //OutputWindowLogger.LogFromManaged($"codetools++ NativeEditControl_Create: hwnd=0x{_hwnd.ToInt64():X} size={width}x{height}");
 
             return _hwnd;
         }
@@ -112,7 +115,7 @@ namespace CodeToolsVsix
 
         /// <summary>Dispatches an editor-level command (Undo, Redo, Cut, Copy, Paste, Find,
         /// Replace, GotoLine) to native code - see NativeMethods.EditorCommand/
-        /// EditorCommandArgs and NativeEditControl.h. args defaults to empty (every field zero);
+        /// EditorCommandArgs and NativeEditor.h. args defaults to empty (every field zero);
         /// callers that need to populate text1/text2/number pass their own.</summary>
         public bool ExecCommand(EditorCommand command, uint flags = 0, EditorCommandArgs args = default)
         {
@@ -124,12 +127,14 @@ namespace CodeToolsVsix
             return NativeMethods.NativeEditControl_ExecCommand(_hwnd, command, flags, ref args);
         }
 
+
+
         public void Destroy()
         {
             if (_hwnd != IntPtr.Zero)
             {
                 // NativeEditControl_RequestClose, not DestroyWindow directly - the control's
-                // real HWND lives on NativeEditControl.dll's own dedicated background thread
+                // real HWND lives on NativeEditControls.dll's own dedicated background thread
                 // (see NativeMethods.NativeEditControl_Create's own comment), and DestroyWindow()
                 // must be called from the thread that created the window. This blocks until the
                 // native side has really torn it down on that thread, same as a direct

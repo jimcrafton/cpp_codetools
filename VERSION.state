@@ -1,1 +1,5 @@
-0.1.0.47
+VERSION=0.1.0.193
+AUTHOR=Jim Crafton
+COPYRIGHT=Copyright (c) 2026 Jim Crafton. All rights reserved.
+PRODUCT_NAME=codetools++
+DESCRIPTION=codetools++ native edit control

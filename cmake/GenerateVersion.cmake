@@ -12,26 +12,53 @@
 # build-tree file, precisely so a `build/` wipe-and-reconfigure doesn't reset version progression
 # back to the INITIAL_* seed).
 #
-# Expected -D arguments: INITIAL_MAJOR, INITIAL_MINOR, INITIAL_RELEASE (used only the very first
-# time, when STATE_FILE doesn't exist yet), STATE_FILE, IN_FILE, OUT_FILE.
+# STATE_FILE is a small KEY=VALUE text file, one entry per line - VERSION (the Major.Minor.Release.
+# Build tuple this script itself owns) alongside a handful of product-metadata fields (AUTHOR,
+# COPYRIGHT, PRODUCT_NAME, DESCRIPTION) that this script doesn't compute, only carries through
+# unchanged from one run to the next so NativeEditControl.rc has a single source of truth for them
+# instead of hand-duplicated literals. Splitting the whole file on "." (as a bare
+# "Major.Minor.Release.Build" file allowed) would misparse COPYRIGHT's own "." characters, hence
+# KEY=VALUE lines instead of a bare version string.
+#
+# Expected -D arguments: INITIAL_MAJOR, INITIAL_MINOR, INITIAL_RELEASE, INITIAL_AUTHOR,
+# INITIAL_COPYRIGHT, INITIAL_PRODUCT_NAME, INITIAL_DESCRIPTION (used only the very first time,
+# when STATE_FILE doesn't exist yet), STATE_FILE, IN_FILE, OUT_FILE.
 
 set(CPPCODETOOLS_BUILD_ROLLOVER 9999)
 set(CPPCODETOOLS_RELEASE_ROLLOVER 999)
 set(CPPCODETOOLS_MINOR_ROLLOVER 99)
 
 if(EXISTS "${STATE_FILE}")
-    file(READ "${STATE_FILE}" STATE)
-    string(STRIP "${STATE}" STATE)
-    string(REPLACE "." ";" STATE_LIST "${STATE}")
-    list(GET STATE_LIST 0 cpptools_VERSION_MAJOR)
-    list(GET STATE_LIST 1 cpptools_VERSION_MINOR)
-    list(GET STATE_LIST 2 cpptools_VERSION_RELEASE)
-    list(GET STATE_LIST 3 cpptools_VERSION_BUILD)
+    file(STRINGS "${STATE_FILE}" STATE_LINES)
+
+    set(cpptools_VERSION "")
+    set(cpptools_AUTHOR "${INITIAL_AUTHOR}")
+    set(cpptools_COPYRIGHT "${INITIAL_COPYRIGHT}")
+    set(cpptools_PRODUCT_NAME "${INITIAL_PRODUCT_NAME}")
+    set(cpptools_DESCRIPTION "${INITIAL_DESCRIPTION}")
+
+    foreach(STATE_LINE ${STATE_LINES})
+        if(STATE_LINE MATCHES "^([A-Z_]+)=(.*)$")
+            set(STATE_KEY "${CMAKE_MATCH_1}")
+            set(STATE_VALUE "${CMAKE_MATCH_2}")
+            set(cpptools_${STATE_KEY} "${STATE_VALUE}")
+        endif()
+    endforeach()
+
+    string(REPLACE "." ";" VERSION_LIST "${cpptools_VERSION}")
+    list(GET VERSION_LIST 0 cpptools_VERSION_MAJOR)
+    list(GET VERSION_LIST 1 cpptools_VERSION_MINOR)
+    list(GET VERSION_LIST 2 cpptools_VERSION_RELEASE)
+    list(GET VERSION_LIST 3 cpptools_VERSION_BUILD)
 else()
     set(cpptools_VERSION_MAJOR ${INITIAL_MAJOR})
     set(cpptools_VERSION_MINOR ${INITIAL_MINOR})
     set(cpptools_VERSION_RELEASE ${INITIAL_RELEASE})
     set(cpptools_VERSION_BUILD 0)
+    set(cpptools_AUTHOR "${INITIAL_AUTHOR}")
+    set(cpptools_COPYRIGHT "${INITIAL_COPYRIGHT}")
+    set(cpptools_PRODUCT_NAME "${INITIAL_PRODUCT_NAME}")
+    set(cpptools_DESCRIPTION "${INITIAL_DESCRIPTION}")
 endif()
 
 math(EXPR cpptools_VERSION_BUILD "${cpptools_VERSION_BUILD} + 1")
@@ -49,6 +76,13 @@ if(cpptools_VERSION_BUILD GREATER ${CPPCODETOOLS_BUILD_ROLLOVER})
 endif()
 
 set(cpptools_VERSION "${cpptools_VERSION_MAJOR}.${cpptools_VERSION_MINOR}.${cpptools_VERSION_RELEASE}.${cpptools_VERSION_BUILD}")
-file(WRITE "${STATE_FILE}" "${cpptools_VERSION}")
+
+file(WRITE "${STATE_FILE}"
+    "VERSION=${cpptools_VERSION}\n"
+    "AUTHOR=${cpptools_AUTHOR}\n"
+    "COPYRIGHT=${cpptools_COPYRIGHT}\n"
+    "PRODUCT_NAME=${cpptools_PRODUCT_NAME}\n"
+    "DESCRIPTION=${cpptools_DESCRIPTION}\n"
+)
 
 configure_file("${IN_FILE}" "${OUT_FILE}" @ONLY)

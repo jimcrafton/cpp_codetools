@@ -28,7 +28,7 @@ namespace CodeToolsVsix
     /// <see cref="IOleCommandTarget"/> currently recognizes ten editing commands (Undo, Redo, Cut,
     /// Copy, Paste, Find, Replace, GotoLine - see <see cref="StubCommands"/>). QueryStatus reports
     /// them enabled so they're reachable; Exec dispatches all of them through one generic native
-    /// call (<see cref="NativeEditHost.ExecCommand"/>, mirroring NativeEditControl.h's
+    /// call (<see cref="NativeEditHost.ExecCommand"/>, mirroring NativeEditor.h's
     /// EditorCommand/EditorCommandArgs) rather than a P/Invoke per command - the stub behavior
     /// itself (currently just an OutputDebugStringW log) lives natively in
     /// CppEditorControl::ExecCommand, not in this class, same lifecycle/dispatch-only principle
@@ -60,7 +60,7 @@ namespace CodeToolsVsix
         /// <summary>
         /// (command-set GUID, command ID) -> the <see cref="EditorCommand"/> this pane recognizes
         /// as a stub, dispatched generically through <see cref="NativeEditHost.ExecCommand"/> (see
-        /// NativeEditControl.h's EditorCommand/EditorCommandArgs for the native side). Several
+        /// NativeEditor.h's EditorCommand/EditorCommandArgs for the native side). Several
         /// logical commands (Undo, Redo, Cut, Copy, Paste, Find, Replace) exist in *both* the
         /// legacy VSStd97 set and the newer VSStd2K set under different numeric IDs - VS can route
         /// a given keystroke/menu click through either depending on context, so both are listed.
@@ -123,10 +123,13 @@ namespace CodeToolsVsix
         /// <summary>Non-zero while <see cref="_fileChangeService"/> is watching <see cref="_filePath"/>
         /// on our behalf; the handle AdviseFileChange/UnadviseFileChange use.</summary>
         private uint _fileChangeCookie;
+        
+        private Microsoft.VisualStudio.OLE.Interop.IServiceProvider _oleServiceProvider;
 
-        public CodeToolsEditorPane(string mkDocument)
+        public CodeToolsEditorPane(string mkDocument, Microsoft.VisualStudio.OLE.Interop.IServiceProvider svcPrv)
         {
             _filePath = mkDocument;
+            _oleServiceProvider = svcPrv;
         }
 
         // ----------------------------------------------------------------
@@ -141,7 +144,7 @@ namespace CodeToolsVsix
 
         int IVsWindowPane.CreatePaneWindow(IntPtr hwndParent, int x, int y, int cx, int cy, out IntPtr hwnd)
         {
-            hwnd = _host.CreateChildWindow(hwndParent, x, y, cx, cy);
+            hwnd = _host.CreateChildWindow(hwndParent, x, y, cx, cy, _oleServiceProvider);
 
             // LoadDocData can run before or after the window exists depending on how the doc
             // was opened; flush whichever arrived first now that both are ready.

@@ -46,7 +46,7 @@
     <LLVMInstallDir Condition="'$(LLVMInstallDir)'==''">C:\Program Files\LLVM</LLVMInstallDir>
 
     <!-- cpp_codetools' own repo root and CMake build directory (extension/CodeToolsVsix -> up
-         two levels). NativeEditControl.dll is a CMake target (root CMakeLists.txt), built by
+         two levels). NativeEditControls.dll is a CMake target (root CMakeLists.txt), built by
          invoking cmake directly against this build tree before deploying its output alongside
          this assembly - it isn't an MSBuild project and so isn't picked up by the .sln's
          ProjectDependencies ordering (indeed, it isn't in the .sln at all). -->
@@ -57,7 +57,7 @@
     <RepoBuildDir>$(RepoRoot)\build</RepoBuildDir>
 
     <!-- VERSION.state (repo root, tracked in git) is cpp_codetools' single source of truth for
-         Major.Minor.Release.Build - shared with NativeEditControl.dll's own version (see
+         Major.Minor.Release.Build - shared with NativeEditControls.dll's own version (see
          cmake/GenerateVersion.cmake, NativeEditControl.rc). Read here, at project *evaluation*
          time (before any target runs) via an MSBuild property function rather than a Target-based
          file read - tried making a Target set $(Version) after BuildAndIncludeNativeDependencies'
@@ -67,8 +67,14 @@
          "1.0.0.0" default even across a forced /t:Rebuild), so this reads the value as of the
          START of this build instead - one build-number behind the native DLL built later in the
          same invocation, but simple and reliably correct. Both sides keep tracking the same file,
-         just offset by a constant one build apart rather than resynced to the exact same instant. -->
-    <CppCodeToolsVersion Condition="Exists('$(RepoRoot)\VERSION.state')">$([System.IO.File]::ReadAllText('$(RepoRoot)\VERSION.state').Trim())</CppCodeToolsVersion>
+         just offset by a constant one build apart rather than resynced to the exact same instant.
+
+         VERSION.state is a KEY=VALUE text file, one entry per line (VERSION plus a handful of
+         product-metadata fields cmake/GenerateVersion.cmake also carries through unchanged into
+         NativeEditControl.rc) - not a bare version string - so this pulls out just the VERSION=
+         line's value via Regex rather than reading the whole file as-is. -->
+    <_VersionStateText Condition="Exists('$(RepoRoot)\VERSION.state')">$([System.IO.File]::ReadAllText('$(RepoRoot)\VERSION.state'))</_VersionStateText>
+    <CppCodeToolsVersion Condition="'$(_VersionStateText)' != ''">$([System.Text.RegularExpressions.Regex]::Match('$(_VersionStateText)', 'VERSION=(\S+)').Groups[1].Value)</CppCodeToolsVersion>
     <CppCodeToolsVersion Condition="'$(CppCodeToolsVersion)' == ''">0.1.0.0</CppCodeToolsVersion>
     <Version>$(CppCodeToolsVersion)</Version>
     <AssemblyVersion>$(CppCodeToolsVersion)</AssemblyVersion>
@@ -112,12 +118,12 @@
     </None>
   </ItemGroup>
 
-  <!-- NativeEditControl.dll (native, edit-surface HWND - a CMake target, root CMakeLists.txt)
+  <!-- NativeEditControls.dll (native, edit-surface HWND - a CMake target, root CMakeLists.txt)
        and libclang.dll (cpptools's own runtime dependency) are native code NativeEditHost.cs
-       P/Invokes into or that NativeEditControl.dll needs alongside it. They need to sit next to
+       P/Invokes into or that NativeEditControls.dll needs alongside it. They need to sit next to
        CodeToolsVsix.dll at runtime and travel inside the .vsix, since VS loads them from the
        extension's install folder, not from this project's own build output. There is no separate
-       C API/bridge DLL - NativeEditControl.dll calls cpptools::Parser in-process (see
+       C API/bridge DLL - NativeEditControls.dll calls cpptools::Parser in-process (see
        CppEditorControl.cpp), and hosts a real newui::RootView the same way (see
        EditThreadHost.cpp).
 
@@ -125,9 +131,9 @@
        the CMake build's own output path: a static Content item's Exists() condition is evaluated
        when this project is first loaded, before any build has actually happened, so on a clean
        checkout it would (wrongly) evaluate to false and silently omit the DLLs. Building
-       NativeEditControl via CMake explicitly here - which transitively builds cpptools/newui too,
+       NativeEditControls via CMake explicitly here - which transitively builds cpptools/newui too,
        since it links both - rather than relying on any MSBuild-level project ordering (there is
-       none; NativeEditControl isn't in the .sln at all) - also means `dotnet build` on just this
+       none; NativeEditControls isn't in the .sln at all) - also means `dotnet build` on just this
        .csproj still produces a working, deployable extension on a machine with the VC++ toolset
        and CMake available. -->
   <Target Name="BuildAndIncludeNativeDependencies" BeforeTargets="CoreCompile;GetVsixSourceItems" Condition="'$(DesignTimeBuild)' != 'true'">
@@ -137,10 +143,10 @@
          native build, not just the deployment-file lookup below. -->
     <Exec Command="&quot;$(CMakeExe)&quot; -S &quot;$(RepoRoot)&quot; -B &quot;$(RepoBuildDir)&quot; -DCPPCODETOOLS_LLVM_ROOT=&quot;$(LLVMInstallDir)&quot;" Condition="!Exists('$(RepoBuildDir)\CMakeCache.txt')" />
 
-    <!-- Builds NativeEditControl.dll - transitively builds cpptools and newui too, since it
-         links both (target_link_libraries(NativeEditControl PRIVATE cpptools newui), root
+    <!-- Builds NativeEditControls.dll - transitively builds cpptools and newui too, since it
+         links both (target_link_libraries(NativeEditControls PRIVATE cpptools newui), root
          CMakeLists.txt) - one call covers everything this project needs from the native side. -->
-    <Exec Command="&quot;$(CMakeExe)&quot; --build &quot;$(RepoBuildDir)&quot; --config $(Configuration) --target NativeEditControl" />
+    <Exec Command="&quot;$(CMakeExe)&quot; --build &quot;$(RepoBuildDir)&quot; --config $(Configuration) --target NativeEditControls" />
 
     <!-- Keeps VS's own "Manage Extensions" dialog (Identity Version, source.extension.vsixmanifest)
          in sync with the same VERSION.state this assembly's own Version/AssemblyVersion/FileVersion
@@ -152,7 +158,7 @@
     <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\UpdateVsixManifestVersion.ps1&quot; -ManifestPath &quot;$(MSBuildProjectDirectory)\source.extension.vsixmanifest&quot; -Version &quot;$(CppCodeToolsVersion)&quot;" />
 
     <ItemGroup>
-      <_NativeDeploymentFile Include="$(RepoBuildDir)\$(Configuration)\NativeEditControl.dll" />
+      <_NativeDeploymentFile Include="$(RepoBuildDir)\$(Configuration)\NativeEditControls.dll" />
       <_NativeDeploymentFile Include="$(LLVMInstallDir)\bin\libclang.dll" />
     </ItemGroup>
 

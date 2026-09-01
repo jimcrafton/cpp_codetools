@@ -19,7 +19,7 @@ namespace CodeToolsVsix
 
         public CodeToolsEditorFactory(CodeToolsPackage package)
         {
-            _package = package ?? throw new ArgumentNullException(nameof(package));
+            _package = package ?? throw new ArgumentNullException(nameof(package));            
         }
 
         public int SetSite(Microsoft.VisualStudio.OLE.Interop.IServiceProvider psp)
@@ -55,11 +55,11 @@ namespace CodeToolsVsix
             {
                 return VSConstants.VS_E_INCOMPATIBLEDOCDATA;
             }
-
+            
             // CodeToolsEditorPane plays both roles - DocData (persistence) and DocView (the
             // window) - which is the simplest valid shape for a custom editor and is what most
             // non-text custom editor samples do.
-            var pane = new CodeToolsEditorPane(pszMkDocument);
+            var pane = new CodeToolsEditorPane(pszMkDocument, _oleServiceProvider);
             ppunkDocView = Marshal.GetIUnknownForObject(pane);
             ppunkDocData = Marshal.GetIUnknownForObject(pane);
 

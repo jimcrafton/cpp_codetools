@@ -36,8 +36,7 @@ namespace CodeToolsVsix
         {
             await base.InitializeAsync(cancellationToken, progress);
             await JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
-
-            OutputWindowLogger.Initialize(this);
+            
             RegisterEditorFactory(new CodeToolsEditorFactory(this));
         }
     }

@@ -16,11 +16,24 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # root - deliberately a *tracked* source-tree file, not a build-tree one, so version progression
 # survives a build/ wipe-and-reconfigure. project(VERSION) above only seeds VERSION.state the very
 # first time it's created.
+# Product-metadata fields carried alongside the Major.Minor.Release.Build tuple in VERSION.state
+# (see cmake/GenerateVersion.cmake) - only used to seed VERSION.state the very first time it
+# doesn't exist yet; every build after that just carries forward whatever's already on disk there
+# (hand-edit VERSION.state directly to change these, not these defaults).
+set(CPPCODETOOLS_AUTHOR "Jim Crafton")
+set(CPPCODETOOLS_COPYRIGHT "Copyright (c) 2026 Jim Crafton. All rights reserved.")
+set(CPPCODETOOLS_PRODUCT_NAME "codetools++")
+set(CPPCODETOOLS_DESCRIPTION "codetools++ native edit control")
+
 add_custom_target(cpptools_version ALL
     COMMAND ${CMAKE_COMMAND}
         -DINITIAL_MAJOR=${cpp_codetools_VERSION_MAJOR}
         -DINITIAL_MINOR=${cpp_codetools_VERSION_MINOR}
         -DINITIAL_RELEASE=${cpp_codetools_VERSION_PATCH}
+        -DINITIAL_AUTHOR=${CPPCODETOOLS_AUTHOR}
+        -DINITIAL_COPYRIGHT=${CPPCODETOOLS_COPYRIGHT}
+        -DINITIAL_PRODUCT_NAME=${CPPCODETOOLS_PRODUCT_NAME}
+        -DINITIAL_DESCRIPTION=${CPPCODETOOLS_DESCRIPTION}
         -DSTATE_FILE=${CMAKE_CURRENT_SOURCE_DIR}/VERSION.state
         -DIN_FILE=${CMAKE_CURRENT_SOURCE_DIR}/include/cpptools/version.h.in
         -DOUT_FILE=${CMAKE_CURRENT_BINARY_DIR}/include/cpptools/version.h
@@ -143,8 +156,7 @@ add_library(cpptools STATIC
     include/cpptools/symbol.h
     include/cpptools/diagnostic.h
     include/cpptools/parser.h
-    include/cpptools/log.h
-)
+    include/cpptools/log.h)
 
 target_include_directories(cpptools PUBLIC include ${CMAKE_CURRENT_BINARY_DIR}/include)
 target_link_libraries(cpptools PUBLIC libclang::libclang)
@@ -152,7 +164,7 @@ add_dependencies(cpptools cpptools_version)
 
 add_subdirectory(tools/cppoutline)
 
-# codetools++ VSIX support - extension/NativeEditControl.dll, the native HWND edit surface
+# codetools++ VSIX support - extension/NativeEditControls.dll, the native HWND edit surface
 # CodeToolsVsix.csproj (the VSIX/C# package - extension/CodeToolsVsix/) P/Invokes into. A normal
 # CMake SHARED library target, not a hand-written vcxproj - target_link_libraries(... PRIVATE
 # cpptools newui) below gets every one of cpptools'/newui's own PUBLIC include dirs and link
@@ -160,33 +172,39 @@ add_subdirectory(tools/cppoutline)
 # CMakeLists.txt) transitively, with nothing to hand-maintain here. There is no separate C
 # API/bridge library - it calls cpptools::Parser and hosts a real newui::RootView both in-process
 # (see CppEditorControl.cpp/EditThreadHost.cpp). CodeToolsVsix.csproj's own build invokes
-# `cmake --build --target NativeEditControl` against this build tree before deploying the result
+# `cmake --build --target NativeEditControls` against this build tree before deploying the result
 # alongside itself - nothing needs to be add_subdirectory()'d here for that.
-add_library(NativeEditControl SHARED
-    extension/NativeEditControl/NativeEditControl.h
-    extension/NativeEditControl/CppEditorControl.h
-    extension/NativeEditControl/CppEditorControl.cpp
-    extension/NativeEditControl/EditThreadHost.h
-    extension/NativeEditControl/EditThreadHost.cpp
-    extension/NativeEditControl/NativeEditControlApi.cpp
-    extension/NativeEditControl/TextEncoding.h
-    extension/NativeEditControl/TextEncoding.cpp
-    extension/NativeEditControl/Logging.h
-    extension/NativeEditControl/Logging.cpp
-    extension/NativeEditControl/dllmain.cpp
-    extension/NativeEditControl/NativeEditControl.rc
-)
+add_library(NativeEditControls SHARED
+    extension/NativeEditControls/NativeEditControlApi.h
+    extension/NativeEditControls/CppEditor.h
+    extension/NativeEditControls/CppEditor.cpp
+    
+    
+    extension/NativeEditControls/NativeEditControlApi.cpp
+    extension/NativeEditControls/TextEncoding.h
+    extension/NativeEditControls/TextEncoding.cpp
+    extension/NativeEditControls/Logging.h
+    extension/NativeEditControls/Logging.cpp
+    extension/NativeEditControls/dllmain.cpp
+    extension/NativeEditControls/NativeEditControl.rc
+    extension/NativeEditControls/NativeEditor.cpp)
 
-target_compile_definitions(NativeEditControl PRIVATE
+target_compile_definitions(NativeEditControls PRIVATE
     NATIVEEDITCONTROL_EXPORTS
     WIN32_LEAN_AND_MEAN
     UNICODE
     _UNICODE
 )
-target_link_libraries(NativeEditControl PRIVATE cpptools newui user32.lib gdi32.lib)
-add_dependencies(NativeEditControl cpptools_version)
 
-cpptools_copy_libclang_dll(NativeEditControl)
+set(VSEXT_INCLUDES "C:/Program Files/Microsoft Visual Studio/18/Community/VSSDK/VisualStudioIntegration/Common/Inc")
+
+
+target_include_directories(NativeEditControls PUBLIC include ${VSEXT_INCLUDES})
+
+target_link_libraries(NativeEditControls PRIVATE cpptools newui user32.lib gdi32.lib)
+add_dependencies(NativeEditControls cpptools_version)
+
+cpptools_copy_libclang_dll(NativeEditControls)
 
 # GoogleTest - Testing Framework
 # ==============================
