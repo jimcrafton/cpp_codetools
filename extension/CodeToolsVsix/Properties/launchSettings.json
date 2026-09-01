@@ -1,0 +1,12 @@
+{
+  "profiles": {
+    "CodeToolsVsix": {
+      "commandName": "VsixDebugger",
+      "nativeDebugging": true
+    },
+    "Profile 1": {
+      "commandName": "Project",
+      "debugEngines": "managed-framework,native"
+    }
+  }
+}
