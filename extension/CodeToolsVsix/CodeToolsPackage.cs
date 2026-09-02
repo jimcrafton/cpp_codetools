@@ -30,6 +30,11 @@ namespace CodeToolsVsix
     [ProvideEditorExtension(typeof(CodeToolsEditorFactory), ".cxx", 100)]
     [ProvideEditorExtension(typeof(CodeToolsEditorFactory), ".h", 100)]
     [ProvideEditorExtension(typeof(CodeToolsEditorFactory), ".hpp", 100)]
+    // .newui is newui's own JSON5-based serialization format for its reflection API (objects
+    // read/written through it, not C++ source) - registered here to exercise
+    // DocumentType.Designer end to end (see CodeToolsEditorPane.DocumentTypeFromPath), routing to
+    // DesignerEditor instead of CppEditor.
+    [ProvideEditorExtension(typeof(CodeToolsEditorFactory), ".newui", 100)]
     public sealed class CodeToolsPackage : AsyncPackage
     {
         protected override async Task InitializeAsync(CancellationToken cancellationToken, IProgress<ServiceProgressData> progress)

@@ -178,8 +178,10 @@ add_library(NativeEditControls SHARED
     extension/NativeEditControls/NativeEditControlApi.h
     extension/NativeEditControls/CppEditor.h
     extension/NativeEditControls/CppEditor.cpp
-    
-    
+    extension/NativeEditControls/DesignerEditor.h
+    extension/NativeEditControls/DesignerEditor.cpp
+
+
     extension/NativeEditControls/NativeEditControlApi.cpp
     extension/NativeEditControls/TextEncoding.h
     extension/NativeEditControls/TextEncoding.cpp
@@ -204,7 +206,36 @@ target_include_directories(NativeEditControls PUBLIC include ${VSEXT_INCLUDES})
 target_link_libraries(NativeEditControls PRIVATE cpptools newui user32.lib gdi32.lib)
 add_dependencies(NativeEditControls cpptools_version)
 
+# testharness - a plain newui::Application/newui::Frame .exe (extension/NativeEditControls/
+# testharness/testharness.cpp) for exercising NativeEditControls' editing code directly, without
+# going through VS/the managed VSIX layer at all. Compiles NativeEditor.cpp/CppEditor.cpp/
+# DesignerEditor.cpp/TextEncoding.cpp/Logging.cpp directly into this .exe rather than linking
+# NativeEditControls.dll - NativeEditor/NativeEditManager/CppEditor/DesignerEditor are plain
+# classes, never __declspec(dllexport)'d (only the extern "C" functions in
+# NativeEditControlApi.cpp are), so the DLL's import library wouldn't expose them for this
+# harness to call directly the way it does (createEditor(newui::RootView*, ...), editor->load()/
+# save()) - see NativeEditor.h's own comment on that overload.
+add_executable(testharness
+    extension/NativeEditControls/testharness/testharness.cpp
+    extension/NativeEditControls/NativeEditor.cpp
+    extension/NativeEditControls/CppEditor.cpp
+    extension/NativeEditControls/DesignerEditor.cpp
+    extension/NativeEditControls/TextEncoding.cpp
+    extension/NativeEditControls/Logging.cpp)
+
+target_compile_definitions(testharness PRIVATE
+    WIN32_LEAN_AND_MEAN
+    UNICODE
+    _UNICODE
+)
+
+target_include_directories(testharness PRIVATE include ${VSEXT_INCLUDES})
+
+target_link_libraries(testharness PRIVATE cpptools newui user32.lib gdi32.lib comdlg32.lib)
+add_dependencies(testharness cpptools_version)
+
 cpptools_copy_libclang_dll(NativeEditControls)
+cpptools_copy_libclang_dll(testharness)
 
 # GoogleTest - Testing Framework
 # ==============================

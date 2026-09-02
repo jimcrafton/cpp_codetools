@@ -43,10 +43,15 @@ namespace CodeToolsVsix
     public:
         virtual ~NativeEditor()
         {
-            if (rootView_)
+            if (rootView_ )
             {
-                logToDebugOut(L"~NativeEditor about to delete NativeEditor::rootView_");
-                rootView_->destroy();
+                if (rootViewOwned_) {
+                    rootView_.release();
+                }
+                else {
+                    logToDebugOut(L"~NativeEditor about to delete NativeEditor::rootView_");
+                    rootView_->destroy();
+                }
             }
         }
 
@@ -72,7 +77,10 @@ namespace CodeToolsVsix
         void markDirty() { dirty_ = true; }
         void clearDirty() { dirty_ = false; }
 
+    protected:
+        bool rootViewOwned_ = false;
     private:
+        
         std::unique_ptr<newui::RootView> rootView_;
         bool dirty_ = false;
     };
@@ -115,7 +123,9 @@ namespace CodeToolsVsix
 
         static newui::RunLoop* runLoop() { return instance().runLoop_; }
 
-        static NativeEditor* createEditor(HWND hwndParent, int x, int y, int width, int height);
+        static NativeEditor* createEditor(HWND hwndParent, int x, int y, int width, int height, DocumentType documentType);
+
+        static NativeEditor* createEditor(newui::RootView* rootView, DocumentType documentType);
 
 		static bool closeEditor(HWND hwnd) {
 			auto& instance = NativeEditManager::instance();

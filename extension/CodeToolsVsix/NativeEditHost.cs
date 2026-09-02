@@ -34,8 +34,12 @@ namespace CodeToolsVsix
         /// same way it always has for native HWND-based panes - no callback into managed code is
         /// needed for that. <see cref="Resize"/> below is exposed only in case your own control
         /// needs to explicitly reposition itself (e.g. from other native code).
+        /// <paramref name="documentType"/> selects which concrete native editor gets
+        /// constructed behind the returned HWND (see <see cref="NativeMethods.DocumentType"/>) -
+        /// the caller (<c>CodeToolsEditorPane</c>) is responsible for deciding it, from the
+        /// document's own extension.
         /// </summary>
-        public IntPtr CreateChildWindow(IntPtr hwndParent, int x, int y, int width, int height, Microsoft.VisualStudio.OLE.Interop.IServiceProvider svcPrv)
+        public IntPtr CreateChildWindow(IntPtr hwndParent, int x, int y, int width, int height, Microsoft.VisualStudio.OLE.Interop.IServiceProvider svcPrv, DocumentType documentType)
         {
 
             NativeMethods.NativeEditControl_SetServiceProvider(svcPrv);
@@ -44,9 +48,9 @@ namespace CodeToolsVsix
             // To host a different native control, replace this call (and NativeEditControls.dll
             // it P/Invokes into) with your own. Keep it WS_CHILD, parented to hwndParent, and
             // sized to (x,y,width,height).
-            IntPtr hInstance = NativeMethods.GetModuleHandle(null);
 
-            _hwnd = NativeMethods.NativeEditControl_Create(hwndParent, x, y, width, height, hInstance);
+
+            _hwnd = NativeMethods.NativeEditControl_Create(hwndParent, x, y, width, height, documentType);
 
             if (_hwnd == IntPtr.Zero)
             {

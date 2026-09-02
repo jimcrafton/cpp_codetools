@@ -118,6 +118,9 @@ namespace CodeToolsVsix
 
         auto svcProvPtr = NativeEditManager::serviceProvider();
 
+		if (!svcProvPtr) {
+			return;
+		}
 
         IVsOutputWindowPtr pOutputWindow;
         if (SUCCEEDED(svcProvPtr->QueryService(SID_SVsOutputWindow, IID_IVsOutputWindow, (void**)&pOutputWindow))) {

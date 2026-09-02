@@ -29,20 +29,31 @@ typedef wil::com_ptr<IServiceProvider> IServiceProviderPtr;
 // is an exported native entry point another caller could reach without that guarantee, so nothing
 // here scans for a terminator in an untrusted buffer.
 
+// Which concrete NativeEditor subclass NativeEditControl_Create should instantiate. VS itself
+// never tells this DLL what kind of document is being opened - IVsEditorFactory selection is a
+// pure filename-extension match resolved entirely on the managed side (see
+// CodeToolsEditorPane's own DocumentTypeFromPath) before this call ever happens - so this is that
+// decision, made explicit and carried across the ABI instead of being hardwired into
+// NativeEditManager::createEditor picking one fixed editor type.
+enum class DocumentType : int32_t
+{
+    CppSource = 0,  // CppEditor - source text + cpptools-derived outline.
+    Designer = 1,   // DesignerEditor - placeholder today; a future visual designer surface.
+};
+
 // Creates a new CppEditorControl - a real newui::RootView (standalone, no Application/Frame) -
-// as a child of hwndParent, filling (x, y, width, height). The returned HWND lives on this DLL's
-// own dedicated background thread (see EditThreadHost.h, "win32 loop in VSIX.docx" (D:\code\newui)
+// as a child of hwndParent, filling (x, y, width, height), hosting the NativeEditor subclass
+// documentType selects (see DocumentType above). The returned HWND lives on this DLL's own
+// dedicated background thread (see EditThreadHost.h, "win32 loop in VSIX.docx" (D:\code\newui)
 // for the hosting model this follows), not the calling thread - this call blocks until that
-// thread's RootView is actually constructed and ready. hInstance is accepted for ABI
-// compatibility but not used for the window class itself (that needs to be this DLL's own module
-// handle, not the caller's - see EditThreadHost::moduleHandle()). Returns the control's HWND, or
-// nullptr on failure.
+// thread's RootView is actually constructed and ready. Returns the control's HWND, or nullptr on
+// failure.
 //
 // The returned HWND must be closed via NativeEditControl_RequestClose(), never DestroyWindow()
 // directly - DestroyWindow() must be called from the thread that created the window, which is no
 // longer the caller's own thread once this returns.
 NATIVEEDITCONTROL_API HWND __cdecl NativeEditControl_Create(
-    HWND hwndParent, int x, int y, int width, int height, HINSTANCE hInstance);
+    HWND hwndParent, int x, int y, int width, int height, DocumentType documentType);
 
 NATIVEEDITCONTROL_API BOOL __cdecl  NativeEditControl_SetServiceProvider(IUnknown* svcProviderPtr);
 

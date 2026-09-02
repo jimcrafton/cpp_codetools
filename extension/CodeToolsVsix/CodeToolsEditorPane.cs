@@ -142,9 +142,28 @@ namespace CodeToolsVsix
             return VSConstants.S_OK;
         }
 
+        /// <summary>Decides which native editor <see cref="NativeEditHost.CreateChildWindow"/>
+        /// should create, from <paramref name="filePath"/>'s own extension. This is the one place
+        /// that answers "what kind of document is this" - VS itself never tells this extension
+        /// (see <see cref="CodeToolsEditorFactory.CreateEditorInstance"/>'s own remarks: editor
+        /// selection is a pure filename-extension match against this factory's own
+        /// <c>ProvideEditorExtension</c> registrations, resolved before this pane is even
+        /// constructed). Every extension is registered in <c>CodeToolsPackage</c>; keep this
+        /// switch in sync with that attribute list.</summary>
+        private static DocumentType DocumentTypeFromPath(string filePath)
+        {
+            switch (Path.GetExtension(filePath)?.ToLowerInvariant())
+            {
+                case ".newui":
+                    return DocumentType.Designer;
+                default:
+                    return DocumentType.CppSource;
+            }
+        }
+
         int IVsWindowPane.CreatePaneWindow(IntPtr hwndParent, int x, int y, int cx, int cy, out IntPtr hwnd)
         {
-            hwnd = _host.CreateChildWindow(hwndParent, x, y, cx, cy, _oleServiceProvider);
+            hwnd = _host.CreateChildWindow(hwndParent, x, y, cx, cy, _oleServiceProvider, DocumentTypeFromPath(_filePath));
 
             // LoadDocData can run before or after the window exists depending on how the doc
             // was opened; flush whichever arrived first now that both are ready.

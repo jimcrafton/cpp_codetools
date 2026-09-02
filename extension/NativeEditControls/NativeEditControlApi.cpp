@@ -34,11 +34,11 @@ BOOL __cdecl NativeEditControl_SetServiceProvider(IUnknown* svcProviderPtr)
 
 
 
-HWND __cdecl NativeEditControl_Create(HWND hwndParent, int x, int y, int width, int height, HINSTANCE /*hInstance*/)
+HWND __cdecl NativeEditControl_Create(HWND hwndParent, int x, int y, int width, int height, DocumentType documentType)
 {
     HWND hwnd = NULL;
 
-    auto editor = NativeEditManager::createEditor(hwndParent, x, y, width, height);
+    auto editor = NativeEditManager::createEditor(hwndParent, x, y, width, height, documentType);
 	if (nullptr != editor)
 	{
 		hwnd = editor->windowHandle();

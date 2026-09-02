@@ -1,7 +1,7 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011" xmlns:d="http://schemas.microsoft.com/developer/vsx-schema-design/2011">
   <Metadata>
-    <Identity Id="CodeToolsVsix.29b9ace6-39b2-42db-afae-736f937fefcf" Version="0.1.0.192" Language="en-US" Publisher="Jim Crafton" />
+    <Identity Id="CodeToolsVsix.29b9ace6-39b2-42db-afae-736f937fefcf" Version="0.1.0.198" Language="en-US" Publisher="Jim Crafton" />
     <DisplayName>codetools++</DisplayName>
     <Description xml:space="preserve">Registers an alternate editor for C/C++ source files that hosts a native Win32 HWND control as the actual text-editing surface, with a symbol outline parsed by cpp_codetools' own cpptools library.</Description>
   </Metadata>

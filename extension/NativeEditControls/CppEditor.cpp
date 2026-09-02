@@ -176,6 +176,18 @@ namespace CodeToolsVsix
         }
     }
 
+    CppEditor::CppEditor(newui::RootView* rootView)
+    {
+        rootViewOwned_ = true;
+
+        if (!setupUI(rootView))
+        {
+            return;
+        }
+
+        setRootView(std::unique_ptr<newui::RootView>(rootView));
+    }
+
     CppEditor::CppEditor(HWND hwndParent, int x, int y, int width, int height)
     {
         logToDebugOut(L"CppEditorControl");
@@ -185,6 +197,21 @@ namespace CodeToolsVsix
             newui::Rect(static_cast<float>(x), static_cast<float>(y), static_cast<float>(width), static_cast<float>(height)),
             "cppEditorRoot");
 
+
+        if ( !setupUI(root.get()) )
+        {
+            return ;
+        }
+
+        setRootView(std::move(root));
+
+        
+
+        logToDebugOut(L"CppEditorControl completed");
+    }
+
+    bool CppEditor::setupUI(newui::RootView* root)
+    {
         root->style().setBackgroundColor(newui::UIColorManager::colorFor(newui::UIColorRole::WindowBackground));
 
         auto rootLayout = std::make_unique<newui::FlexLayout>(newui::Orientation::Vertical);
@@ -206,16 +233,18 @@ namespace CodeToolsVsix
         // same editable buffer" - same UIColorManager pattern the root's own background uses.
         outlineControl->style().setBackgroundColor(newui::UIColorManager::colorFor(newui::UIColorRole::ControlBackground));
         root->addChild(outlineControl);
-
-        if (!root->initialize())
-        {
-            // Leave the base's RootView/textControl_/outlineControl_ null - windowHandle()
-            // reports failure the same way StandInEditControl::Create() used to (a null HWND),
-            // and load/save/execCommand all already guard on textControl_ being null before
-            // touching it.
-            logToDebugOut(L"!root->initialize()");
-            return;
+        if (!this->rootViewOwned_) {
+            if (!root->initialize())
+            {
+                // Leave the base's RootView/textControl_/outlineControl_ null - windowHandle()
+                // reports failure the same way StandInEditControl::Create() used to (a null HWND),
+                // and load/save/execCommand all already guard on textControl_ being null before
+                // touching it.
+                logToDebugOut(L"!root->initialize()");
+                return false;
+            }
         }
+        
 
         // Only the editable pane's changes count as "dirty" - outlineControl_'s own setText()
         // calls (load(), below) fire this same delegate too, but nothing should ever mark the
@@ -225,10 +254,11 @@ namespace CodeToolsVsix
             return newui::SyncReturn::Handled;
             });
 
-        setRootView(std::move(root));
+        
         textControl_ = textControl;
         outlineControl_ = outlineControl;
-        logToDebugOut(L"CppEditorControl completed");
+
+        return true;
     }
 
     bool CppEditor::load(const wchar_t* filePath, std::size_t filePathLength)

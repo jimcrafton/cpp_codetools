@@ -23,6 +23,20 @@ namespace CodeToolsVsix
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
     internal delegate void LogSinkCallback(Severity severity, IntPtr message, UIntPtr messageLength);
 
+    /// <summary>Mirrors NativeEditControlApi.h's DocumentType - which concrete NativeEditor
+    /// subclass NativeEditControl_Create should instantiate. VS itself never tells this extension
+    /// what kind of document is being opened (editor-factory selection is a pure
+    /// filename-extension match, resolved before CreateEditorInstance is even called - see
+    /// CodeToolsEditorFactory.CreateEditorInstance); CodeToolsEditorPane.DocumentTypeFromPath is
+    /// where that decision gets made explicit, from the document's own extension, so it can be
+    /// carried across the ABI instead of NativeEditManager::createEditor picking one fixed editor
+    /// type. Values are explicit on both sides, same discipline as EditorCommand below.</summary>
+    internal enum DocumentType : int
+    {
+        CppSource = 0,
+        Designer = 1,
+    }
+
     /// <summary>Mirrors NativeEditor.h's EditorCommand. Values are explicit on both sides
     /// (not left to implicit ordering) so a mismatch can't silently slip in from reordering either
     /// enum independently.</summary>
@@ -71,7 +85,7 @@ namespace CodeToolsVsix
         /// <see cref="NativeEditControl_RequestClose"/>, never <see cref="DestroyWindow"/>
         /// directly. Returns the new control's HWND, or IntPtr.Zero on failure.</summary>
         [DllImport("NativeEditControls.dll", EntryPoint = "NativeEditControl_Create", CallingConvention = CallingConvention.Cdecl, SetLastError = true)]
-        public static extern IntPtr NativeEditControl_Create(IntPtr hwndParent, int x, int y, int width, int height, IntPtr hInstance);
+        public static extern IntPtr NativeEditControl_Create(IntPtr hwndParent, int x, int y, int width, int height, DocumentType documentType);
 
 
         [DllImport("NativeEditControls.dll", EntryPoint = "NativeEditControl_SetServiceProvider", CallingConvention = CallingConvention.Cdecl, SetLastError = true)]
@@ -132,7 +146,6 @@ namespace CodeToolsVsix
         [DllImport("user32.dll")]
         public static extern IntPtr SetFocus(IntPtr hWnd);
 
-        [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
-        public static extern IntPtr GetModuleHandle(string lpModuleName);
+        
     }
 }

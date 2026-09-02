@@ -7,6 +7,7 @@
 
 
 #include "CppEditor.h"
+#include "DesignerEditor.h"
 
 namespace CodeToolsVsix
 {
@@ -38,7 +39,42 @@ namespace CodeToolsVsix
         instance.runLoopThread_.join();
     }
 
-    NativeEditor* NativeEditManager::createEditor(HWND hwndParent, int x, int y, int width, int height)
+    NativeEditor* NativeEditManager::createEditor(newui::RootView* rootView, DocumentType documentType)
+    {
+        auto& instance = NativeEditManager::instance();
+
+        NativeEditor* result = nullptr;
+
+        std::unique_ptr<NativeEditor> editor;
+        switch (documentType)
+        {
+            case DocumentType::Designer:
+                editor = std::make_unique<DesignerEditor>(rootView);
+                break;
+            case DocumentType::CppSource:
+            default:
+                editor = std::make_unique<CppEditor>(rootView);
+                break;
+        }
+    
+
+        auto hwnd = editor->windowHandle();
+
+        if (!hwnd)
+        {
+            return nullptr;
+        }
+
+        result = editor.get();
+
+        instance.controlMap_.emplace(hwnd, std::move(editor));
+    
+    
+
+        return result;
+    }
+
+    NativeEditor* NativeEditManager::createEditor(HWND hwndParent, int x, int y, int width, int height, DocumentType documentType)
     {
         auto& instance = NativeEditManager::instance();
 
@@ -52,9 +88,20 @@ namespace CodeToolsVsix
 
             logToDebugOut(L"runloop runAndWait");
 
-            auto editor = std::make_unique<CppEditor>(hwndParent, x, y, width, height);
+            std::unique_ptr<NativeEditor> editor;
+            switch (documentType)
+            {
+            case DocumentType::Designer:
+                editor = std::make_unique<DesignerEditor>(hwndParent, x, y, width, height);
+                break;
+            case DocumentType::CppSource:
+            default:
+                editor = std::make_unique<CppEditor>(hwndParent, x, y, width, height);
+                break;
+            }
+
 			auto hwnd = editor->windowHandle();
-            
+
             if (!hwnd)
             {
                 return nullptr;
