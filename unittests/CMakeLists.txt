@@ -16,7 +16,9 @@ gtest_discover_tests(cpptools_tests)
 # newui at all) rather than adding that dependency there.
 add_executable(nativeeditcontrols_tests
     test_property_editor.cpp
+    test_component_editor.cpp
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/PropertyEditor.cpp"
+    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/ComponentEditor.cpp"
 )
 
 target_link_libraries(nativeeditcontrols_tests PRIVATE cpptools newui GTest::gtest_main Threads::Threads)
