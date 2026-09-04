@@ -134,12 +134,20 @@ TEST_F(PropertyEditorTest, NarrowerClassAndNameSpecificRegistrationWinsOverTheWi
 {
     const Property* prop = findProperty(widgetClass_, "count");
 
-    CodeToolsVsix::PropertyEditorRegistry::instance().registerEditor(
+    // A local registry, not the shared instance() singleton - registering
+    // a StringPropertyEditor override for "count" there would otherwise
+    // leak into every later test in this binary that also touches "count"
+    // (real bug, caught the hard way: it did, until this was a local
+    // instance instead - see ComponentEditorRegistry's own tests, which
+    // already avoid the singleton for exactly this reason).
+    CodeToolsVsix::PropertyEditorRegistry registry;
+    registry.registerBuiltinEditors();
+    registry.registerEditor(
         std::type_index(typeid(int)),
         [](const Property* p, void* instance) { return std::make_unique<CodeToolsVsix::StringPropertyEditor>(p, instance); },
         widgetClass_, "count");
 
-    auto editor = CodeToolsVsix::PropertyEditorRegistry::instance().createEditor(prop, widgetClass_, &widget_);
+    auto editor = registry.createEditor(prop, widgetClass_, &widget_);
     ASSERT_NE(editor, nullptr);
     EXPECT_EQ(editor->editStyle(), CodeToolsVsix::PropertyEditor::EditStyle::None);
 }
@@ -154,4 +162,61 @@ TEST_F(PropertyEditorTest, UnregisteredTypeReturnsNullptr)
 
     auto editor = CodeToolsVsix::PropertyEditorRegistry::instance().createEditor(prop, widgetClass_, &widget_);
     EXPECT_EQ(editor, nullptr);
+}
+
+TEST_F(PropertyEditorTest, WithNoUndoStackAttachedCommitsDirectlyLikeBefore)
+{
+    const Property* prop = findProperty(widgetClass_, "count");
+    auto editor = CodeToolsVsix::PropertyEditorRegistry::instance().createEditor(prop, widgetClass_, &widget_);
+
+    EXPECT_EQ(editor->undoStack(), nullptr);
+    editor->setValueFromString("7");
+    EXPECT_EQ(widget_.count, 7);
+}
+
+TEST_F(PropertyEditorTest, WithAnUndoStackAttachedTheEditIsUndoable)
+{
+    const Property* prop = findProperty(widgetClass_, "count");
+    auto editor = CodeToolsVsix::PropertyEditorRegistry::instance().createEditor(prop, widgetClass_, &widget_);
+
+    newui::UndoStack undoStack;
+    editor->setUndoStack(&undoStack);
+    EXPECT_EQ(editor->undoStack(), &undoStack);
+
+    widget_.count = 3;
+    editor->setValueFromString("9");
+    EXPECT_EQ(widget_.count, 9);
+    EXPECT_TRUE(undoStack.canUndo());
+
+    undoStack.undo();
+    EXPECT_EQ(widget_.count, 3);
+
+    undoStack.redo();
+    EXPECT_EQ(widget_.count, 9);
+}
+
+TEST_F(PropertyEditorTest, InvalidTextWithAnUndoStackAttachedPushesNothing)
+{
+    const Property* prop = findProperty(widgetClass_, "count");
+    auto editor = CodeToolsVsix::PropertyEditorRegistry::instance().createEditor(prop, widgetClass_, &widget_);
+
+    newui::UndoStack undoStack;
+    editor->setUndoStack(&undoStack);
+
+    widget_.count = 3;
+    editor->setValueFromString("not a number");
+    EXPECT_EQ(widget_.count, 3);
+    EXPECT_FALSE(undoStack.canUndo());
+}
+
+TEST_F(PropertyEditorTest, PushedActionDescriptionNamesTheProperty)
+{
+    const Property* prop = findProperty(widgetClass_, "label");
+    auto editor = CodeToolsVsix::PropertyEditorRegistry::instance().createEditor(prop, widgetClass_, &widget_);
+
+    newui::UndoStack undoStack;
+    editor->setUndoStack(&undoStack);
+
+    editor->setValueFromString("hello");
+    EXPECT_EQ(undoStack.undoDescription(), "Change label");
 }

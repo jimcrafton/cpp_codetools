@@ -3,11 +3,13 @@
 #include <any>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <typeindex>
 #include <vector>
 
 #include <newui/reflection.h>
+#include <newui/undostack.h>
 #include <newui/view.h>
 
 namespace CodeToolsVsix
@@ -27,11 +29,30 @@ namespace CodeToolsVsix
 
         virtual EditStyle editStyle() const { return EditStyle::None; }
         virtual std::string valueAsString() const = 0;
-        virtual void setValueFromString(const std::string& text) = 0;  // invalid text: no-op
+
+        // Parses text into a value of this property's type - std::nullopt
+        // for invalid input (a no-op). Each subclass implements only this;
+        // committing the value (and pushing undo/redo, if an UndoStack is
+        // attached) is handled once, below, not per subclass - Property::
+        // set()'s type erasure means that part needs no per-type code.
+        virtual std::optional<std::any> parseValue(const std::string& text) const = 0;
+
+        // Parses text via parseValue(); if valid, commits it - through
+        // undoStack() if one is attached (undoable), or directly
+        // otherwise. Invalid text is a no-op either way.
+        void setValueFromString(const std::string& text);
+
         virtual std::vector<std::string> dropdownValues() const { return {}; }
         virtual void edit(newui::View* owner) {}  // EditStyle::Dialog
 
         const newui::reflection::Property* property() const { return property_; }
+
+        // Attaches the UndoStack setValueFromString() pushes through -
+        // nullptr (the default) means "commit directly, no undo", so a
+        // PropertyEditor stays usable with no undo infrastructure at all
+        // (testharness.exe, tests).
+        void setUndoStack(newui::UndoStack* undoStack) { undoStack_ = undoStack; }
+        newui::UndoStack* undoStack() const { return undoStack_; }
 
     protected:
         std::any rawValue() const { return property_->get(instance_); }
@@ -39,6 +60,7 @@ namespace CodeToolsVsix
 
         const newui::reflection::Property* property_;
         void* instance_;
+        newui::UndoStack* undoStack_ = nullptr;
     };
 
     // Generic editors - registered as the type-only wildcard fallback for
@@ -49,7 +71,7 @@ namespace CodeToolsVsix
         using PropertyEditor::PropertyEditor;
         EditStyle editStyle() const override { return EditStyle::Dropdown; }
         std::string valueAsString() const override;
-        void setValueFromString(const std::string& text) override;
+        std::optional<std::any> parseValue(const std::string& text) const override;
         std::vector<std::string> dropdownValues() const override { return { "false", "true" }; }
     };
 
@@ -58,7 +80,7 @@ namespace CodeToolsVsix
     public:
         using PropertyEditor::PropertyEditor;
         std::string valueAsString() const override;
-        void setValueFromString(const std::string& text) override;
+        std::optional<std::any> parseValue(const std::string& text) const override;
     };
 
     class FloatPropertyEditor : public PropertyEditor
@@ -66,7 +88,7 @@ namespace CodeToolsVsix
     public:
         using PropertyEditor::PropertyEditor;
         std::string valueAsString() const override;
-        void setValueFromString(const std::string& text) override;
+        std::optional<std::any> parseValue(const std::string& text) const override;
     };
 
     class StringPropertyEditor : public PropertyEditor
@@ -74,7 +96,7 @@ namespace CodeToolsVsix
     public:
         using PropertyEditor::PropertyEditor;
         std::string valueAsString() const override;
-        void setValueFromString(const std::string& text) override;
+        std::optional<std::any> parseValue(const std::string& text) const override;
     };
 
     // Keyed (propertyType, owningClass, propertyName) with wildcards

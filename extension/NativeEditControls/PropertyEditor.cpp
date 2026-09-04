@@ -19,15 +19,16 @@ namespace CodeToolsVsix
         return std::any_cast<bool>(rawValue()) ? "true" : "false";
     }
 
-    void BoolPropertyEditor::setValueFromString(const std::string& text)
+    std::optional<std::any> BoolPropertyEditor::parseValue(const std::string& text) const
     {
         std::string lower = toLower(text);
         if (lower == "true" || lower == "1" || lower == "yes") {
-            setRawValue(true);
-        } else if (lower == "false" || lower == "0" || lower == "no") {
-            setRawValue(false);
+            return std::any(true);
         }
-        // anything else: invalid, no-op - see PropertyEditor::setValueFromString's doc comment.
+        if (lower == "false" || lower == "0" || lower == "no") {
+            return std::any(false);
+        }
+        return std::nullopt;
     }
 
     std::string IntPropertyEditor::valueAsString() const
@@ -35,17 +36,18 @@ namespace CodeToolsVsix
         return std::to_string(std::any_cast<int>(rawValue()));
     }
 
-    void IntPropertyEditor::setValueFromString(const std::string& text)
+    std::optional<std::any> IntPropertyEditor::parseValue(const std::string& text) const
     {
         try {
             std::size_t consumed = 0;
             int value = std::stoi(text, &consumed);
             if (consumed == text.size()) {
-                setRawValue(value);
+                return std::any(value);
             }
         } catch (const std::exception&) {
-            // invalid text: no-op
+            // invalid text: falls through to nullopt below
         }
+        return std::nullopt;
     }
 
     std::string FloatPropertyEditor::valueAsString() const
@@ -53,17 +55,18 @@ namespace CodeToolsVsix
         return std::to_string(std::any_cast<float>(rawValue()));
     }
 
-    void FloatPropertyEditor::setValueFromString(const std::string& text)
+    std::optional<std::any> FloatPropertyEditor::parseValue(const std::string& text) const
     {
         try {
             std::size_t consumed = 0;
             float value = std::stof(text, &consumed);
             if (consumed == text.size()) {
-                setRawValue(value);
+                return std::any(value);
             }
         } catch (const std::exception&) {
-            // invalid text: no-op
+            // invalid text: falls through to nullopt below
         }
+        return std::nullopt;
     }
 
     std::string StringPropertyEditor::valueAsString() const
@@ -71,9 +74,33 @@ namespace CodeToolsVsix
         return std::any_cast<std::string>(rawValue());
     }
 
-    void StringPropertyEditor::setValueFromString(const std::string& text)
+    std::optional<std::any> StringPropertyEditor::parseValue(const std::string& text) const
     {
-        setRawValue(text);
+        return std::any(text);
+    }
+
+    void PropertyEditor::setValueFromString(const std::string& text)
+    {
+        std::optional<std::any> parsed = parseValue(text);
+        if (!parsed.has_value()) {
+            return;
+        }
+
+        if (undoStack_ == nullptr) {
+            setRawValue(*parsed);
+            return;
+        }
+
+        const newui::reflection::Property* property = property_;
+        void* instance = instance_;
+        std::any oldValue = rawValue();
+        std::any newValue = *parsed;
+
+        newui::UndoableAction action;
+        action.description = "Change " + property_->name();
+        action.doIt = [property, instance, newValue] { property->set(instance, newValue); };
+        action.undoIt = [property, instance, oldValue] { property->set(instance, oldValue); };
+        undoStack_->push(std::move(action));  // push() calls doIt() immediately
     }
 
     PropertyEditorRegistry& PropertyEditorRegistry::instance()
