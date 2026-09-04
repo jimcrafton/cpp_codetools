@@ -22,11 +22,21 @@ namespace CodeToolsVsix
 
         bool setupUI(newui::RootView* root);
 
-        // No document model yet - always returns true (there is nothing that can fail to load).
+        // filePath must be a real "<root>\Resources\<bundleName>.newui" -
+        // derives bundleName/root from it (see resolveBundleNameAndRoot(),
+        // DesignerEditor.cpp), points Bundle::instance() at root via
+        // setExecutableDirOverride() (this DLL is hosted inside devenv.exe,
+        // whose own exe dir has nothing to do with the user's project), then
+        // Bundle::loadRootView()s just the "rootView" node into this
+        // editor's own RootView. Returns false if the path isn't shaped
+        // that way, or for any of loadRootView()'s own failure reasons.
         bool load(const wchar_t* filePath, std::size_t filePathLength) override;
 
-        // No document model yet - always returns false, matching the "not implemented" theme of
-        // this placeholder rather than silently pretending a save succeeded.
+        // Write-side counterpart to load() - Bundle::writeRootView(),
+        // which preserves any other top-level keys (title, bounds,
+        // animations, ...) an existing Frame-shaped file already has;
+        // only "rootView" is replaced. Same path/root derivation and
+        // failure contract as load().
         bool save(const wchar_t* filePath, std::size_t filePathLength) override;
 
         bool execCommand(EditorCommand command, std::uint32_t flags, const EditorCommandArgs* args) override;
