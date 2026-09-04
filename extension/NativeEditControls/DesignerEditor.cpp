@@ -6,6 +6,7 @@
 #include <newui/layout.h>
 #include <newui/uicolormanager.h>
 #include <newui/bundle.h>
+#include <newui/viewbuilder.h>
 
 #include <utility>
 
@@ -106,10 +107,31 @@ namespace CodeToolsVsix
     {
         root->style().setBackgroundColor(newui::UIColorManager::colorFor(newui::UIColorRole::WindowBackground));
 
+        // View::isDesignTime() defers to the *owning RootView's* own flag
+        // once attached (rootView_ ? rootView_->isDesignTime() :
+        // Component::isDesignTime() - view.cpp) - setting it per-child
+        // (on FrameProxy/RootViewProxy specifically) would be silently
+        // ignored the moment they're addChild()'d into this tree, since
+        // View::isDesignTime() hides Component::isDesignTime() via name
+        // hiding rather than overriding it. Setting it once here, on the
+        // real hosting RootView, is what actually makes every attached
+        // descendant (Workspace's chrome and the design surface alike)
+        // report isDesignTime() == true for the whole life of this editor.
+        root->setDesignTime(true);
+
         auto rootLayout = std::make_unique<newui::FlexLayout>(newui::Orientation::Vertical);
         rootLayout->setSpacing(0.0f);
         rootLayout->setPadding(0.0f);
         root->setLayout(std::move(rootLayout));
+
+        // Workspace fills the whole pane - root itself is never the edited
+        // document (see this class's own header comment); load()/save()
+        // work against workspace_->rootViewProxy() instead.
+        newui::ViewBuilder<newui::RootView> rootBuilder(root);
+        rootBuilder.child<Workspace>([this](newui::ViewBuilder<Workspace>& workspace) {
+            workspace.layoutParams(std::make_unique<newui::FlexLayoutParams>(1.0f));
+            workspace_ = workspace.build();
+        });
 
         if (!this->rootViewOwned_) {
             if (!root->initialize())
@@ -125,10 +147,9 @@ namespace CodeToolsVsix
 
     bool DesignerEditor::load(const wchar_t* filePath, std::size_t filePathLength)
     {
-        newui::RootView* root = getRootView();
-        if (!root)
+        if (!workspace_)
         {
-            logToDebugOut(L"DesignerEditor::load: root view is null (construction must have failed)");
+            logToDebugOut(L"DesignerEditor::load: workspace is null (construction must have failed)");
             return false;
         }
 
@@ -142,7 +163,11 @@ namespace CodeToolsVsix
         }
 
         newui::Bundle::instance().setExecutableDirOverride(wideToUtf8(overrideRoot));
-        if (!newui::Bundle::instance().loadRootView(*root, bundleName))
+        // designMode left at its default (false) here - it only propagates
+        // Component::setDesignTime(true) onto freshly-constructed children,
+        // which View::isDesignTime() would ignore anyway once they're
+        // attached (see setupUI()'s own comment on root->setDesignTime()).
+        if (!newui::Bundle::instance().loadRootView(*workspace_->rootViewProxy(), bundleName))
         {
             logToDebugOut(L"DesignerEditor::load: Bundle::loadRootView failed");
             return false;
@@ -154,10 +179,9 @@ namespace CodeToolsVsix
 
     bool DesignerEditor::save(const wchar_t* filePath, std::size_t filePathLength)
     {
-        newui::RootView* root = getRootView();
-        if (!root)
+        if (!workspace_)
         {
-            logToDebugOut(L"DesignerEditor::save: root view is null (construction must have failed)");
+            logToDebugOut(L"DesignerEditor::save: workspace is null (construction must have failed)");
             return false;
         }
 
@@ -171,7 +195,7 @@ namespace CodeToolsVsix
         }
 
         newui::Bundle::instance().setExecutableDirOverride(wideToUtf8(overrideRoot));
-        if (!newui::Bundle::instance().writeRootView(*root, bundleName))
+        if (!newui::Bundle::instance().writeRootView(*workspace_->rootViewProxy(), bundleName, /*designMode=*/true))
         {
             logToDebugOut(L"DesignerEditor::save: Bundle::writeRootView failed");
             return false;

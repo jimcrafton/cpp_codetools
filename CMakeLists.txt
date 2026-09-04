@@ -184,6 +184,8 @@ add_library(NativeEditControls SHARED
     extension/NativeEditControls/PropertyEditor.cpp
     extension/NativeEditControls/ComponentEditor.h
     extension/NativeEditControls/ComponentEditor.cpp
+    extension/NativeEditControls/Workspace.h
+    extension/NativeEditControls/Workspace.cpp
 
 
     extension/NativeEditControls/NativeEditControlApi.cpp
@@ -226,6 +228,7 @@ add_executable(testharness
     extension/NativeEditControls/DesignerEditor.cpp
     extension/NativeEditControls/PropertyEditor.cpp
     extension/NativeEditControls/ComponentEditor.cpp
+    extension/NativeEditControls/Workspace.cpp
     extension/NativeEditControls/TextEncoding.cpp
     extension/NativeEditControls/Logging.cpp)
 

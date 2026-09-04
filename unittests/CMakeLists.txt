@@ -25,6 +25,7 @@ add_executable(nativeeditcontrols_tests
     test_property_editor.cpp
     test_component_editor.cpp
     test_designer_editor.cpp
+    test_workspace.cpp
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/PropertyEditor.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/ComponentEditor.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/DesignerEditor.cpp"
@@ -32,6 +33,7 @@ add_executable(nativeeditcontrols_tests
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/NativeEditor.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/TextEncoding.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/Logging.cpp"
+    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/Workspace.cpp"
 )
 
 target_compile_definitions(nativeeditcontrols_tests PRIVATE

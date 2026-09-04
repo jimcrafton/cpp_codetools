@@ -2,7 +2,9 @@
 
 #include <newui/bundle.h>
 #include <newui/frame.h>
+#include <newui/reflection.h>
 #include <newui/rootview.h>
+#include <newui/rootviewproxy.h>
 #include <newui/subview.h>
 
 #include <gtest/gtest.h>
@@ -49,6 +51,22 @@ namespace
     };
 }
 
+TEST_F(DesignerEditorFileFixture, ConstructionSetsDesignTimeOnTheHostingRootView)
+{
+    // View::isDesignTime() defers to the owning RootView's own flag once
+    // attached (view.cpp) - setupUI() sets this once on the real hosting
+    // RootView, which is what makes every attached descendant (Workspace's
+    // chrome and the design surface alike) report isDesignTime() == true.
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+
+    EXPECT_TRUE(view.isDesignTime());
+    ASSERT_NE(editor.workspace(), nullptr);
+    EXPECT_TRUE(editor.workspace()->isDesignTime());
+    ASSERT_NE(editor.workspace()->rootViewProxy(), nullptr);
+    EXPECT_TRUE(editor.workspace()->rootViewProxy()->isDesignTime());
+}
+
 TEST_F(DesignerEditorFileFixture, LoadFailsForAPathNotUnderAResourcesFolder)
 {
     newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
@@ -77,8 +95,16 @@ TEST_F(DesignerEditorFileFixture, LoadPopulatesTheRootViewFromARealFrameShapedFi
     std::wstring path = filePath();
     ASSERT_TRUE(editor.load(path.c_str(), path.size()));
 
+    // view itself now hosts only the Workspace chrome - the loaded
+    // document's own tree lives under workspace()->rootViewProxy() (see
+    // DesignerEditor's own header comment).
     ASSERT_EQ(view.childViews().size(), 1u);
-    EXPECT_EQ(view.childViews()[0]->name(), "probeChild");
+    EXPECT_EQ(view.childViews()[0], editor.workspace());
+
+    ASSERT_NE(editor.workspace()->rootViewProxy(), nullptr);
+    ASSERT_EQ(editor.workspace()->rootViewProxy()->childViews().size(), 1u);
+    EXPECT_EQ(editor.workspace()->rootViewProxy()->childViews()[0]->name(), "probeChild");
+    EXPECT_TRUE(editor.workspace()->rootViewProxy()->childViews()[0]->isDesignTime());
 }
 
 TEST_F(DesignerEditorFileFixture, SaveFailsForAPathNotUnderAResourcesFolder)
@@ -105,12 +131,15 @@ TEST_F(DesignerEditorFileFixture, SavePreservesTitleAndBoundsWhileReplacingRootV
     ASSERT_TRUE(newui::Bundle::instance().writeFrame(sourceFrame));
     newui::Bundle::instance().setExecutableDirOverride("");
 
-    // A DesignerEditor whose own RootView has different content entirely.
+    // A DesignerEditor whose own design surface (workspace()->
+    // rootViewProxy(), not its hosting RootView directly - see this test
+    // file's own LoadPopulatesTheRootViewFromARealFrameShapedFile) has
+    // different content entirely.
     newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
     CodeToolsVsix::DesignerEditor editor(&view);
     newui::SubView* newChild = new newui::SubView();
     newChild->setName("editedChild");
-    view.addChild(newChild);
+    editor.workspace()->rootViewProxy()->addChild(newChild);
 
     std::wstring path = filePath();
     ASSERT_TRUE(editor.save(path.c_str(), path.size()));
