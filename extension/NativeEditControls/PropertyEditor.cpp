@@ -79,6 +79,20 @@ namespace CodeToolsVsix
         return std::any(text);
     }
 
+    std::string ColorPropertyEditor::valueAsString() const
+    {
+        return std::any_cast<newui::Color>(rawValue()).toString();
+    }
+
+    std::optional<std::any> ColorPropertyEditor::parseValue(const std::string& text) const
+    {
+        newui::Color color;
+        if (newui::Color::fromString(text, color)) {
+            return std::any(color);
+        }
+        return std::nullopt;
+    }
+
     void PropertyEditor::setValueFromString(const std::string& text)
     {
         std::optional<std::any> parsed = parseValue(text);
@@ -116,11 +130,23 @@ namespace CodeToolsVsix
         entries_.push_back(Entry{ propertyType, owningClass, propertyName, std::move(factory) });
     }
 
+    void PropertyEditorRegistry::registerEditor(const std::string& tag, Factory factory)
+    {
+        tagEntries_[tag] = std::move(factory);
+    }
+
     std::unique_ptr<PropertyEditor> PropertyEditorRegistry::createEditor(
         const newui::reflection::Property* property,
         const newui::reflection::Class* owningClass,
         void* instance) const
     {
+        for (const std::string& tag : property->tags()) {
+            auto it = tagEntries_.find(tag);
+            if (it != tagEntries_.end()) {
+                return it->second(property, instance);
+            }
+        }
+
         const Entry* best = nullptr;
         int bestScore = -1;
 
@@ -158,5 +184,7 @@ namespace CodeToolsVsix
             [](const newui::reflection::Property* p, void* instance) { return std::make_unique<FloatPropertyEditor>(p, instance); });
         registerEditor(std::type_index(typeid(std::string)),
             [](const newui::reflection::Property* p, void* instance) { return std::make_unique<StringPropertyEditor>(p, instance); });
+        registerEditor(std::type_index(typeid(newui::Color)),
+            [](const newui::reflection::Property* p, void* instance) { return std::make_unique<ColorPropertyEditor>(p, instance); });
     }
 }

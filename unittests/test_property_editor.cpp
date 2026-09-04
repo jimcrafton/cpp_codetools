@@ -19,6 +19,8 @@ namespace
         float opacity = 0.0f;
         std::string label;
         std::vector<int> tags;  // no editor type registered for this - see UnregisteredTypeReturnsNullptr
+        newui::Color tint;
+        std::string iconPath;  // tagged "filepath" - see TagRegistrationWinsOverTheTypeWildcard
 
         bool isEnabled() const { return enabled; }
         void setEnabled(bool v) { enabled = v; }
@@ -30,6 +32,10 @@ namespace
         void setLabel(std::string v) { label = std::move(v); }
         std::vector<int> getTags() const { return tags; }
         void setTags(std::vector<int> v) { tags = std::move(v); }
+        newui::Color getTint() const { return tint; }
+        void setTint(newui::Color v) { tint = v; }
+        std::string getIconPath() const { return iconPath; }
+        void setIconPath(std::string v) { iconPath = std::move(v); }
     };
 
     const Class* registerWidgetOnce()
@@ -41,7 +47,9 @@ namespace
                 .property("count", Scope::Public, &Widget::getCount, &Widget::setCount)
                 .property("opacity", Scope::Public, &Widget::getOpacity, &Widget::setOpacity)
                 .property("label", Scope::Public, &Widget::getLabel, &Widget::setLabel)
-                .property("tags", Scope::Public, &Widget::getTags, &Widget::setTags);
+                .property("tags", Scope::Public, &Widget::getTags, &Widget::setTags)
+                .property("tint", Scope::Public, &Widget::getTint, &Widget::setTint)
+                .property("iconPath", Scope::Public, &Widget::getIconPath, &Widget::setIconPath, {"filepath"});
             ReflectionRegistry::registerClass(builder);
             return classinfo(typeid(Widget));
         }();
@@ -128,6 +136,96 @@ TEST_F(PropertyEditorTest, StringEditorRoundTripsThroughTheRealProperty)
     editor->setValueFromString("hello");
     EXPECT_EQ(widget_.label, "hello");
     EXPECT_EQ(editor->valueAsString(), "hello");
+}
+
+TEST_F(PropertyEditorTest, ColorEditorRoundTripsThroughTheRealProperty)
+{
+    const Property* prop = findProperty(widgetClass_, "tint");
+    auto editor = CodeToolsVsix::PropertyEditorRegistry::instance().createEditor(prop, widgetClass_, &widget_);
+    ASSERT_NE(editor, nullptr);
+
+    editor->setValueFromString("#ff8800");
+    EXPECT_EQ(editor->valueAsString(), "#ff8800ff");
+
+    uint8_t rgb[3];
+    widget_.tint.toRGB24(rgb);
+    EXPECT_EQ(rgb[0], 0xff);
+    EXPECT_EQ(rgb[1], 0x88);
+    EXPECT_EQ(rgb[2], 0x00);
+}
+
+TEST_F(PropertyEditorTest, ColorEditorInvalidTextIsANoOp)
+{
+    const Property* prop = findProperty(widgetClass_, "tint");
+    auto editor = CodeToolsVsix::PropertyEditorRegistry::instance().createEditor(prop, widgetClass_, &widget_);
+
+    widget_.tint = newui::Color(1.0f, 0.0f, 0.0f);
+    editor->setValueFromString("not a color");
+    EXPECT_EQ(editor->valueAsString(), "#ff0000ff");
+}
+
+TEST_F(PropertyEditorTest, ColorEditorAcceptsANamedColorToo)
+{
+    const Property* prop = findProperty(widgetClass_, "tint");
+    auto editor = CodeToolsVsix::PropertyEditorRegistry::instance().createEditor(prop, widgetClass_, &widget_);
+
+    editor->setValueFromString("cornflowerblue");
+    uint8_t rgb[3];
+    widget_.tint.toRGB24(rgb);
+    EXPECT_EQ(rgb[0], 0x64);
+    EXPECT_EQ(rgb[1], 0x95);
+    EXPECT_EQ(rgb[2], 0xed);
+}
+
+namespace
+{
+    // Minimal editor just to prove tag dispatch picked a *different* class
+    // than the std::string wildcard (StringPropertyEditor) would.
+    class MarkerPathEditor : public CodeToolsVsix::PropertyEditor
+    {
+    public:
+        using CodeToolsVsix::PropertyEditor::PropertyEditor;
+        std::string valueAsString() const override { return "marker:" + std::any_cast<std::string>(rawValue()); }
+        std::optional<std::any> parseValue(const std::string& text) const override { return std::any(text); }
+    };
+}
+
+TEST_F(PropertyEditorTest, TagRegistrationWinsOverTheTypeWildcard)
+{
+    const Property* prop = findProperty(widgetClass_, "iconPath");
+    ASSERT_NE(prop, nullptr);
+    EXPECT_EQ(prop->tags(), (std::vector<std::string>{"filepath"}));
+
+    CodeToolsVsix::PropertyEditorRegistry registry;  // local, not instance() - same isolation lesson
+    registry.registerBuiltinEditors();
+    registry.registerEditor("filepath",
+        [](const Property* p, void* instance) { return std::make_unique<MarkerPathEditor>(p, instance); });
+
+    auto editor = registry.createEditor(prop, widgetClass_, &widget_);
+    ASSERT_NE(editor, nullptr);
+
+    widget_.iconPath = "icons/x.png";
+    EXPECT_EQ(editor->valueAsString(), "marker:icons/x.png");
+}
+
+TEST_F(PropertyEditorTest, UntaggedPropertyStillFallsThroughToTheTypeWildcard)
+{
+    // "label" has no tags at all - a registry that only knows the
+    // "filepath" tag must still resolve it via the ordinary std::string
+    // wildcard, not fail or pick the tagged editor by mistake.
+    const Property* prop = findProperty(widgetClass_, "label");
+    ASSERT_TRUE(prop->tags().empty());
+
+    CodeToolsVsix::PropertyEditorRegistry registry;
+    registry.registerBuiltinEditors();
+    registry.registerEditor("filepath",
+        [](const Property* p, void* instance) { return std::make_unique<MarkerPathEditor>(p, instance); });
+
+    auto editor = registry.createEditor(prop, widgetClass_, &widget_);
+    ASSERT_NE(editor, nullptr);
+
+    widget_.label = "hello";
+    EXPECT_EQ(editor->valueAsString(), "hello");  // plain StringPropertyEditor, not "marker:hello"
 }
 
 TEST_F(PropertyEditorTest, NarrowerClassAndNameSpecificRegistrationWinsOverTheWildcard)

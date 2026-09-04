@@ -6,8 +6,10 @@
 #include <optional>
 #include <string>
 #include <typeindex>
+#include <unordered_map>
 #include <vector>
 
+#include <newui/color.h>
 #include <newui/reflection.h>
 #include <newui/undostack.h>
 #include <newui/view.h>
@@ -99,6 +101,18 @@ namespace CodeToolsVsix
         std::optional<std::any> parseValue(const std::string& text) const override;
     };
 
+    // Text edit only for now (EditStyle::None, the base default) - reuses
+    // newui::Color::toString()/fromString() (CSS-style hex) directly
+    // rather than inventing another format. A real picker (EditStyle::
+    // Dialog) is a future increment, not built here.
+    class ColorPropertyEditor : public PropertyEditor
+    {
+    public:
+        using PropertyEditor::PropertyEditor;
+        std::string valueAsString() const override;
+        std::optional<std::any> parseValue(const std::string& text) const override;
+    };
+
     // Keyed (propertyType, owningClass, propertyName) with wildcards
     // (nullptr class / empty name) - narrowest match wins, same 3-key shape
     // as Delphi's RegisterPropertyEditor. Generic editors register at the
@@ -115,14 +129,26 @@ namespace CodeToolsVsix
                              const newui::reflection::Class* owningClass = nullptr,
                              const std::string& propertyName = std::string());
 
-        // nullptr if nothing registered matches propertyType at all, even
-        // the wildcard form - caller falls back to read-only display.
+        // Keyed on one of a property's tags() (see reflection.h's
+        // "@reflect tags=..." support) - checked before propertyType, so
+        // e.g. a plain std::string property tagged "filepath" resolves to
+        // a real file-picker editor instead of the generic
+        // StringPropertyEditor wildcard, without the two ever colliding
+        // (the tag is what distinguishes them, not the C++ type, which is
+        // identical for both). A property with multiple tags checks them
+        // in tags() order, first registered match wins.
+        void registerEditor(const std::string& tag, Factory factory);
+
+        // Tag match (if property has any tags and one is registered)
+        // wins over the propertyType-based lookup; nullptr if neither
+        // finds anything, even the type-only wildcard - caller falls back
+        // to read-only display.
         std::unique_ptr<PropertyEditor> createEditor(const newui::reflection::Property* property,
                                                        const newui::reflection::Class* owningClass,
                                                        void* instance) const;
 
-        // bool/int/float/std::string wildcard editors - called once by
-        // whoever owns instance() at startup.
+        // bool/int/float/std::string/Color wildcard editors - called once
+        // by whoever owns instance() at startup.
         void registerBuiltinEditors();
 
     private:
@@ -135,5 +161,6 @@ namespace CodeToolsVsix
         };
 
         std::vector<Entry> entries_;
+        std::unordered_map<std::string, Factory> tagEntries_;
     };
 }
