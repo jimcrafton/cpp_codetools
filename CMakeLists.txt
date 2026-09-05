@@ -190,6 +190,10 @@ add_library(NativeEditControls SHARED
     extension/NativeEditControls/Toolbox.cpp
     extension/NativeEditControls/Workspace.h
     extension/NativeEditControls/Workspace.cpp
+    extension/NativeEditControls/CanvasWell.h
+    extension/NativeEditControls/CanvasWell.cpp
+    extension/NativeEditControls/SelectionOverlay.h
+    extension/NativeEditControls/SelectionOverlay.cpp
 
 
     extension/NativeEditControls/NativeEditControlApi.cpp
@@ -235,6 +239,8 @@ add_executable(testharness
     extension/NativeEditControls/ToolboxRegistry.cpp
     extension/NativeEditControls/Toolbox.cpp
     extension/NativeEditControls/Workspace.cpp
+    extension/NativeEditControls/CanvasWell.cpp
+    extension/NativeEditControls/SelectionOverlay.cpp
     extension/NativeEditControls/TextEncoding.cpp
     extension/NativeEditControls/Logging.cpp)
 

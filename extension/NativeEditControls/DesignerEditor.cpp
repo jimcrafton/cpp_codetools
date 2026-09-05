@@ -3,10 +3,13 @@
 #include "TextEncoding.h"
 
 #include <newui/rootview.h>
+#include <newui/rootviewproxy.h>
 #include <newui/layout.h>
 #include <newui/uicolormanager.h>
 #include <newui/bundle.h>
+#include <newui/frame.h>
 #include <newui/viewbuilder.h>
+#include <newui/keyboard_constants.h>
 
 #include <utility>
 
@@ -129,6 +132,22 @@ namespace CodeToolsVsix
         workspace_ = workspaceBuilder.build();
         rootBuilder.child(workspace_);
 
+        // Selection + handles (designer-plan.md 6.1 item 3) - root owns the
+        // overlay (Overlay isn't a SubView, see overlay.h), painted last on
+        // top of the whole pane every repaint. root->onMouseDown fires
+        // unconditionally for every mouse down anywhere in the pane (unlike
+        // a hit-tested child's own onMouseDown - RootView::mouseDown(),
+        // rootview.cpp), which is what lets handleMouseDownForSelection()
+        // below check "is this click inside the design surface at all"
+        // before hit-testing into it - a handler attached to rootViewProxy_
+        // itself would never fire for a click that lands on one of its own
+        // children instead (hitTestChildren() always dispatches to the
+        // deepest hit target, not its ancestors).
+        auto selectionOverlay = std::make_unique<SelectionOverlay>();
+        selectionOverlay_ = selectionOverlay.get();
+        root->setOverlay(std::move(selectionOverlay));
+        root->onMouseDown.add(this, &DesignerEditor::handleMouseDownForSelection);
+
         if (!this->rootViewOwned_) {
             if (!root->initialize())
             {
@@ -153,6 +172,41 @@ namespace CodeToolsVsix
         // press style().markDirty()) happened to touch it.
         root->markDirty();
         return true;
+    }
+
+    newui::SyncReturn DesignerEditor::handleMouseDownForSelection(newui::View& /*sender*/, const newui::Point& pt,
+        std::uint32_t /*btnMask*/, std::uint32_t keyMask)
+    {
+        newui::RootViewProxy* surface = workspace_ ? workspace_->rootViewProxy() : nullptr;
+        if (surface == nullptr || !surface->isVisible()) {
+            return newui::SyncReturn::Ignored;
+        }
+
+        // pt is already root-local (same space RootView::mouseDown() passes
+        // to onMouseDown), matching what boundsInRootView() computes -
+        // outside the design surface entirely (a click on the Toolbox/
+        // Properties/animation dock chrome) leaves the current selection
+        // untouched.
+        newui::Rect surfaceBounds = SelectionOverlay::boundsInRootView(surface);
+        if (!surfaceBounds.contains(pt)) {
+            return newui::SyncReturn::Ignored;
+        }
+
+        newui::Point localPt(pt.x - surfaceBounds.left(), pt.y - surfaceBounds.top());
+        newui::Point unused;
+        newui::SubView* target = surface->hitTestChildren(localPt, unused);
+
+        if ((keyMask & newui::kmCtrl) != 0) {
+            selectionOverlay_->toggleSelection(target);
+        } else {
+            selectionOverlay_->selectExclusive(target);
+        }
+
+        // Same reasoning as setupUI()'s/load()'s own markDirty() calls -
+        // nothing else asks Windows to repaint just because the overlay's
+        // own selection state changed.
+        getRootView()->markDirty();
+        return newui::SyncReturn::Ignored;
     }
 
     bool DesignerEditor::load(const wchar_t* filePath, std::size_t filePathLength)
@@ -185,6 +239,52 @@ namespace CodeToolsVsix
             logToDebugOut(L"DesignerEditor::load: Bundle::loadRootView failed");
             return false;
         }
+
+        // A real top-level RootView's own saved "bounds" is its own OS
+        // window's size - meaningless once rootViewProxy_ is a managed
+        // AnchorLayout child of frameProxy_ instead, but loadRootView()
+        // just read it as an ordinary property and called setBounds() with
+        // it regardless (rootViewProxy_'s bounds are no different from any
+        // other View property to the reflection read path). SubView::
+        // setBounds() only ever re-arranges *its own* children via
+        // updateLayout() (subview.cpp) - it never asks its own parent to
+        // re-verify its position, the same one-directional mechanism
+        // Splitter's own resize cascade relies on, just never in reverse -
+        // so nothing corrects this on its own. frameProxy_'s own
+        // AnchorLayout is what actually owns rootViewProxy_'s real
+        // position/size (its AnchorLayoutParams, set up in Workspace's
+        // constructor); re-running it here reasserts that, overriding
+        // whatever bogus size the file's own bounds happened to contain.
+        workspace_->frameProxy()->updateLayout();
+
+        // The file's own top-level "title" is a Frame property, a sibling
+        // of "rootView" (see writeRootView()'s own comment) - not something
+        // loadRootView() above ever touches. Bundle has no lighter-weight
+        // way to read just that one property, so this uses loadFrame() on
+        // a throwaway, never-initialize()'d Frame purely to read its
+        // title() back out; scratchFrame (and whatever rootView tree
+        // loadFrame() reconstructs onto it, which this never touches) goes
+        // out of scope right after. A failed load here just leaves
+        // frameProxy_'s title unset - not fatal to the real rootView load
+        // above, which already succeeded.
+        newui::Frame scratchFrame;
+        scratchFrame.setName(bundleName);
+        if (newui::Bundle::instance().loadFrame(scratchFrame))
+        {
+            workspace_->frameProxy()->setTitle(scratchFrame.getTitle());
+        }
+
+        // A real top-level RootView's own "visible" flag is never actually
+        // exercised (a real OS window's visibility is controlled by
+        // ShowWindow, not this field), so it's commonly saved as false -
+        // loadRootView() just faithfully applied that onto rootViewProxy_,
+        // undoing Workspace's own constructor setVisible(true) call.
+        // RootViewProxy is an ordinary child in this pane's paint tree
+        // (unlike a real RootView), so an invisible one means
+        // paintChildren() skips its whole loaded subtree. Re-assert it here
+        // rather than in Bundle::loadRootView() itself, since this is only
+        // meaningful for a target standing in for a real top-level window.
+        workspace_->rootViewProxy()->setVisible(true);
 
         // Same reasoning as setupUI()'s own markDirty() call - loadRootView()
         // just repopulated rootViewProxy()'s children in place, and nothing

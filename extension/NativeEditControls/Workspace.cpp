@@ -60,7 +60,15 @@ namespace CodeToolsVsix
                           | newui::Anchor::Right | newui::Anchor::Bottom;
                 p.topMargin = newui::FrameProxy::kTitleBarHeight;
             })
-            .configure([](newui::RootViewProxy& v) { v.setDesignTime(true); });
+            .configure([](newui::RootViewProxy& v) {
+                v.setDesignTime(true);
+                // Matches FrameProxy's own body radius - see
+                // RootViewProxy::setCornerRadius()'s own comment for why
+                // this is needed at all (its square background fill would
+                // otherwise overwrite the FrameProxy body's already-
+                // rounded bottom corners, since it paints after them).
+                v.setCornerRadius(newui::FrameProxy::kCornerRadius);
+            });
         rootViewProxy_ = rootViewProxyBuilder.build();
 
         newui::ViewBuilder<newui::FrameProxy> frameBuilder;
@@ -83,19 +91,21 @@ namespace CodeToolsVsix
         frameBuilder.child(rootViewProxy_);
         frameProxy_ = frameBuilder.build();
 
-        // canvasWell_: the darker "pasteboard" frameProxy_ sits centered
-        // in - a bespoke app color, not a real Windows system color (no
-        // uxtheme concept maps to "design canvas background"), so a
-        // literal Color here rather than routing through UIColorManager
-        // (whose whole job is querying/inverting *real* system theme
-        // colors - inventing a new role for this would mean fabricating a
-        // "system" value that was never one to begin with).
-        newui::ViewBuilder<newui::SubView> canvasWellBuilder;
+        // canvasWell_: the "pasteboard" frameProxy_ sits centered in - a
+        // bespoke app color, not a real Windows system color (no uxtheme
+        // concept maps to "design canvas background"), so a literal Color
+        // here rather than routing through UIColorManager (whose whole job
+        // is querying/inverting *real* system theme colors - inventing a
+        // new role for this would mean fabricating a "system" value that
+        // was never one to begin with). Lightened from the original
+        // 0x2B2B2B - FrameProxy's own drop shadow (default color: black at
+        // 0.6 alpha) barely registered against that near-black backdrop.
+        newui::ViewBuilder<CanvasWell> canvasWellBuilder;
         canvasWellBuilder.name("workspaceCanvasWell")
             .visible(true)
             .layout<newui::AnchorLayout>()
             .style<newui::ViewStyle>([](newui::ViewStyle& style) {
-                style.setBackgroundColor(newui::Color(0x2B2B2Bu, false));
+                style.setBackgroundColor(newui::Color(0x4A4A4Au, false));
             });
         canvasWellBuilder.child(frameProxy_);
         canvasWell_ = canvasWellBuilder.build();

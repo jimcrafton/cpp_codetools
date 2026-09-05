@@ -4,6 +4,7 @@
 #include <cstdint>
 
 #include "NativeEditor.h"
+#include "SelectionOverlay.h"
 #include "Workspace.h"
 
 namespace CodeToolsVsix
@@ -32,6 +33,12 @@ namespace CodeToolsVsix
         // RootViewProxy pair for future panel wiring, and for tests.
         Workspace* workspace() const { return workspace_; }
 
+        // Non-owning - selectionOverlay_ is owned by root itself (root->
+        // setOverlay() in setupUI()), freed when root is. The Document
+        // Outline/Properties panels (designer-plan.md 6.1 items 4/5, not
+        // built yet) read the current selection from here once they exist.
+        SelectionOverlay* selectionOverlay() const { return selectionOverlay_; }
+
         // filePath must be a real "<root>\Resources\<bundleName>.newui" -
         // derives bundleName/root from it (see resolveBundleNameAndRoot(),
         // DesignerEditor.cpp), points Bundle::instance() at root via
@@ -59,6 +66,17 @@ namespace CodeToolsVsix
         bool execCommand(EditorCommand command, std::uint32_t flags, const EditorCommandArgs* args) override;
 
     private:
+        // Selection + handles (designer-plan.md 6.1 item 3) - hooked onto
+        // root's own onMouseDown (fires unconditionally for every mouse
+        // down, unlike a hit-tested child's onMouseDown - see
+        // RootView::mouseDown(), rootview.cpp) so a click anywhere in the
+        // pane can be checked against the design surface's own bounds and,
+        // if inside, hit-tested against its real children. See
+        // DesignerEditor.cpp for the full reasoning.
+        newui::SyncReturn handleMouseDownForSelection(newui::View& sender, const newui::Point& pt,
+            std::uint32_t btnMask, std::uint32_t keyMask);
+
         Workspace* workspace_ = nullptr;
+        SelectionOverlay* selectionOverlay_ = nullptr;
     };
 }

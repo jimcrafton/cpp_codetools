@@ -28,6 +28,7 @@ add_executable(nativeeditcontrols_tests
     test_workspace.cpp
     test_toolbox_registry.cpp
     test_toolbox.cpp
+    test_selection_overlay.cpp
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/PropertyEditor.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/ComponentEditor.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/ToolboxRegistry.cpp"
@@ -38,6 +39,8 @@ add_executable(nativeeditcontrols_tests
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/TextEncoding.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/Logging.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/Workspace.cpp"
+    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/CanvasWell.cpp"
+    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/SelectionOverlay.cpp"
 )
 
 target_compile_definitions(nativeeditcontrols_tests PRIVATE

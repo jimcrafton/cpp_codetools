@@ -1,8 +1,11 @@
 #include "../extension/NativeEditControls/DesignerEditor.h"
 
 #include <newui/bundle.h>
+#include <newui/controls.h>
 #include <newui/frame.h>
+#include <newui/keyboard_constants.h>
 #include <newui/layout.h>
+#include <newui/mouse_constants.h>
 #include <newui/reflection.h>
 #include <newui/rootview.h>
 #include <newui/rootviewproxy.h>
@@ -125,6 +128,103 @@ TEST_F(DesignerEditorFileFixture, WorkspaceGetsRealBoundsWhenAddedAlongsideAPree
     ASSERT_NE(editor.workspace()->frameProxy(), nullptr);
     EXPECT_GT(editor.workspace()->frameProxy()->bounds().size().width, 150.0f);
     EXPECT_GT(editor.workspace()->frameProxy()->bounds().size().height, 150.0f);
+}
+
+TEST_F(DesignerEditorFileFixture, ClickInsideTheDesignSurfaceSelectsTheHitChild)
+{
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&root);
+    ASSERT_NE(editor.workspace(), nullptr);
+    // Forces a real Splitter/FlexLayout arrange pass, same as
+    // WorkspaceGetsRealBoundsWhenAddedAlongsideAPreexistingSiblingThenResized
+    // above - without this the whole tree stays at its tiny 10x10
+    // construction-time bounds and nothing has a real on-screen position.
+    root.setBounds(newui::Rect(0, 0, 1000, 700));
+
+    newui::RootViewProxy* surface = editor.workspace()->rootViewProxy();
+    ASSERT_NE(surface, nullptr);
+
+    auto* control = new newui::SubView();
+    control->setName("probeControl");
+    control->setVisible(true);
+    control->setBounds(newui::Rect(10, 10, 40, 20));
+    surface->addChild(control);
+
+    ASSERT_NE(editor.selectionOverlay(), nullptr);
+    EXPECT_EQ(editor.selectionOverlay()->primary(), nullptr);
+
+    newui::Rect surfaceBounds = CodeToolsVsix::SelectionOverlay::boundsInRootView(surface);
+    newui::Point insideControl(surfaceBounds.left() + 20.0f, surfaceBounds.top() + 15.0f);
+    root.onMouseDown(root, insideControl, newui::mbmLeftButton, newui::kmUndefined);
+
+    EXPECT_EQ(editor.selectionOverlay()->primary(), control);
+
+    // A subsequent click on empty design-surface space (past the control's
+    // own 40x20 bounds, still inside the surface itself) clears it again.
+    newui::Point emptyCanvas(surfaceBounds.left() + 300.0f, surfaceBounds.top() + 300.0f);
+    root.onMouseDown(root, emptyCanvas, newui::mbmLeftButton, newui::kmUndefined);
+
+    EXPECT_EQ(editor.selectionOverlay()->primary(), nullptr);
+}
+
+TEST_F(DesignerEditorFileFixture, CtrlClickAddsASecondControlToTheSelection)
+{
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&root);
+    ASSERT_NE(editor.workspace(), nullptr);
+    root.setBounds(newui::Rect(0, 0, 1000, 700));
+
+    newui::RootViewProxy* surface = editor.workspace()->rootViewProxy();
+    ASSERT_NE(surface, nullptr);
+
+    auto* first = new newui::SubView();
+    first->setName("first");
+    first->setVisible(true);
+    first->setBounds(newui::Rect(10, 10, 40, 20));
+    surface->addChild(first);
+
+    auto* second = new newui::SubView();
+    second->setName("second");
+    second->setVisible(true);
+    second->setBounds(newui::Rect(10, 40, 40, 20));
+    surface->addChild(second);
+
+    newui::Rect surfaceBounds = CodeToolsVsix::SelectionOverlay::boundsInRootView(surface);
+    root.onMouseDown(root, newui::Point(surfaceBounds.left() + 20.0f, surfaceBounds.top() + 15.0f),
+        newui::mbmLeftButton, newui::kmUndefined);
+    root.onMouseDown(root, newui::Point(surfaceBounds.left() + 20.0f, surfaceBounds.top() + 45.0f),
+        newui::mbmLeftButton, newui::kmCtrl);
+
+    ASSERT_EQ(editor.selectionOverlay()->selected().size(), 2u);
+    EXPECT_TRUE(editor.selectionOverlay()->isSelected(first));
+    EXPECT_TRUE(editor.selectionOverlay()->isSelected(second));
+    EXPECT_EQ(editor.selectionOverlay()->primary(), second);
+}
+
+TEST_F(DesignerEditorFileFixture, ClickOutsideTheDesignSurfaceLeavesSelectionUntouched)
+{
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&root);
+    ASSERT_NE(editor.workspace(), nullptr);
+    root.setBounds(newui::Rect(0, 0, 1000, 700));
+
+    newui::RootViewProxy* surface = editor.workspace()->rootViewProxy();
+    ASSERT_NE(surface, nullptr);
+    auto* control = new newui::SubView();
+    control->setName("probeControl");
+    control->setVisible(true);
+    control->setBounds(newui::Rect(10, 10, 40, 20));
+    surface->addChild(control);
+
+    newui::Rect surfaceBounds = CodeToolsVsix::SelectionOverlay::boundsInRootView(surface);
+    root.onMouseDown(root, newui::Point(surfaceBounds.left() + 20.0f, surfaceBounds.top() + 15.0f),
+        newui::mbmLeftButton, newui::kmUndefined);
+    ASSERT_EQ(editor.selectionOverlay()->primary(), control);
+
+    // A click on the Toolbox pane (well to the left of the design surface,
+    // still inside the pane) doesn't touch the existing selection.
+    root.onMouseDown(root, newui::Point(5.0f, 5.0f), newui::mbmLeftButton, newui::kmUndefined);
+    EXPECT_EQ(editor.selectionOverlay()->primary(), control);
 }
 
 TEST_F(DesignerEditorFileFixture, LoadFailsForAPathNotUnderAResourcesFolder)
