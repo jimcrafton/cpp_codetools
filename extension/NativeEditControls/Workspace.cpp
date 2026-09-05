@@ -47,13 +47,20 @@ namespace CodeToolsVsix
         styleAsPane(topBuilder, newui::UIColorRole::ControlBackground);
         topBar_ = topBuilder.build();
 
+        // isDesignTime() no longer defers to an owning RootView's flag
+        // (view.cpp - a View reports only its own explicitly-set flag) -
+        // set directly here rather than once on the hosting RootView the
+        // way an earlier version did, which had made all of Workspace's
+        // own permanent chrome (this toolbox/properties pane included)
+        // report design-time too, with no way to tell them apart.
         newui::ViewBuilder<newui::RootViewProxy> rootViewProxyBuilder;
         rootViewProxyBuilder.name("workspaceRootViewProxy")
             .layoutParams<newui::AnchorLayoutParams>([](newui::AnchorLayoutParams& p) {
                 p.anchors = newui::Anchor::Left | newui::Anchor::Top
                           | newui::Anchor::Right | newui::Anchor::Bottom;
                 p.topMargin = newui::FrameProxy::kTitleBarHeight;
-            });
+            })
+            .configure([](newui::RootViewProxy& v) { v.setDesignTime(true); });
         rootViewProxy_ = rootViewProxyBuilder.build();
 
         newui::ViewBuilder<newui::FrameProxy> frameBuilder;
@@ -71,7 +78,8 @@ namespace CodeToolsVsix
                 p.anchors = newui::Anchor::CenterX | newui::Anchor::CenterY;
                 p.width = Workspace::kDefaultCanvasWidth;
                 p.height = Workspace::kDefaultCanvasHeight;
-            });
+            })
+            .configure([](newui::FrameProxy& f) { f.setDesignTime(true); });
         frameBuilder.child(rootViewProxy_);
         frameProxy_ = frameBuilder.build();
 
@@ -123,6 +131,12 @@ namespace CodeToolsVsix
         toolboxBuilder.name("workspaceToolboxPane")
             .configure([this](Toolbox& toolbox) {
                 toolbox.onEntryActivated.add([this](Toolbox&, newui::SubView* created) {
+                    // isDesignTime() no longer propagates from an owning
+                    // RootView (view.cpp) - a freshly-created control the
+                    // designer itself adds needs its own flag set
+                    // explicitly, right here, same as rootViewProxy_/
+                    // frameProxy_ are above.
+                    created->setDesignTime(true);
                     rootViewProxy_->addChild(created);
                     return newui::SyncReturn::Handled;
                 });

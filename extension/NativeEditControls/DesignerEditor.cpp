@@ -107,17 +107,13 @@ namespace CodeToolsVsix
     {
         root->style().setBackgroundColor(newui::UIColorManager::colorFor(newui::UIColorRole::WindowBackground));
 
-        // View::isDesignTime() defers to the *owning RootView's* own flag
-        // once attached (rootView_ ? rootView_->isDesignTime() :
-        // Component::isDesignTime() - view.cpp) - setting it per-child
-        // (on FrameProxy/RootViewProxy specifically) would be silently
-        // ignored the moment they're addChild()'d into this tree, since
-        // View::isDesignTime() hides Component::isDesignTime() via name
-        // hiding rather than overriding it. Setting it once here, on the
-        // real hosting RootView, is what actually makes every attached
-        // descendant (Workspace's chrome and the design surface alike)
-        // report isDesignTime() == true for the whole life of this editor.
-        root->setDesignTime(true);
+        // root itself is never marked design-time - it's just this
+        // editor's own hosting pane, not part of the edited document.
+        // isDesignTime() no longer propagates from an owning RootView
+        // (view.cpp) - Workspace's own constructor sets it explicitly on
+        // exactly the pieces that need it (frameProxy_/rootViewProxy_),
+        // and load() below does too for whatever gets read into
+        // rootViewProxy_ - see each of those for why.
 
         // Workspace fills the whole pane - root itself is never the edited
         // document (see this class's own header comment); load()/save()
@@ -177,11 +173,14 @@ namespace CodeToolsVsix
         }
 
         newui::Bundle::instance().setExecutableDirOverride(wideToUtf8(overrideRoot));
-        // designMode left at its default (false) here - it only propagates
-        // Component::setDesignTime(true) onto freshly-constructed children,
-        // which View::isDesignTime() would ignore anyway once they're
-        // attached (see setupUI()'s own comment on root->setDesignTime()).
-        if (!newui::Bundle::instance().loadRootView(*workspace_->rootViewProxy(), bundleName))
+        // designMode=true - propagates Component::setDesignTime(true) onto
+        // every freshly-constructed child read from the file (reflection.h's
+        // TypedClass<T>::read(), recurses through the whole loaded tree).
+        // Genuinely meaningful now that isDesignTime() no longer defers to
+        // an owning RootView's flag (view.cpp) - an earlier version left
+        // this at the default false since the propagation was moot either
+        // way back then.
+        if (!newui::Bundle::instance().loadRootView(*workspace_->rootViewProxy(), bundleName, /*designMode=*/true))
         {
             logToDebugOut(L"DesignerEditor::load: Bundle::loadRootView failed");
             return false;

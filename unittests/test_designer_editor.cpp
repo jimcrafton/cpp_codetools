@@ -53,18 +53,24 @@ namespace
     };
 }
 
-TEST_F(DesignerEditorFileFixture, ConstructionSetsDesignTimeOnTheHostingRootView)
+TEST_F(DesignerEditorFileFixture, ConstructionSetsDesignTimeOnlyOnTheDesignSurfaceNotTheHostingChrome)
 {
-    // View::isDesignTime() defers to the owning RootView's own flag once
-    // attached (view.cpp) - setupUI() sets this once on the real hosting
-    // RootView, which is what makes every attached descendant (Workspace's
-    // chrome and the design surface alike) report isDesignTime() == true.
+    // isDesignTime() no longer propagates from an owning RootView (view.cpp) -
+    // a View reports only its own explicitly-set flag. root/Workspace itself
+    // are just this editor's hosting chrome, never marked design-time;
+    // Workspace's own constructor marks exactly frameProxy_/rootViewProxy_
+    // (the actual design surface) instead - see its own comment for why.
     newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
     CodeToolsVsix::DesignerEditor editor(&view);
 
-    EXPECT_TRUE(view.isDesignTime());
+    EXPECT_FALSE(view.isDesignTime());
     ASSERT_NE(editor.workspace(), nullptr);
-    EXPECT_TRUE(editor.workspace()->isDesignTime());
+    EXPECT_FALSE(editor.workspace()->isDesignTime());
+    EXPECT_FALSE(editor.workspace()->toolboxPane()->isDesignTime());
+    EXPECT_FALSE(editor.workspace()->propertiesPane()->isDesignTime());
+
+    ASSERT_NE(editor.workspace()->frameProxy(), nullptr);
+    EXPECT_TRUE(editor.workspace()->frameProxy()->isDesignTime());
     ASSERT_NE(editor.workspace()->rootViewProxy(), nullptr);
     EXPECT_TRUE(editor.workspace()->rootViewProxy()->isDesignTime());
 }
