@@ -119,19 +119,19 @@ namespace CodeToolsVsix
         // report isDesignTime() == true for the whole life of this editor.
         root->setDesignTime(true);
 
-        auto rootLayout = std::make_unique<newui::FlexLayout>(newui::Orientation::Vertical);
-        rootLayout->setSpacing(0.0f);
-        rootLayout->setPadding(0.0f);
-        root->setLayout(std::move(rootLayout));
-
         // Workspace fills the whole pane - root itself is never the edited
         // document (see this class's own header comment); load()/save()
         // work against workspace_->rootViewProxy() instead.
         newui::ViewBuilder<newui::RootView> rootBuilder(root);
-        rootBuilder.child<Workspace>([this](newui::ViewBuilder<Workspace>& workspace) {
-            workspace.layoutParams(std::make_unique<newui::FlexLayoutParams>(1.0f));
-            workspace_ = workspace.build();
+        rootBuilder.layout<newui::FlexLayout>([](newui::FlexLayout& l) {
+            l.setOrientation(newui::Orientation::Vertical);
+            l.setSpacing(0.0f);
+            l.setPadding(0.0f);
         });
+        newui::ViewBuilder<Workspace> workspaceBuilder;
+        workspaceBuilder.layoutParams(std::make_unique<newui::FlexLayoutParams>(1.0f));
+        workspace_ = workspaceBuilder.build();
+        rootBuilder.child(workspace_);
 
         if (!this->rootViewOwned_) {
             if (!root->initialize())
@@ -142,6 +142,20 @@ namespace CodeToolsVsix
                 return false;
             }
         }
+
+        // View::addChild()/setLayout() (which the ViewBuilder chain above
+        // runs through) only ever call updateLayout() - never markDirty()/
+        // invalidate() (see RootView::setBounds()'s own comment: only an
+        // actual resize, via resizeImageBuffer(), triggers a real repaint
+        // synchronously). On a RootView that's already shown (true for
+        // this editor's testharness-hosted rootViewOwned_ case, and for
+        // any real VS document pane by the time a later Open reaches
+        // load() below), nothing else would ever ask Windows to paint the
+        // Workspace tree just built - it would just sit correctly laid
+        // out but never drawn until some unrelated interaction (e.g.
+        // dragging a Splitter, which goes through Control's own hover/
+        // press style().markDirty()) happened to touch it.
+        root->markDirty();
         return true;
     }
 
@@ -172,6 +186,11 @@ namespace CodeToolsVsix
             logToDebugOut(L"DesignerEditor::load: Bundle::loadRootView failed");
             return false;
         }
+
+        // Same reasoning as setupUI()'s own markDirty() call - loadRootView()
+        // just repopulated rootViewProxy()'s children in place, and nothing
+        // in that path asks Windows to actually paint the result.
+        getRootView()->markDirty();
 
         clearDirty();
         return true;

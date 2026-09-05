@@ -1,0 +1,23 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 24,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "build-dir-debug",
+      "displayName": "Debug (build/)",
+      "generator": "Visual Studio 18 2026",
+      "binaryDir": "${sourceDir}/build"
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "build-dir-debug",
+      "configurePreset": "build-dir-debug",
+      "configuration": "Debug"
+    }
+  ]
+}

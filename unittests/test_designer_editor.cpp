@@ -2,6 +2,7 @@
 
 #include <newui/bundle.h>
 #include <newui/frame.h>
+#include <newui/layout.h>
 #include <newui/reflection.h>
 #include <newui/rootview.h>
 #include <newui/rootviewproxy.h>
@@ -10,6 +11,7 @@
 #include <gtest/gtest.h>
 
 #include <fstream>
+#include <memory>
 #include <string>
 
 namespace
@@ -65,6 +67,47 @@ TEST_F(DesignerEditorFileFixture, ConstructionSetsDesignTimeOnTheHostingRootView
     EXPECT_TRUE(editor.workspace()->isDesignTime());
     ASSERT_NE(editor.workspace()->rootViewProxy(), nullptr);
     EXPECT_TRUE(editor.workspace()->rootViewProxy()->isDesignTime());
+}
+
+// Reproduces testharness.cpp's real construction sequence, which is not
+// what any existing Workspace/DesignerEditor test exercises: those all
+// either call Workspace::setBounds() directly (bypassing a parent's own
+// FlexLayout arrange entirely) or construct DesignerEditor onto an empty
+// RootView no one has resized. testharness.cpp instead (1) gives root its
+// own FlexLayout and a first child (MenuBar, weight 0) *before* the
+// DesignerEditor exists, then (2) constructs DesignerEditor(&root), whose
+// setupUI() replaces that layout and adds Workspace as weight-1 second
+// child, then (3) resizes an already-shown window. A real bug report says
+// the Workspace pane shows only a tiny sliver of content after that, and
+// that a later resize changes nothing - this test isolates exactly that
+// sequence without needing a live window at all.
+TEST_F(DesignerEditorFileFixture, WorkspaceGetsRealBoundsWhenAddedAlongsideAPreexistingSiblingThenResized)
+{
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "harnessRoot");
+
+    auto rootLayout = std::make_unique<newui::FlexLayout>(newui::Orientation::Vertical);
+    rootLayout->setSpacing(0.0f);
+    rootLayout->setPadding(0.0f);
+    root.setLayout(std::move(rootLayout));
+
+    auto* menuBarStandIn = new newui::SubView();
+    menuBarStandIn->setName("menuBarStandIn");
+    menuBarStandIn->setVisible(true);
+    menuBarStandIn->setDesiredSize(newui::Size(0.0f, 24.0f));
+    menuBarStandIn->setLayoutParams(std::make_unique<newui::FlexLayoutParams>(0.0f));
+    root.addChild(menuBarStandIn);
+
+    CodeToolsVsix::DesignerEditor editor(&root);
+    ASSERT_NE(editor.workspace(), nullptr);
+
+    root.setBounds(newui::Rect(0, 0, 1000, 700));
+
+    EXPECT_GT(editor.workspace()->bounds().size().width, 900.0f);
+    EXPECT_GT(editor.workspace()->bounds().size().height, 600.0f);
+
+    ASSERT_NE(editor.workspace()->frameProxy(), nullptr);
+    EXPECT_GT(editor.workspace()->frameProxy()->bounds().size().width, 0.0f);
+    EXPECT_GT(editor.workspace()->frameProxy()->bounds().size().height, 0.0f);
 }
 
 TEST_F(DesignerEditorFileFixture, LoadFailsForAPathNotUnderAResourcesFolder)
