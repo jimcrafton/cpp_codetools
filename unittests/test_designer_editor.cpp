@@ -105,9 +105,20 @@ TEST_F(DesignerEditorFileFixture, WorkspaceGetsRealBoundsWhenAddedAlongsideAPree
     EXPECT_GT(editor.workspace()->bounds().size().width, 900.0f);
     EXPECT_GT(editor.workspace()->bounds().size().height, 600.0f);
 
+    // >0.0f alone isn't a strong enough check here - a real bug (fixed in
+    // newui's own Splitter::clampSplitPosition(), see its own comment)
+    // silently collapsed every Workspace pane split to minPaneSize()
+    // (40px) instead of its real configured value. frameProxy_'s height
+    // here tracks "middle"'s own splitPosition, which Workspace.cpp never
+    // overrides - Splitter's own real default (200.0f) - so 150.0f is a
+    // threshold comfortably between the old broken 40px floor and that
+    // real, correct value, not an exact-match assertion on an unconfigured
+    // default that could legitimately change later. frameProxy_'s width
+    // tracks centerAndRight's own explicit 560.0f split, several hundred
+    // pixels clear of the same 40px floor.
     ASSERT_NE(editor.workspace()->frameProxy(), nullptr);
-    EXPECT_GT(editor.workspace()->frameProxy()->bounds().size().width, 0.0f);
-    EXPECT_GT(editor.workspace()->frameProxy()->bounds().size().height, 0.0f);
+    EXPECT_GT(editor.workspace()->frameProxy()->bounds().size().width, 150.0f);
+    EXPECT_GT(editor.workspace()->frameProxy()->bounds().size().height, 150.0f);
 }
 
 TEST_F(DesignerEditorFileFixture, LoadFailsForAPathNotUnderAResourcesFolder)

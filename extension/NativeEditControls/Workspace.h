@@ -31,9 +31,40 @@ namespace CodeToolsVsix
         static constexpr float kTopBarHeight = 32.0f;
         static constexpr float kStatusBarHeight = 22.0f;
 
+        // Fixed-dock sizes - matching bluesky/designer-surface/Main.dc.html's
+        // own real CSS proportions (".toolbox { width: 220px }",
+        // ".rightpane { width: 300px }", ".dock-head" 26px + ".dock-body"
+        // 58px), not arbitrary guesses - see centerAndRight/mainRow/middle's
+        // own setFixedPane()/setSplitPosition() calls (Workspace.cpp) for
+        // which pane each of these actually sizes.
+        static constexpr float kToolboxPaneWidth = 220.0f;
+        static constexpr float kPropertiesPaneWidth = 300.0f;
+
+        // The Animations preview dock's own fixed height - kept small
+        // deliberately (designer-plan.md's "in-context slice", not full
+        // curve editing) relative to the main Toolbox/design-surface/
+        // Properties row above it, which gets the rest.
+        static constexpr float kAnimationDockHeight = 84.0f;
+
+        // frameProxy_'s own fixed size, centered inside the darker canvas
+        // well rather than stretched to fill it - matches
+        // bluesky/designer-surface/Main.dc.html's own ".artboard" (640x460),
+        // itself an arbitrary reference size, not derived from any real
+        // document yet (an "idea, not built" gap: sizing this from the
+        // loaded document's own real Frame bounds instead, once
+        // DesignerEditor::load() has one to read).
+        static constexpr float kDefaultCanvasWidth = 640.0f;
+        static constexpr float kDefaultCanvasHeight = 460.0f;
+
+        // Thinner than newui::Splitter's own generic 6px default - a
+        // slimmer divider reads better across three of these stacked
+        // side by side than the default would.
+        static constexpr float kDividerThickness = 2.0f;
+
         Workspace();
 
         newui::SubView* topBar() const { return topBar_; }
+        newui::SubView* canvasWell() const { return canvasWell_; }
         newui::SubView* toolboxPane() const { return toolboxPane_; }
         newui::SubView* propertiesPane() const { return propertiesPane_; }
         newui::SubView* animationPane() const { return animationPane_; }
@@ -43,6 +74,7 @@ namespace CodeToolsVsix
 
     private:
         newui::SubView* topBar_ = nullptr;
+        newui::SubView* canvasWell_ = nullptr;
         newui::SubView* toolboxPane_ = nullptr;
         newui::SubView* propertiesPane_ = nullptr;
         newui::SubView* animationPane_ = nullptr;
