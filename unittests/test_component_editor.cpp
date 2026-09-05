@@ -7,10 +7,10 @@
 using namespace newui::reflection;
 
 // Defined in the reflectgen-generated .cpp linked into the `newui` target -
-// only runs once something calls it (same pattern as newui's own
-// unittests/test_reflection.cpp). Needed here since these tests use real
-// newui::View/SubView classes, unlike test_property_editor.cpp's own
-// hand-registered Widget.
+// self-guarding at the source (only actually registers once per process,
+// however many places call it - see its own comment in reflectgen.py's
+// generate()), so this and NativeEditManager's own constructor
+// (NativeEditor.cpp) can both just call it directly.
 extern void registerReflectionData();
 
 namespace

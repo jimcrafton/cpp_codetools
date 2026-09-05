@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Toolbox.h"
+
 #include <newui/frameproxy.h>
 #include <newui/rootviewproxy.h>
 #include <newui/splitter.h>
@@ -65,7 +67,7 @@ namespace CodeToolsVsix
 
         newui::SubView* topBar() const { return topBar_; }
         newui::SubView* canvasWell() const { return canvasWell_; }
-        newui::SubView* toolboxPane() const { return toolboxPane_; }
+        Toolbox* toolboxPane() const { return toolboxPane_; }
         newui::SubView* propertiesPane() const { return propertiesPane_; }
         newui::SubView* animationPane() const { return animationPane_; }
         newui::SubView* statusBar() const { return statusBar_; }
@@ -75,7 +77,7 @@ namespace CodeToolsVsix
     private:
         newui::SubView* topBar_ = nullptr;
         newui::SubView* canvasWell_ = nullptr;
-        newui::SubView* toolboxPane_ = nullptr;
+        Toolbox* toolboxPane_ = nullptr;
         newui::SubView* propertiesPane_ = nullptr;
         newui::SubView* animationPane_ = nullptr;
         newui::SubView* statusBar_ = nullptr;

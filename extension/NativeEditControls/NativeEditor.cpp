@@ -9,11 +9,24 @@
 #include "CppEditor.h"
 #include "DesignerEditor.h"
 
+// Defined in the reflectgen-generated .cpp (compiled into the `newui`
+// target, global namespace) - self-guarding at the source (only actually
+// registers once per process, however many places call it - see its own
+// comment in reflectgen.py's generate()), so every call site can just
+// call it directly.
+extern void registerReflectionData();
+
 namespace CodeToolsVsix
 {
+    // Every real newui example app calls registerReflectionData() once at
+    // startup; nothing in this DLL (or testharness.cpp, which also goes
+    // through NativeEditManager::instance() before ever constructing a
+    // DesignerEditor/Workspace/Toolbox) ever did. Real gap found via
+    // CodeToolsVsix::ToolboxRegistry's reflection-driven category scan
+    // coming back empty against a never-populated ReflectionRegistry.
     NativeEditManager::NativeEditManager()
     {
-
+        registerReflectionData();
     }
 
 	void NativeEditManager::startRunLoop()

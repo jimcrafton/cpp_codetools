@@ -26,8 +26,12 @@ add_executable(nativeeditcontrols_tests
     test_component_editor.cpp
     test_designer_editor.cpp
     test_workspace.cpp
+    test_toolbox_registry.cpp
+    test_toolbox.cpp
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/PropertyEditor.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/ComponentEditor.cpp"
+    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/ToolboxRegistry.cpp"
+    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/Toolbox.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/DesignerEditor.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/CppEditor.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/NativeEditor.cpp"

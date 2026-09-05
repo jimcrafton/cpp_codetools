@@ -114,9 +114,19 @@ namespace CodeToolsVsix
         centerAndRightBuilder.child(canvasWell_).child(propertiesPane_);
         newui::Splitter* centerAndRight = centerAndRightBuilder.build();
 
-        newui::ViewBuilder<newui::SubView> toolboxBuilder;
-        toolboxBuilder.name("workspaceToolboxPane");
-        styleAsPane(toolboxBuilder, newui::UIColorRole::ControlBackground);
+        // Double-click an entry creates it and attaches it directly onto
+        // rootViewProxy_ - the design surface's own root - real drag-and-
+        // drop being out of scope for v1 (see Toolbox's own class
+        // comment). rootViewProxy_ is already built above, safe to
+        // capture/use here.
+        newui::ViewBuilder<Toolbox> toolboxBuilder;
+        toolboxBuilder.name("workspaceToolboxPane")
+            .configure([this](Toolbox& toolbox) {
+                toolbox.onEntryActivated.add([this](Toolbox&, newui::SubView* created) {
+                    rootViewProxy_->addChild(created);
+                    return newui::SyncReturn::Handled;
+                });
+            });
         toolboxPane_ = toolboxBuilder.build();
 
         // mainRow: toolboxPane_ | centerAndRight, a horizontal split -
