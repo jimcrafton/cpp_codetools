@@ -66,14 +66,25 @@ namespace CodeToolsVsix
         bool execCommand(EditorCommand command, std::uint32_t flags, const EditorCommandArgs* args) override;
 
     private:
-        // Selection + handles (designer-plan.md 6.1 item 3) - hooked onto
-        // root's own onMouseDown (fires unconditionally for every mouse
-        // down, unlike a hit-tested child's onMouseDown - see
+        // Selection + handles (designer-plan.md 6.1 item 3), and (checked
+        // first, so a resize drag always wins over starting a new
+        // selection) starting a CanvasWell guide-line resize drag - both
+        // hooked onto root's own onMouseDown (fires unconditionally for
+        // every mouse down, unlike a hit-tested child's onMouseDown - see
         // RootView::mouseDown(), rootview.cpp) so a click anywhere in the
-        // pane can be checked against the design surface's own bounds and,
-        // if inside, hit-tested against its real children. See
-        // DesignerEditor.cpp for the full reasoning.
+        // pane can be checked against the design surface's/canvas well's
+        // own bounds and, if inside, hit-tested against its real children.
+        // See DesignerEditor.cpp for the full reasoning.
         newui::SyncReturn handleMouseDownForSelection(newui::View& sender, const newui::Point& pt,
+            std::uint32_t btnMask, std::uint32_t keyMask);
+
+        // Continues/ends a CanvasWell resize drag started above, or (when
+        // not dragging) just updates its hover cursor - hooked onto root's
+        // own onMouseMove/onMouseUp for the same "fires unconditionally,
+        // before hit-testing" reason handleMouseDownForSelection() is.
+        newui::SyncReturn handleMouseMoveForResize(newui::View& sender, const newui::Point& pt,
+            std::uint32_t btnMask, std::uint32_t keyMask);
+        newui::SyncReturn handleMouseUpForResize(newui::View& sender, const newui::Point& pt,
             std::uint32_t btnMask, std::uint32_t keyMask);
 
         Workspace* workspace_ = nullptr;

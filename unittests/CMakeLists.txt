@@ -26,6 +26,7 @@ add_executable(nativeeditcontrols_tests
     test_component_editor.cpp
     test_designer_editor.cpp
     test_workspace.cpp
+    test_canvas_well.cpp
     test_toolbox_registry.cpp
     test_toolbox.cpp
     test_selection_overlay.cpp

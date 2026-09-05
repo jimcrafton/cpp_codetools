@@ -147,6 +147,8 @@ namespace CodeToolsVsix
         selectionOverlay_ = selectionOverlay.get();
         root->setOverlay(std::move(selectionOverlay));
         root->onMouseDown.add(this, &DesignerEditor::handleMouseDownForSelection);
+        root->onMouseMove.add(this, &DesignerEditor::handleMouseMoveForResize);
+        root->onMouseUp.add(this, &DesignerEditor::handleMouseUpForResize);
 
         if (!this->rootViewOwned_) {
             if (!root->initialize())
@@ -177,6 +179,19 @@ namespace CodeToolsVsix
     newui::SyncReturn DesignerEditor::handleMouseDownForSelection(newui::View& /*sender*/, const newui::Point& pt,
         std::uint32_t /*btnMask*/, std::uint32_t keyMask)
     {
+        // Checked first, so grabbing a guide line always starts a resize
+        // rather than a selection - CanvasWell.h's own class comment has
+        // the full reasoning for why this is driven from here rather than
+        // CanvasWell's own onMouseDown.
+        CanvasWell* canvasWell = workspace_ ? workspace_->canvasWell() : nullptr;
+        if (canvasWell != nullptr) {
+            newui::Rect canvasWellBounds = SelectionOverlay::boundsInRootView(canvasWell);
+            newui::Point canvasLocalPt(pt.x - canvasWellBounds.left(), pt.y - canvasWellBounds.top());
+            if (canvasWell->beginResizeDrag(canvasLocalPt)) {
+                return newui::SyncReturn::Handled;
+            }
+        }
+
         newui::RootViewProxy* surface = workspace_ ? workspace_->rootViewProxy() : nullptr;
         if (surface == nullptr || !surface->isVisible()) {
             return newui::SyncReturn::Ignored;
@@ -207,6 +222,43 @@ namespace CodeToolsVsix
         // own selection state changed.
         getRootView()->markDirty();
         return newui::SyncReturn::Ignored;
+    }
+
+    newui::SyncReturn DesignerEditor::handleMouseMoveForResize(newui::View& /*sender*/, const newui::Point& pt,
+        std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/)
+    {
+        CanvasWell* canvasWell = workspace_ ? workspace_->canvasWell() : nullptr;
+        if (canvasWell == nullptr) {
+            return newui::SyncReturn::Ignored;
+        }
+
+        newui::Rect canvasWellBounds = SelectionOverlay::boundsInRootView(canvasWell);
+        newui::Point canvasLocalPt(pt.x - canvasWellBounds.left(), pt.y - canvasWellBounds.top());
+
+        if (canvasWell->isResizingDrag()) {
+            canvasWell->continueResizeDrag(canvasLocalPt);
+            // Same reasoning as setupUI()'s/load()'s own markDirty() calls -
+            // nothing else asks Windows to repaint just because
+            // continueResizeDrag() moved FrameProxy.
+            getRootView()->markDirty();
+            return newui::SyncReturn::Handled;
+        }
+
+        // Not dragging - still gives hover feedback (a resize cursor) when
+        // the mouse is over a grabbable guide line.
+        canvasWell->updateHoverCursor(canvasLocalPt);
+        return newui::SyncReturn::Ignored;
+    }
+
+    newui::SyncReturn DesignerEditor::handleMouseUpForResize(newui::View& /*sender*/, const newui::Point& /*pt*/,
+        std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/)
+    {
+        CanvasWell* canvasWell = workspace_ ? workspace_->canvasWell() : nullptr;
+        if (canvasWell == nullptr || !canvasWell->isResizingDrag()) {
+            return newui::SyncReturn::Ignored;
+        }
+        canvasWell->endResizeDrag();
+        return newui::SyncReturn::Handled;
     }
 
     bool DesignerEditor::load(const wchar_t* filePath, std::size_t filePathLength)

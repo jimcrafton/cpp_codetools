@@ -1,7 +1,10 @@
 #include "CanvasWell.h"
 
+#include <newui/cursor.h>
+#include <newui/layout.h>
 #include <newui/uicolormanager.h>
 
+#include <cmath>
 #include <string>
 
 namespace CodeToolsVsix
@@ -111,6 +114,19 @@ namespace CodeToolsVsix
         const newui::Rect& frameBounds = childViews()[0]->bounds();
         newui::Rect ownBounds(0.0f, 0.0f, bounds().size().width, bounds().size().height);
 
+        // No drop shadow: View::paintChildren() (view.cpp) clips every
+        // child to exactly its own bounding box before calling paint(),
+        // recursively at every level of the tree - a shadow needs to bleed
+        // outside FrameProxy's own bounds, so casting it here (this view's
+        // own paint() pass) only pushes the same clip one level up, and
+        // FrameProxy's own default size can genuinely exceed this view's
+        // own bounds (a fixed reference size, not derived from the real
+        // window) - confirmed live via the debugger, not assumed. Fixing
+        // that for real needs a general opt-out of paintChildren()'s
+        // per-child clip in newui itself, deliberately not taken on here -
+        // dropped rather than shipped half-working (and the shadow's own
+        // per-repaint box-blur was a real, measurable cost during a resize
+        // drag, on top of not even being visible).
         BLRgba32 guideColor = newui::UIColorManager::colorFor(newui::UIColorRole::HighlightBackground).toBLRgba32();
 
         ctx.save();
@@ -137,6 +153,99 @@ namespace CodeToolsVsix
         if (leftMargin >= kMinRulerMargin) {
             std::string heightLabel = std::to_string(static_cast<int>(frameBounds.size().height)) + " px";
             paintDimensionRuler(ctx, frameBounds.top(), frameBounds.bottom(), leftMargin * 0.5, true, heightLabel, *blFont, guideColor);
+        }
+    }
+
+    CanvasWell::ResizeEdge CanvasWell::resizeEdgeAt(const newui::Point& localPt) const
+    {
+        if (childViews().empty()) {
+            return ResizeEdge::None;
+        }
+
+        const newui::Rect& frameBounds = childViews()[0]->bounds();
+        bool nearLeft = std::fabs(localPt.x - frameBounds.left()) <= kEdgeGrabTolerance;
+        bool nearRight = std::fabs(localPt.x - frameBounds.right()) <= kEdgeGrabTolerance;
+        bool nearTop = std::fabs(localPt.y - frameBounds.top()) <= kEdgeGrabTolerance;
+        bool nearBottom = std::fabs(localPt.y - frameBounds.bottom()) <= kEdgeGrabTolerance;
+
+        if (nearLeft || nearRight) {
+            return ResizeEdge::Vertical;
+        }
+        if (nearTop || nearBottom) {
+            return ResizeEdge::Horizontal;
+        }
+        return ResizeEdge::None;
+    }
+
+    bool CanvasWell::beginResizeDrag(const newui::Point& localPt)
+    {
+        ResizeEdge edge = resizeEdgeAt(localPt);
+        if (edge == ResizeEdge::None) {
+            return false;
+        }
+        resizing_ = edge;
+        return true;
+    }
+
+    void CanvasWell::continueResizeDrag(const newui::Point& localPt)
+    {
+        if (resizing_ == ResizeEdge::None || childViews().empty()) {
+            return;
+        }
+
+        newui::SubView* frame = childViews()[0];
+        // Workspace.cpp always builds frameProxy_ with AnchorLayoutParams -
+        // static_cast, not dynamic_cast, since the real type is already
+        // guaranteed by construction, not something this code needs to
+        // discover.
+        auto* params = static_cast<newui::AnchorLayoutParams*>(frame->layoutParams());
+        if (params == nullptr) {
+            return;
+        }
+
+        newui::Rect ownBounds = getClientBounds();
+        float centerX = ownBounds.left() + ownBounds.size().width * 0.5f;
+        float centerY = ownBounds.top() + ownBounds.size().height * 0.5f;
+
+        // FrameProxy keeps CenterX|CenterY throughout - dragging either the
+        // left or right guide grows/shrinks it symmetrically about the
+        // center (per the user's own explicit call: "no matter what the
+        // FrameProxy needs to remain centered"), not from a fixed corner.
+        if (resizing_ == ResizeEdge::Vertical) {
+            float newWidth = std::fabs(localPt.x - centerX) * 2.0f;
+            params->width = (newWidth > kMinFrameSize) ? newWidth : kMinFrameSize;
+        } else {
+            float newHeight = std::fabs(localPt.y - centerY) * 2.0f;
+            params->height = (newHeight > kMinFrameSize) ? newHeight : kMinFrameSize;
+        }
+
+        // This view's own AnchorLayout is what actually owns frameProxy_'s
+        // position/size - re-running it applies the just-changed
+        // width/height immediately, same as any other LayoutParams
+        // mutation (see View::updateLayout()'s own "after mutating a
+        // child's LayoutParams in place" doc comment).
+        updateLayout();
+        redraw();
+    }
+
+    void CanvasWell::endResizeDrag()
+    {
+        resizing_ = ResizeEdge::None;
+    }
+
+    void CanvasWell::updateHoverCursor(const newui::Point& localPt)
+    {
+        ResizeEdge edge = (resizing_ != ResizeEdge::None) ? resizing_ : resizeEdgeAt(localPt);
+        switch (edge) {
+            case ResizeEdge::Vertical:
+                setCursor(newui::Cursor(newui::CursorKind::SizeWE));
+                break;
+            case ResizeEdge::Horizontal:
+                setCursor(newui::Cursor(newui::CursorKind::SizeNS));
+                break;
+            default:
+                setCursor(newui::Cursor(newui::CursorKind::Arrow));
+                break;
         }
     }
 }
