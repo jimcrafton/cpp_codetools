@@ -151,20 +151,20 @@ TEST_F(DesignerEditorFileFixture, ClickInsideTheDesignSurfaceSelectsTheHitChild)
     surface->addChild(control);
 
     ASSERT_NE(editor.selectionOverlay(), nullptr);
-    EXPECT_EQ(editor.selectionOverlay()->primary(), nullptr);
+    EXPECT_EQ(editor.viewDesignerController().primary(), nullptr);
 
     newui::Rect surfaceBounds = CodeToolsVsix::SelectionOverlay::boundsInRootView(surface);
     newui::Point insideControl(surfaceBounds.left() + 20.0f, surfaceBounds.top() + 15.0f);
     root.onMouseDown(root, insideControl, newui::mbmLeftButton, newui::kmUndefined);
 
-    EXPECT_EQ(editor.selectionOverlay()->primary(), control);
+    EXPECT_EQ(editor.viewDesignerController().primary(), control);
 
     // A subsequent click on empty design-surface space (past the control's
     // own 40x20 bounds, still inside the surface itself) clears it again.
     newui::Point emptyCanvas(surfaceBounds.left() + 300.0f, surfaceBounds.top() + 300.0f);
     root.onMouseDown(root, emptyCanvas, newui::mbmLeftButton, newui::kmUndefined);
 
-    EXPECT_EQ(editor.selectionOverlay()->primary(), nullptr);
+    EXPECT_EQ(editor.viewDesignerController().primary(), nullptr);
 }
 
 TEST_F(DesignerEditorFileFixture, CtrlClickAddsASecondControlToTheSelection)
@@ -195,10 +195,10 @@ TEST_F(DesignerEditorFileFixture, CtrlClickAddsASecondControlToTheSelection)
     root.onMouseDown(root, newui::Point(surfaceBounds.left() + 20.0f, surfaceBounds.top() + 45.0f),
         newui::mbmLeftButton, newui::kmCtrl);
 
-    ASSERT_EQ(editor.selectionOverlay()->selected().size(), 2u);
-    EXPECT_TRUE(editor.selectionOverlay()->isSelected(first));
-    EXPECT_TRUE(editor.selectionOverlay()->isSelected(second));
-    EXPECT_EQ(editor.selectionOverlay()->primary(), second);
+    ASSERT_EQ(editor.viewDesignerController().selected().size(), 2u);
+    EXPECT_TRUE(editor.viewDesignerController().isSelected(first));
+    EXPECT_TRUE(editor.viewDesignerController().isSelected(second));
+    EXPECT_EQ(editor.viewDesignerController().primary(), second);
 }
 
 TEST_F(DesignerEditorFileFixture, ClickOutsideTheDesignSurfaceLeavesSelectionUntouched)
@@ -219,12 +219,12 @@ TEST_F(DesignerEditorFileFixture, ClickOutsideTheDesignSurfaceLeavesSelectionUnt
     newui::Rect surfaceBounds = CodeToolsVsix::SelectionOverlay::boundsInRootView(surface);
     root.onMouseDown(root, newui::Point(surfaceBounds.left() + 20.0f, surfaceBounds.top() + 15.0f),
         newui::mbmLeftButton, newui::kmUndefined);
-    ASSERT_EQ(editor.selectionOverlay()->primary(), control);
+    ASSERT_EQ(editor.viewDesignerController().primary(), control);
 
     // A click on the Toolbox pane (well to the left of the design surface,
     // still inside the pane) doesn't touch the existing selection.
     root.onMouseDown(root, newui::Point(5.0f, 5.0f), newui::mbmLeftButton, newui::kmUndefined);
-    EXPECT_EQ(editor.selectionOverlay()->primary(), control);
+    EXPECT_EQ(editor.viewDesignerController().primary(), control);
 }
 
 TEST_F(DesignerEditorFileFixture, LoadFailsForAPathNotUnderAResourcesFolder)

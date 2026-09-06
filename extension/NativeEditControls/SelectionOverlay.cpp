@@ -2,8 +2,6 @@
 
 #include <newui/uicolormanager.h>
 
-#include <algorithm>
-
 namespace CodeToolsVsix
 {
     namespace
@@ -43,37 +41,6 @@ namespace CodeToolsVsix
         }
     }
 
-    bool SelectionOverlay::isSelected(const newui::SubView* view) const
-    {
-        return std::find(selected_.begin(), selected_.end(), view) != selected_.end();
-    }
-
-    void SelectionOverlay::selectExclusive(newui::SubView* view)
-    {
-        selected_.clear();
-        if (view != nullptr) {
-            selected_.push_back(view);
-        }
-    }
-
-    void SelectionOverlay::toggleSelection(newui::SubView* view)
-    {
-        if (view == nullptr) {
-            return;
-        }
-        auto it = std::find(selected_.begin(), selected_.end(), view);
-        if (it != selected_.end()) {
-            selected_.erase(it);
-        } else {
-            selected_.push_back(view);
-        }
-    }
-
-    void SelectionOverlay::clearSelection()
-    {
-        selected_.clear();
-    }
-
     newui::Rect SelectionOverlay::boundsInRootView(const newui::View* view)
     {
         if (view == nullptr) {
@@ -84,13 +51,14 @@ namespace CodeToolsVsix
 
     void SelectionOverlay::paint(BLContext& ctx, const newui::Rect& /*rect*/)
     {
-        if (selected_.empty()) {
+        const std::vector<newui::SubView*>& selected = controller_.selected();
+        if (selected.empty()) {
             return;
         }
 
         BLRgba32 accent = newui::UIColorManager::colorFor(newui::UIColorRole::HighlightBackground).toBLRgba32();
 
-        for (newui::SubView* view : selected_) {
+        for (newui::SubView* view : selected) {
             // Inset by 1px - matches Main.dc.html's own
             // ".node-wrap.selected { outline-offset: -1px }".
             newui::Rect outline = boundsInRootView(view).deflate(1.0f);
@@ -99,7 +67,7 @@ namespace CodeToolsVsix
             ctx.stroke_box(outline.left(), outline.top(), outline.right(), outline.bottom());
         }
 
-        if (newui::SubView* primaryView = primary()) {
+        if (newui::SubView* primaryView = controller_.primary()) {
             newui::Rect bounds = boundsInRootView(primaryView);
             paintHandle(ctx, bounds.left(), bounds.top(), accent);
             paintHandle(ctx, bounds.right(), bounds.top(), accent);

@@ -148,7 +148,15 @@ namespace CodeToolsVsix
                                                        void* instance) const;
 
         // bool/int/float/std::string/Color wildcard editors - called once
-        // by whoever owns instance() at startup.
+        // by whoever owns instance() at startup. Self-guarding per
+        // instance (builtinsRegistered_ below), not just "the one real
+        // caller happens to call it once" - a real, caught bug: unlike
+        // registerReflectionData() (a self-guarding global magic static),
+        // this used to duplicate every entries_ registration on a second
+        // call. A per-instance bool, not a magic static, since this is
+        // also called on local, non-singleton instances in tests
+        // (test_property_editor.cpp) - a global guard would have made
+        // every such instance after the first come up empty.
         void registerBuiltinEditors();
 
     private:
@@ -162,5 +170,6 @@ namespace CodeToolsVsix
 
         std::vector<Entry> entries_;
         std::unordered_map<std::string, Factory> tagEntries_;
+        bool builtinsRegistered_ = false;
     };
 }

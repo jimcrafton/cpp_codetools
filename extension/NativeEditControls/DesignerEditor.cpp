@@ -77,6 +77,17 @@ namespace CodeToolsVsix
         }
     }
 
+    DesignerEditor::~DesignerEditor()
+    {
+        // See this declaration's own doc comment (DesignerEditor.h) - must
+        // run before viewDesignerController_'s own destruction, which an
+        // implicit/defaulted destructor wouldn't guarantee relative to
+        // root's base-owned Overlay.
+        if (getRootView() != nullptr) {
+            getRootView()->setOverlay(nullptr);
+        }
+    }
+
     DesignerEditor::DesignerEditor(newui::RootView* rootView)
     {
         rootViewOwned_ = true;
@@ -143,12 +154,17 @@ namespace CodeToolsVsix
         // itself would never fire for a click that lands on one of its own
         // children instead (hitTestChildren() always dispatches to the
         // deepest hit target, not its ancestors).
-        auto selectionOverlay = std::make_unique<SelectionOverlay>();
+        auto selectionOverlay = std::make_unique<SelectionOverlay>(viewDesignerController_);
         selectionOverlay_ = selectionOverlay.get();
         root->setOverlay(std::move(selectionOverlay));
         root->onMouseDown.add(this, &DesignerEditor::handleMouseDownForSelection);
         root->onMouseMove.add(this, &DesignerEditor::handleMouseMoveForResize);
         root->onMouseUp.add(this, &DesignerEditor::handleMouseUpForResize);
+
+        // PropertiesPanel (and, later, Document Outline) learn about
+        // selection changes this way - through ViewDesignerController's
+        // own notification, not because this class knows they exist.
+        viewDesignerController_.onSelectionChanged.add(this, &DesignerEditor::handleSelectionChanged);
 
         if (!this->rootViewOwned_) {
             if (!root->initialize())
@@ -212,9 +228,9 @@ namespace CodeToolsVsix
         newui::SubView* target = surface->hitTestChildren(localPt, unused);
 
         if ((keyMask & newui::kmCtrl) != 0) {
-            selectionOverlay_->toggleSelection(target);
+            viewDesignerController_.toggleSelection(target);
         } else {
-            selectionOverlay_->selectExclusive(target);
+            viewDesignerController_.selectExclusive(target);
         }
 
         // Same reasoning as setupUI()'s/load()'s own markDirty() calls -
@@ -259,6 +275,14 @@ namespace CodeToolsVsix
         }
         canvasWell->endResizeDrag();
         return newui::SyncReturn::Handled;
+    }
+
+    newui::SyncReturn DesignerEditor::handleSelectionChanged(ViewDesignerController& sender)
+    {
+        if (workspace_ != nullptr) {
+            workspace_->propertiesPane()->setSelection(sender.primary());
+        }
+        return newui::SyncReturn::Ignored;
     }
 
     bool DesignerEditor::load(const wchar_t* filePath, std::size_t filePathLength)

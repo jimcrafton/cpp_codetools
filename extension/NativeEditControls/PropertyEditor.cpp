@@ -176,6 +176,11 @@ namespace CodeToolsVsix
 
     void PropertyEditorRegistry::registerBuiltinEditors()
     {
+        if (builtinsRegistered_) {
+            return;
+        }
+        builtinsRegistered_ = true;
+
         registerEditor(std::type_index(typeid(bool)),
             [](const newui::reflection::Property* p, void* instance) { return std::make_unique<BoolPropertyEditor>(p, instance); });
         registerEditor(std::type_index(typeid(int)),

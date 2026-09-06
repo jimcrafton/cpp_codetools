@@ -5,6 +5,7 @@
 
 #include "NativeEditor.h"
 #include "SelectionOverlay.h"
+#include "ViewDesignerController.h"
 #include "Workspace.h"
 
 namespace CodeToolsVsix
@@ -26,6 +27,23 @@ namespace CodeToolsVsix
 
         DesignerEditor(newui::RootView* rootView);
 
+        // Explicit (not implicit-default): root's own Overlay (set in
+        // setupUI() below) holds a const reference into
+        // viewDesignerController_ (via SelectionOverlay), and root itself
+        // is owned by the *base* NativeEditor - base-class subobjects
+        // always outlive derived members' own destruction (C++'s ordinary
+        // member/base teardown order), so without this,
+        // viewDesignerController_ would already be destroyed by the time
+        // root's Overlay (and the reference it holds) actually goes away,
+        // a real dangling-reference window - most concretely in the
+        // rootViewOwned_ case (the newui::RootView* constructor below),
+        // where NativeEditor's own destructor releases rootView_ instead
+        // of destroying it at all, so root can outlive *this* by an
+        // arbitrary amount. Explicitly clearing the overlay here runs
+        // before any member/base destruction begins, while
+        // viewDesignerController_ still exists.
+        ~DesignerEditor() override;
+
         bool setupUI(newui::RootView* root);
 
         // Non-owning - workspace_ is owned by the View tree (root->addChild()'d in setupUI()),
@@ -34,10 +52,15 @@ namespace CodeToolsVsix
         Workspace* workspace() const { return workspace_; }
 
         // Non-owning - selectionOverlay_ is owned by root itself (root->
-        // setOverlay() in setupUI()), freed when root is. The Document
-        // Outline/Properties panels (designer-plan.md 6.1 items 4/5, not
-        // built yet) read the current selection from here once they exist.
+        // setOverlay() in setupUI()), freed when root is.
         SelectionOverlay* selectionOverlay() const { return selectionOverlay_; }
+
+        // Owns the real selection state/logic (ViewDesignerController.h) -
+        // PropertiesPanel (and, later, Document Outline) subscribe to its
+        // onSelectionChanged independently, without this class needing to
+        // know they exist (see the onSelectionChanged wiring in setupUI()).
+        ViewDesignerController& viewDesignerController() { return viewDesignerController_; }
+        const ViewDesignerController& viewDesignerController() const { return viewDesignerController_; }
 
         // filePath must be a real "<root>\Resources\<bundleName>.newui" -
         // derives bundleName/root from it (see resolveBundleNameAndRoot(),
@@ -87,7 +110,17 @@ namespace CodeToolsVsix
         newui::SyncReturn handleMouseUpForResize(newui::View& sender, const newui::Point& pt,
             std::uint32_t btnMask, std::uint32_t keyMask);
 
+        // Pushes viewDesignerController_'s new primary() into the
+        // Properties panel - the one place this class still knows about a
+        // specific selection consumer, since PropertiesPanel is real and
+        // built today; Document Outline (designer-plan.md 6.1 item 4, not
+        // built yet) will subscribe its own handler onto
+        // viewDesignerController_.onSelectionChanged the same way, once it
+        // exists, without needing to touch this one.
+        newui::SyncReturn handleSelectionChanged(ViewDesignerController& sender);
+
         Workspace* workspace_ = nullptr;
         SelectionOverlay* selectionOverlay_ = nullptr;
+        ViewDesignerController viewDesignerController_;
     };
 }

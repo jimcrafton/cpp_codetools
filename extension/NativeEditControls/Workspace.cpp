@@ -110,9 +110,14 @@ namespace CodeToolsVsix
         canvasWellBuilder.child(frameProxy_);
         canvasWell_ = canvasWellBuilder.build();
 
-        newui::ViewBuilder<newui::SubView> propertiesBuilder;
+        // PropertiesPanel's own constructor already sets visible(true) and
+        // its background color (matching FrameProxy/RootViewProxy/
+        // Splitter's own convention of doing that in the constructor
+        // itself, not styleAsPane()) - it's a ScrollView, not a plain
+        // SubView, so styleAsPane() (typed for ViewBuilder<SubView>&)
+        // doesn't apply here anyway.
+        newui::ViewBuilder<PropertiesPanel> propertiesBuilder;
         propertiesBuilder.name("workspacePropertiesPane");
-        styleAsPane(propertiesBuilder, newui::UIColorRole::ControlBackground);
         propertiesPane_ = propertiesBuilder.build();
 
         // centerAndRight: canvasWell_ (holding the design space) |

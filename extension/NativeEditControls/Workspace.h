@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CanvasWell.h"
+#include "PropertiesPanel.h"
 #include "Toolbox.h"
 
 #include <newui/frameproxy.h>
@@ -69,7 +70,7 @@ namespace CodeToolsVsix
         newui::SubView* topBar() const { return topBar_; }
         CanvasWell* canvasWell() const { return canvasWell_; }
         Toolbox* toolboxPane() const { return toolboxPane_; }
-        newui::SubView* propertiesPane() const { return propertiesPane_; }
+        PropertiesPanel* propertiesPane() const { return propertiesPane_; }
         newui::SubView* animationPane() const { return animationPane_; }
         newui::SubView* statusBar() const { return statusBar_; }
         newui::FrameProxy* frameProxy() const { return frameProxy_; }
@@ -79,7 +80,7 @@ namespace CodeToolsVsix
         newui::SubView* topBar_ = nullptr;
         CanvasWell* canvasWell_ = nullptr;
         Toolbox* toolboxPane_ = nullptr;
-        newui::SubView* propertiesPane_ = nullptr;
+        PropertiesPanel* propertiesPane_ = nullptr;
         newui::SubView* animationPane_ = nullptr;
         newui::SubView* statusBar_ = nullptr;
         newui::FrameProxy* frameProxy_ = nullptr;

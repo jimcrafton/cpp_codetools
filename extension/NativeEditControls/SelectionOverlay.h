@@ -1,10 +1,10 @@
 #pragma once
 
+#include "ViewDesignerController.h"
+
 #include <newui/geometry.h>
 #include <newui/overlay.h>
 #include <newui/subview.h>
-
-#include <vector>
 
 namespace CodeToolsVsix
 {
@@ -12,38 +12,22 @@ namespace CodeToolsVsix
     // mode-only overlay painted on top of the whole editor pane via newui's
     // existing RootView::setOverlay() mechanism (overlay.h's own class
     // comment names exactly this use: "whatever needs to sit above the
-    // entire view hierarchy regardless of z-order within it"). DesignerEditor
-    // owns one (setupUI() sets it as root's overlay) and feeds it selection
-    // changes from its own root->onMouseDown hook (DesignerEditor.cpp) -
-    // this class itself only tracks state and paints; it does no hit-testing/
-    // mouse handling of its own (Overlay isn't a SubView - see overlay.h).
+    // entire view hierarchy regardless of z-order within it"). Purely a
+    // paint adapter - selection state itself lives on ViewDesignerController
+    // (a const reference, given at construction), not here; this class does
+    // no hit-testing/mouse handling of its own (Overlay isn't a SubView -
+    // see overlay.h) and owns nothing beyond how to draw whatever the
+    // controller currently reports selected.
     //
-    // Multi-select: selected() is kept in click order, so primary()
-    // (selected().back()) is always well-defined - every selected view gets
-    // the outline, only primary() also gets the four corner handles. Visual
-    // only for v1 - dragging a handle doesn't resize anything yet (a
-    // deliberately deferred follow-up).
+    // Multi-select: ViewDesignerController::selected() is kept in click
+    // order, so primary() (selected().back()) is always well-defined -
+    // every selected view gets the outline, only primary() also gets the
+    // four corner handles. Visual only for v1 - dragging a handle doesn't
+    // resize anything yet (a deliberately deferred follow-up).
     class SelectionOverlay : public newui::Overlay
     {
     public:
-        const std::vector<newui::SubView*>& selected() const { return selected_; }
-
-        newui::SubView* primary() const { return selected_.empty() ? nullptr : selected_.back(); }
-
-        bool isSelected(const newui::SubView* view) const;
-
-        // Plain click - replaces the whole selection with just view, or
-        // clears it if view is nullptr (an empty-canvas click).
-        void selectExclusive(newui::SubView* view);
-
-        // Ctrl+click - adds view if not already selected (becoming the new
-        // primary()), removes it otherwise. A no-op for a null view
-        // (Ctrl+click on empty canvas leaves the existing selection alone -
-        // the same convention ListView/TreeView's own kmCtrl handling
-        // already follows elsewhere in newui).
-        void toggleSelection(newui::SubView* view);
-
-        void clearSelection();
+        explicit SelectionOverlay(const ViewDesignerController& controller) : controller_(controller) {}
 
         // view's bounds in the coordinate space Overlay::paint() itself
         // already draws in (overlay.h - (0,0) at the hosting RootView's own
@@ -59,6 +43,6 @@ namespace CodeToolsVsix
         void paint(BLContext& ctx, const newui::Rect& rect) override;
 
     private:
-        std::vector<newui::SubView*> selected_;
+        const ViewDesignerController& controller_;
     };
 }

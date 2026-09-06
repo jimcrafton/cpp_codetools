@@ -3,83 +3,70 @@
 #include <newui/rootview.h>
 #include <newui/subview.h>
 
+#include <blend2d/blend2d.h>
+
 #include <gtest/gtest.h>
 
 using CodeToolsVsix::SelectionOverlay;
+using CodeToolsVsix::ViewDesignerController;
 
-TEST(SelectionOverlay, StartsWithNoSelection)
-{
-    SelectionOverlay overlay;
-    EXPECT_TRUE(overlay.selected().empty());
-    EXPECT_EQ(overlay.primary(), nullptr);
+// Selection state/mutation itself now lives on ViewDesignerController (see
+// test_view_designer_controller.cpp) - SelectionOverlay is purely a paint
+// adapter over a ViewDesignerController it's given, plus the
+// boundsInRootView() geometry helper below, which stays here since it's
+// unrelated to selection state.
+
+namespace {
+    bool anyPixelPainted(const BLImage& surface, int width, int height) {
+        BLImageData data;
+        surface.get_data(&data);
+        const uint8_t* bytes = static_cast<const uint8_t*>(data.pixel_data);
+        for (int row = 0; row < height; ++row) {
+            const uint8_t* rowBytes = bytes + row * data.stride;
+            for (int i = 0; i < width * 4; ++i) {
+                if (rowBytes[i] != 0) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
 }
 
-TEST(SelectionOverlay, SelectExclusiveReplacesWholeSelection)
+TEST(SelectionOverlay, PaintDoesNothingWithNoSelection)
 {
-    SelectionOverlay overlay;
-    newui::SubView a;
-    newui::SubView b;
+    ViewDesignerController controller;
+    SelectionOverlay overlay(controller);
 
-    overlay.selectExclusive(&a);
-    EXPECT_EQ(overlay.selected().size(), 1u);
-    EXPECT_TRUE(overlay.isSelected(&a));
-    EXPECT_EQ(overlay.primary(), &a);
+    BLImage surface;
+    ASSERT_EQ(surface.create(64, 64, BL_FORMAT_PRGB32), BL_SUCCESS);
+    BLContext ctx(surface);
+    ctx.clear_all();
+    overlay.paint(ctx, newui::Rect(0, 0, 64, 64));
+    ctx.end();
 
-    overlay.selectExclusive(&b);
-    EXPECT_EQ(overlay.selected().size(), 1u);
-    EXPECT_FALSE(overlay.isSelected(&a));
-    EXPECT_EQ(overlay.primary(), &b);
+    EXPECT_FALSE(anyPixelPainted(surface, 64, 64));
 }
 
-TEST(SelectionOverlay, SelectExclusiveWithNullClearsSelection)
+TEST(SelectionOverlay, PaintDrawsSomethingForARealSelection)
 {
-    SelectionOverlay overlay;
-    newui::SubView a;
-    overlay.selectExclusive(&a);
+    ViewDesignerController controller;
+    SelectionOverlay overlay(controller);
 
-    overlay.selectExclusive(nullptr);
-    EXPECT_TRUE(overlay.selected().empty());
-    EXPECT_EQ(overlay.primary(), nullptr);
-}
+    newui::RootView root(nullptr, newui::Rect(0, 0, 64, 64), "root");
+    auto* child = new newui::SubView();
+    child->setBounds(newui::Rect(10, 10, 30, 30));
+    root.addChild(child);
+    controller.selectExclusive(child);
 
-TEST(SelectionOverlay, ToggleSelectionAddsThenRemoves)
-{
-    SelectionOverlay overlay;
-    newui::SubView a;
-    newui::SubView b;
-    overlay.selectExclusive(&a);
+    BLImage surface;
+    ASSERT_EQ(surface.create(64, 64, BL_FORMAT_PRGB32), BL_SUCCESS);
+    BLContext ctx(surface);
+    ctx.clear_all();
+    overlay.paint(ctx, newui::Rect(0, 0, 64, 64));
+    ctx.end();
 
-    overlay.toggleSelection(&b);
-    EXPECT_EQ(overlay.selected().size(), 2u);
-    EXPECT_TRUE(overlay.isSelected(&a));
-    EXPECT_TRUE(overlay.isSelected(&b));
-    EXPECT_EQ(overlay.primary(), &b);  // most recently added is primary
-
-    overlay.toggleSelection(&a);
-    EXPECT_EQ(overlay.selected().size(), 1u);
-    EXPECT_FALSE(overlay.isSelected(&a));
-    EXPECT_EQ(overlay.primary(), &b);
-}
-
-TEST(SelectionOverlay, ToggleSelectionWithNullIsANoOp)
-{
-    SelectionOverlay overlay;
-    newui::SubView a;
-    overlay.selectExclusive(&a);
-
-    overlay.toggleSelection(nullptr);
-    EXPECT_EQ(overlay.selected().size(), 1u);
-    EXPECT_EQ(overlay.primary(), &a);
-}
-
-TEST(SelectionOverlay, ClearSelectionEmptiesTheSet)
-{
-    SelectionOverlay overlay;
-    newui::SubView a;
-    overlay.selectExclusive(&a);
-
-    overlay.clearSelection();
-    EXPECT_TRUE(overlay.selected().empty());
+    EXPECT_TRUE(anyPixelPainted(surface, 64, 64));
 }
 
 TEST(SelectionOverlay, BoundsInRootViewForADirectChildOfRootIsItsOwnBounds)

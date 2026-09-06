@@ -8,6 +8,7 @@
 
 #include "CppEditor.h"
 #include "DesignerEditor.h"
+#include "PropertyEditor.h"
 
 // Defined in the reflectgen-generated .cpp (compiled into the `newui`
 // target, global namespace) - self-guarding at the source (only actually
@@ -24,9 +25,22 @@ namespace CodeToolsVsix
     // DesignerEditor/Workspace/Toolbox) ever did. Real gap found via
     // CodeToolsVsix::ToolboxRegistry's reflection-driven category scan
     // coming back empty against a never-populated ReflectionRegistry.
+    //
+    // PropertyEditorRegistry::instance().registerBuiltinEditors() has the
+    // exact same gap - only ever called from test code (test_property_
+    // editor.cpp), never from here - found while wiring up the real
+    // Properties panel (designer-plan.md 6.1 item 5), which would
+    // otherwise resolve zero editors for every property. Unlike
+    // registerReflectionData(), that one wasn't self-guarding at all
+    // (calling it twice would duplicate every entries_ registration) -
+    // fixed directly on PropertyEditorRegistry (a builtinsRegistered_
+    // instance flag, not a global magic static, since registerBuiltinEditors()
+    // is also called on local, non-singleton instances in tests - see its
+    // own comment).
     NativeEditManager::NativeEditManager()
     {
         registerReflectionData();
+        PropertyEditorRegistry::instance().registerBuiltinEditors();
     }
 
 	void NativeEditManager::startRunLoop()
