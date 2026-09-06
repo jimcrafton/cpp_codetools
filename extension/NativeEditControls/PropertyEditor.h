@@ -10,6 +10,7 @@
 #include <vector>
 
 #include <newui/color.h>
+#include <newui/geometry.h>
 #include <newui/reflection.h>
 #include <newui/undostack.h>
 #include <newui/view.h>
@@ -47,6 +48,22 @@ namespace CodeToolsVsix
         virtual std::vector<std::string> dropdownValues() const { return {}; }
         virtual void edit(newui::View* owner) {}  // EditStyle::Dialog
 
+        // EditStyle::SubProperties only (e.g. RectPropertyEditor) - the
+        // whole value decomposed into named synthetic child rows (e.g.
+        // "x"/"y"/"width"/"height") for a compound type that isn't a real
+        // addressable nested Class (PropertiesModel::classifyProperty()
+        // can't turn it into a real Kind::PropertyGroup the normal way -
+        // see PropertiesModel.h's own comment on why). Each sub-property
+        // is read/written by decomposing/recomposing the *whole* value
+        // through this same editor's rawValue()/commitValue() - there's no
+        // real Property/address() backing an individual component, only a
+        // synthetic index PropertiesModel hands back here. Base defaults
+        // are empty/no-op; only a SubProperties-style editor overrides
+        // these.
+        virtual std::vector<std::string> subPropertyNames() const { return {}; }
+        virtual std::string subPropertyValueAsString(std::size_t index) const { return {}; }
+        virtual void setSubPropertyValueFromString(std::size_t index, const std::string& text) {}
+
         const newui::reflection::Property* property() const { return property_; }
 
         // Attaches the UndoStack setValueFromString() pushes through -
@@ -59,6 +76,14 @@ namespace CodeToolsVsix
     protected:
         std::any rawValue() const { return property_->get(instance_); }
         void setRawValue(const std::any& value) const { property_->set(instance_, value); }
+
+        // Commits an already-built value - through undoStack() if one is
+        // attached (undoable), or directly otherwise. Factored out of
+        // setValueFromString() (below) so a SubProperties editor's
+        // setSubPropertyValueFromString() override can commit a freshly
+        // recomposed whole value the same undo-aware way, without
+        // re-parsing it back through parseValue()/a string round-trip.
+        void commitValue(const std::any& newValue) const;
 
         const newui::reflection::Property* property_;
         void* instance_;
@@ -111,6 +136,85 @@ namespace CodeToolsVsix
         using PropertyEditor::PropertyEditor;
         std::string valueAsString() const override;
         std::optional<std::any> parseValue(const std::string& text) const override;
+    };
+
+    // Compact comma-separated text ("x, y" / "width, height" / "x, y,
+    // width, height") *and* EditStyle::SubProperties (individually
+    // editable "x"/"y"/etc rows) - neither newui::Point/Size/Rect property
+    // this is used for (View::origin()/desiredSize()/bounds(), all
+    // returning by value or const-ref) is ever addressable, so none can
+    // become a real Kind::PropertyGroup (PropertiesModel::
+    // classifyProperty() needs a live pointer to recurse into, which none
+    // of these have) - SubProperties decomposes/recomposes the whole
+    // value through this same editor's rawValue()/commitValue() instead,
+    // no real Property/address() needed per component. valueAsString()
+    // stays the single-line summary (used if a caller/test wants the
+    // whole value without expanding); the grid itself always expands a
+    // SubProperties editor rather than showing its single-line form.
+    class PointPropertyEditor : public PropertyEditor
+    {
+    public:
+        using PropertyEditor::PropertyEditor;
+        EditStyle editStyle() const override { return EditStyle::SubProperties; }
+        std::string valueAsString() const override;
+        std::optional<std::any> parseValue(const std::string& text) const override;
+        std::vector<std::string> subPropertyNames() const override { return { "x", "y" }; }
+        std::string subPropertyValueAsString(std::size_t index) const override;
+        void setSubPropertyValueFromString(std::size_t index, const std::string& text) override;
+    };
+
+    class SizePropertyEditor : public PropertyEditor
+    {
+    public:
+        using PropertyEditor::PropertyEditor;
+        EditStyle editStyle() const override { return EditStyle::SubProperties; }
+        std::string valueAsString() const override;
+        std::optional<std::any> parseValue(const std::string& text) const override;
+        std::vector<std::string> subPropertyNames() const override { return { "width", "height" }; }
+        std::string subPropertyValueAsString(std::size_t index) const override;
+        void setSubPropertyValueFromString(std::size_t index, const std::string& text) override;
+    };
+
+    class RectPropertyEditor : public PropertyEditor
+    {
+    public:
+        using PropertyEditor::PropertyEditor;
+        EditStyle editStyle() const override { return EditStyle::SubProperties; }
+        std::string valueAsString() const override;
+        std::optional<std::any> parseValue(const std::string& text) const override;
+        std::vector<std::string> subPropertyNames() const override { return { "x", "y", "width", "height" }; }
+        std::string subPropertyValueAsString(std::size_t index) const override;
+        void setSubPropertyValueFromString(std::size_t index, const std::string& text) override;
+    };
+
+    // A generic dropdown for *any* registered newui::reflection::Enum -
+    // unlike every editor above (each keyed to one fixed C++ type),
+    // PropertyEditorRegistry can't key this one by std::type_index the
+    // same way (every distinct enum is its own type_index) - instead
+    // PropertyEditorRegistry::createEditor() falls back to this, by
+    // looking up ReflectionRegistry::getEnum(property->type()) directly,
+    // once no tag/type-specific entry matches. Reads/writes purely
+    // through Enum's own type-erased toUInt64()/fromUInt64()/tryParse()/
+    // tryToString() (reflection.h) - never needs to know the enum's real
+    // C++ type here, so one editor covers every enum newui ever
+    // registers. Flags-style decompose() (multi-value) editing is out of
+    // scope for v1 - tryToString()/tryParse() already degrade gracefully
+    // for a flags enum (falls back to a raw numeric string), just without
+    // the "Ctrl+Shift"-style combined display decompose() could give.
+    class EnumPropertyEditor : public PropertyEditor
+    {
+    public:
+        EnumPropertyEditor(const newui::reflection::Property* property, void* instance,
+            const newui::reflection::Enum* enumInfo)
+            : PropertyEditor(property, instance), enum_(enumInfo) {}
+
+        EditStyle editStyle() const override { return EditStyle::Dropdown; }
+        std::string valueAsString() const override;
+        std::optional<std::any> parseValue(const std::string& text) const override;
+        std::vector<std::string> dropdownValues() const override;
+
+    private:
+        const newui::reflection::Enum* enum_;
     };
 
     // Keyed (propertyType, owningClass, propertyName) with wildcards

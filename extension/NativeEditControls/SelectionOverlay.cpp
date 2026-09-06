@@ -58,6 +58,18 @@ namespace CodeToolsVsix
 
         BLRgba32 accent = newui::UIColorManager::colorFor(newui::UIColorRole::HighlightBackground).toBLRgba32();
 
+        // See the constructor's own comment - without this, a selection
+        // outline/handle paints straight over the Toolbox/Properties
+        // chrome around the design surface, since Overlay paints on top
+        // of the *entire* hosting RootView pane, not just clipView_'s own
+        // area.
+        bool clipping = clipView_ != nullptr;
+        if (clipping) {
+            newui::Rect clipRect = boundsInRootView(clipView_);
+            ctx.save();
+            ctx.clip_to_rect(BLRect(clipRect.left(), clipRect.top(), clipRect.size().width, clipRect.size().height));
+        }
+
         for (newui::SubView* view : selected) {
             // Inset by 1px - matches Main.dc.html's own
             // ".node-wrap.selected { outline-offset: -1px }".
@@ -73,6 +85,10 @@ namespace CodeToolsVsix
             paintHandle(ctx, bounds.right(), bounds.top(), accent);
             paintHandle(ctx, bounds.left(), bounds.bottom(), accent);
             paintHandle(ctx, bounds.right(), bounds.bottom(), accent);
+        }
+
+        if (clipping) {
+            ctx.restore();
         }
     }
 }

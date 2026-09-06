@@ -210,6 +210,7 @@ namespace CodeToolsVsix
 
         PropertiesModel::Node node = model->nodeAt(path);
         bool isGroupLike = node.kind == PropertiesModel::Kind::PropertyGroup
+            || node.kind == PropertiesModel::Kind::PropertySubGroup
             || node.kind == PropertiesModel::Kind::DelegatesHeader;
 
         // Group-like rows never show the row-selection highlight fill -
@@ -233,7 +234,7 @@ namespace CodeToolsVsix
             // hover fill already uses (a reduced-alpha HighlightBackground).
             ctx.save();
             ctx.set_fill_style(newui::UIColorManager::colorFor(newui::UIColorRole::ControlBorder).toBLRgba32());
-            ctx.set_fill_alpha(0.12);
+            ctx.set_fill_alpha(0.35);
             ctx.fill_rect(BLRect(rect.left(), rect.top(), rect.size().width, rect.size().height));
             ctx.restore();
         }
@@ -267,9 +268,33 @@ namespace CodeToolsVsix
             if (node.kind == PropertiesModel::Kind::DelegatesHeader) {
                 name = "Delegates";
             } else {
-                const newui::reflection::Class* nested = newui::reflection::classinfo(node.property->type());
                 name = node.property->name();
-                typeSuffix = " (" + (nested != nullptr ? nested->name() : std::string("?")) + ")";
+
+                // A Kind::PropertyGroup property (Layout/LayoutParams-
+                // shaped: a polymorphic, addressable pointer with no data
+                // of its own) whose live pointer is currently null (e.g.
+                // a leaf Button's layout()) has nothing real to name -
+                // "(Layout)"/"(LayoutParams)" would just repeat the
+                // always-empty declared base, so this shows "(none)"
+                // instead, same convention as a real "nothing attached"
+                // value. Kind::PropertySubGroup (Rect/Size/Point) never
+                // takes this branch - it always has real synthetic
+                // children regardless of address() (which it doesn't even
+                // use), so getClass()'s own resolved name is always
+                // meaningful there.
+                bool attachedPointerIsNull = node.kind == PropertiesModel::Kind::PropertyGroup
+                    && node.property->isAddressable() && node.property->address(node.ownerInstance) == nullptr;
+                if (attachedPointerIsNull) {
+                    typeSuffix = " (none)";
+                } else {
+                    // getClass(), not classinfo(type()) - so a Layout/
+                    // LayoutParams-typed group header names the real
+                    // attached subclass ("layout (FlexLayout)"), not the
+                    // useless declared base ("layout (Layout)") - see
+                    // PropertiesModel::classifyProperty()'s own comment.
+                    const newui::reflection::Class* nested = node.property->getClass(node.ownerInstance);
+                    typeSuffix = " (" + (nested != nullptr ? nested->name() : std::string("?")) + ")";
+                }
             }
             for (char& c : name) {
                 c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
@@ -305,6 +330,12 @@ namespace CodeToolsVsix
         std::string keyText;
         if (node.kind == PropertiesModel::Kind::DelegateEntry) {
             keyText = node.delegate->name();
+        } else if (node.kind == PropertiesModel::Kind::SubPropertyEntry) {
+            // Filled in below, once the parent compound property's own
+            // PropertyEditor (needed for subPropertyNames() anyway) is
+            // built - left blank here just avoids a second, unnecessary
+            // PropertyEditorRegistry lookup (paintText() below no-ops on
+            // an empty string).
         } else if (node.property != nullptr) {
             keyText = node.property->name();
         }
@@ -328,12 +359,23 @@ namespace CodeToolsVsix
             return;
         }
 
-        // Kind::PropertyLeaf - same registered PropertyEditor
-        // (PropertyEditorRegistry, built 2026-09-03) PropertiesModel used
-        // to classify this node as a leaf in the first place.
+        // Kind::PropertyLeaf/SubPropertyEntry - same registered
+        // PropertyEditor (PropertyEditorRegistry, built 2026-09-03)
+        // PropertiesModel used to classify this node in the first place -
+        // for SubPropertyEntry, node.property/ownerClass/ownerInstance
+        // still describe the *parent* compound property (e.g. "bounds"),
+        // exactly what its own PropertySubGroup node used too.
         std::unique_ptr<PropertyEditor> editor = PropertyEditorRegistry::instance()
             .createEditor(node.property, node.ownerClass, node.ownerInstance);
         if (editor == nullptr) {
+            return;
+        }
+
+        if (node.kind == PropertiesModel::Kind::SubPropertyEntry) {
+            std::vector<std::string> subNames = editor->subPropertyNames();
+            std::string subName = node.subPropertyIndex < subNames.size() ? subNames[node.subPropertyIndex] : std::string();
+            paintText(ctx, keyRect, subName, dimTextColor(*this));
+            paintText(ctx, valueRect, editor->subPropertyValueAsString(node.subPropertyIndex), rowTextColor(*this));
             return;
         }
 

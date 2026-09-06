@@ -107,6 +107,32 @@ TEST_F(PropertyItemTest, PropertyGroupRowForcesSelectedFalseAndPaintsALabel)
     EXPECT_FALSE(lastPaintedSelected_);
 }
 
+TEST_F(PropertyItemTest, PropertyGroupRowWithNoLiveInstanceAttachedStillPaints)
+{
+    // newui::Button (a leaf control) has no layout() attached by default -
+    // "layout" still classifies as Kind::PropertyGroup (Layout is a
+    // registered, addressable, polymorphic property - see
+    // PropertiesModel::classifyProperty()'s own comment), just with a
+    // null address(). This exercises the "(none)" type-suffix branch
+    // (PropertyItem::paint()'s own comment) rather than crashing on the
+    // null pointer.
+    std::vector<const newui::reflection::Property*> properties;
+    classinfo(typeid(newui::Button))->allProperties(properties);
+
+    std::size_t layoutIndex = properties.size();
+    for (std::size_t i = 0; i < properties.size(); ++i) {
+        if (properties[i]->name() == "layout") {
+            layoutIndex = i;
+            break;
+        }
+    }
+    ASSERT_LT(layoutIndex, properties.size());
+    ASSERT_EQ(button_.layout(), nullptr);
+    ASSERT_EQ(model_.nodeAt({layoutIndex}).kind, PropertiesModel::Kind::PropertyGroup);
+
+    EXPECT_TRUE(paintPath({layoutIndex}));
+}
+
 TEST_F(PropertyItemTest, DelegatesHeaderRowForcesSelectedFalseAndPaints)
 {
     std::vector<const newui::reflection::Property*> properties;

@@ -139,7 +139,18 @@ TEST_F(DesignerEditorFileFixture, ClickInsideTheDesignSurfaceSelectsTheHitChild)
     // WorkspaceGetsRealBoundsWhenAddedAlongsideAPreexistingSiblingThenResized
     // above - without this the whole tree stays at its tiny 10x10
     // construction-time bounds and nothing has a real on-screen position.
-    root.setBounds(newui::Rect(0, 0, 1000, 700));
+    // Wide enough that canvasWell() ends up wider than frameProxy_'s own
+    // fixed kDefaultCanvasWidth (640) once Toolbox (220)/Properties (300)/
+    // dividers are reserved - a narrower window leaves frameProxy_
+    // centered-and-overflowing past canvasWell's own edges (a real,
+    // reported bug: handleMouseDownForSelection() used to gate only on
+    // surfaceBounds, frameProxy_/rootViewProxy_'s own - possibly
+    // overflowing - bounds, letting a click on the Properties/Toolbox
+    // chrome still resolve to a design-surface child underneath it), which
+    // would make a click near the surface's own top-left corner (as below)
+    // fall outside the real, visible canvas - not what this test means to
+    // exercise.
+    root.setBounds(newui::Rect(0, 0, 1400, 700));
 
     newui::RootViewProxy* surface = editor.workspace()->rootViewProxy();
     ASSERT_NE(surface, nullptr);
@@ -172,7 +183,10 @@ TEST_F(DesignerEditorFileFixture, CtrlClickAddsASecondControlToTheSelection)
     newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
     CodeToolsVsix::DesignerEditor editor(&root);
     ASSERT_NE(editor.workspace(), nullptr);
-    root.setBounds(newui::Rect(0, 0, 1000, 700));
+    // See ClickInsideTheDesignSurfaceSelectsTheHitChild's own comment for
+    // why this needs to be wide enough that canvasWell() isn't narrower
+    // than frameProxy_'s fixed size.
+    root.setBounds(newui::Rect(0, 0, 1400, 700));
 
     newui::RootViewProxy* surface = editor.workspace()->rootViewProxy();
     ASSERT_NE(surface, nullptr);
@@ -206,7 +220,10 @@ TEST_F(DesignerEditorFileFixture, ClickOutsideTheDesignSurfaceLeavesSelectionUnt
     newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
     CodeToolsVsix::DesignerEditor editor(&root);
     ASSERT_NE(editor.workspace(), nullptr);
-    root.setBounds(newui::Rect(0, 0, 1000, 700));
+    // See ClickInsideTheDesignSurfaceSelectsTheHitChild's own comment for
+    // why this needs to be wide enough that canvasWell() isn't narrower
+    // than frameProxy_'s fixed size.
+    root.setBounds(newui::Rect(0, 0, 1400, 700));
 
     newui::RootViewProxy* surface = editor.workspace()->rootViewProxy();
     ASSERT_NE(surface, nullptr);
@@ -225,6 +242,47 @@ TEST_F(DesignerEditorFileFixture, ClickOutsideTheDesignSurfaceLeavesSelectionUnt
     // still inside the pane) doesn't touch the existing selection.
     root.onMouseDown(root, newui::Point(5.0f, 5.0f), newui::mbmLeftButton, newui::kmUndefined);
     EXPECT_EQ(editor.viewDesignerController().primary(), control);
+}
+
+TEST_F(DesignerEditorFileFixture, ClickInFrameProxysOverflowPastCanvasWellIsIgnored)
+{
+    // Real, reported bug: in a window narrow enough that canvasWell() ends
+    // up narrower than frameProxy_'s own fixed kDefaultCanvasWidth (640),
+    // frameProxy_ (centered inside canvasWell) overflows past canvasWell's
+    // own edges on screen - handleMouseDownForSelection() used to gate
+    // only on surfaceBounds (frameProxy_/rootViewProxy_'s own, possibly-
+    // overflowing bounds), so a click that landed on the Properties pane
+    // (or one of its own expand arrows) but happened to fall within that
+    // overflow could still get misread as a click on the design surface,
+    // silently changing the canvas selection out from under whatever was
+    // actually clicked. Deliberately narrow (not the 1400-wide window the
+    // other click tests above use) specifically to reproduce that overflow.
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&root);
+    ASSERT_NE(editor.workspace(), nullptr);
+    root.setBounds(newui::Rect(0, 0, 1000, 700));
+
+    newui::RootViewProxy* surface = editor.workspace()->rootViewProxy();
+    ASSERT_NE(surface, nullptr);
+    auto* control = new newui::SubView();
+    control->setName("probeControl");
+    control->setVisible(true);
+    control->setBounds(newui::Rect(10, 10, 40, 20));
+    surface->addChild(control);
+
+    newui::Rect surfaceBounds = CodeToolsVsix::SelectionOverlay::boundsInRootView(surface);
+    newui::Rect canvasWellBounds = CodeToolsVsix::SelectionOverlay::boundsInRootView(editor.workspace()->canvasWell());
+    // Confirms this test setup actually reproduces the overflow condition -
+    // otherwise the assertion below would trivially pass for the wrong
+    // reason (nothing to do with the bug at all).
+    ASSERT_LT(canvasWellBounds.size().width, CodeToolsVsix::Workspace::kDefaultCanvasWidth);
+
+    newui::Point nearControl(surfaceBounds.left() + 20.0f, surfaceBounds.top() + 15.0f);
+    ASSERT_FALSE(canvasWellBounds.contains(nearControl))
+        << "expected this point to fall in frameProxy_'s overflow past canvasWell's own edge";
+
+    root.onMouseDown(root, nearControl, newui::mbmLeftButton, newui::kmUndefined);
+    EXPECT_EQ(editor.viewDesignerController().primary(), nullptr);
 }
 
 TEST_F(DesignerEditorFileFixture, LoadFailsForAPathNotUnderAResourcesFolder)

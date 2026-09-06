@@ -27,7 +27,24 @@ namespace CodeToolsVsix
     class SelectionOverlay : public newui::Overlay
     {
     public:
-        explicit SelectionOverlay(const ViewDesignerController& controller) : controller_(controller) {}
+        // clipView, when given, restricts all painting to its own bounds
+        // (boundsInRootView(clipView)) - DesignerEditor passes
+        // workspace_->canvasWell(), the actual Splitter-constrained
+        // viewport pane the design canvas sits in (not frameProxy_/
+        // rootViewProxy() - frameProxy_ is a *fixed* 640x460 rect that can
+        // genuinely extend past canvasWell_'s own edge into the Toolbox/
+        // Properties panes' screen region once the window is narrow
+        // enough, so clipping to it wouldn't help - see DesignerEditor::
+        // setupUI()'s own comment). A real, reported bug otherwise: with
+        // no clip at all, an outline/handle for a selection whose bounds
+        // happen to fall (even partially) outside that area paints
+        // straight over the Toolbox/Properties chrome around it, since
+        // Overlay paints on top of the *entire* hosting RootView pane
+        // (overlay.h), not just the design surface. Defaults to nullptr
+        // (no clip, the original behavior) so existing tests constructing
+        // this with just a controller still compile.
+        explicit SelectionOverlay(const ViewDesignerController& controller, const newui::View* clipView = nullptr)
+            : controller_(controller), clipView_(clipView) {}
 
         // view's bounds in the coordinate space Overlay::paint() itself
         // already draws in (overlay.h - (0,0) at the hosting RootView's own
@@ -44,5 +61,6 @@ namespace CodeToolsVsix
 
     private:
         const ViewDesignerController& controller_;
+        const newui::View* clipView_;
     };
 }

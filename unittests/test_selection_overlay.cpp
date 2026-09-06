@@ -69,6 +69,67 @@ TEST(SelectionOverlay, PaintDrawsSomethingForARealSelection)
     EXPECT_TRUE(anyPixelPainted(surface, 64, 64));
 }
 
+TEST(SelectionOverlay, PaintClipsToTheGivenClipViewsBounds)
+{
+    // A real, reported bug: with no clip, a selection outline paints
+    // straight over the Toolbox/Properties chrome around the design
+    // surface, since Overlay paints on top of the *entire* hosting
+    // RootView pane (overlay.h), not just the design surface's own area.
+    // clipView here (left half of the canvas) stands in for
+    // DesignerEditor's real workspace_->rootViewProxy() - child's bounds
+    // (right half) fall entirely outside it, so nothing should paint at
+    // all once clipped.
+    ViewDesignerController controller;
+
+    newui::RootView root(nullptr, newui::Rect(0, 0, 64, 64), "root");
+    auto* clipView = new newui::SubView();
+    clipView->setBounds(newui::Rect(0, 0, 32, 64));
+    root.addChild(clipView);
+
+    auto* child = new newui::SubView();
+    child->setBounds(newui::Rect(40, 10, 20, 20));
+    root.addChild(child);
+    controller.selectExclusive(child);
+
+    SelectionOverlay overlay(controller, clipView);
+
+    BLImage surface;
+    ASSERT_EQ(surface.create(64, 64, BL_FORMAT_PRGB32), BL_SUCCESS);
+    BLContext ctx(surface);
+    ctx.clear_all();
+    overlay.paint(ctx, newui::Rect(0, 0, 64, 64));
+    ctx.end();
+
+    EXPECT_FALSE(anyPixelPainted(surface, 64, 64));
+}
+
+TEST(SelectionOverlay, PaintWithNoClipViewGivenStaysUnclipped)
+{
+    // Same selection (entirely in the canvas' right half) as
+    // PaintClipsToTheGivenClipViewsBounds above, but with no clipView
+    // given at all (the default) - confirms that overload keeps its
+    // original, unclipped behavior, so every existing caller/test
+    // constructing SelectionOverlay with just a controller is unaffected.
+    ViewDesignerController controller;
+
+    newui::RootView root(nullptr, newui::Rect(0, 0, 64, 64), "root");
+    auto* child = new newui::SubView();
+    child->setBounds(newui::Rect(40, 10, 20, 20));
+    root.addChild(child);
+    controller.selectExclusive(child);
+
+    SelectionOverlay overlay(controller);
+
+    BLImage surface;
+    ASSERT_EQ(surface.create(64, 64, BL_FORMAT_PRGB32), BL_SUCCESS);
+    BLContext ctx(surface);
+    ctx.clear_all();
+    overlay.paint(ctx, newui::Rect(0, 0, 64, 64));
+    ctx.end();
+
+    EXPECT_TRUE(anyPixelPainted(surface, 64, 64));
+}
+
 TEST(SelectionOverlay, BoundsInRootViewForADirectChildOfRootIsItsOwnBounds)
 {
     newui::RootView root(nullptr, newui::Rect(0, 0, 500, 500), "root");

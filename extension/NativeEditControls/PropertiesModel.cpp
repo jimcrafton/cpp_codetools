@@ -22,12 +22,21 @@ namespace CodeToolsVsix
         node.ownerClass = ownerClass;
         node.ownerInstance = ownerInstance;
 
-        if (PropertyEditorRegistry::instance().createEditor(property, ownerClass, ownerInstance) != nullptr) {
-            node.kind = Kind::PropertyLeaf;
+        if (auto editor = PropertyEditorRegistry::instance().createEditor(property, ownerClass, ownerInstance)) {
+            node.kind = editor->editStyle() == PropertyEditor::EditStyle::SubProperties
+                ? Kind::PropertySubGroup : Kind::PropertyLeaf;
             return node;
         }
 
-        const Class* nested = classinfo(property->type());
+        // getClass(), not classinfo(type()) - a property whose declared
+        // type is a polymorphic base with no data of its own (Layout/
+        // LayoutParams) resolves to the real, concrete runtime subclass
+        // instead (FlexLayout/AnchorLayoutParams/...), which is what
+        // actually has properties worth expanding into. Harmless/
+        // identical to classinfo(type()) for every non-polymorphic
+        // property (ViewStyle, etc.) - see newui::reflection::Property::
+        // getClass()'s own comment.
+        const Class* nested = property->getClass(ownerInstance);
         if (nested != nullptr && property->isAddressable()) {
             node.kind = Kind::PropertyGroup;
             return node;
@@ -58,7 +67,7 @@ namespace CodeToolsVsix
             return Node();
         }
         case Kind::PropertyGroup: {
-            const Class* nested = classinfo(container.property->type());
+            const Class* nested = container.property->getClass(container.ownerInstance);
             void* nestedInstance = nested != nullptr ? container.property->address(container.ownerInstance) : nullptr;
             if (nested == nullptr || nestedInstance == nullptr) {
                 return Node();
@@ -69,6 +78,24 @@ namespace CodeToolsVsix
                 return classifyProperty(properties[index], nested, nestedInstance);
             }
             return Node();
+        }
+        case Kind::PropertySubGroup: {
+            auto editor = PropertyEditorRegistry::instance().createEditor(
+                container.property, container.ownerClass, container.ownerInstance);
+            if (editor == nullptr) {
+                return Node();
+            }
+            std::vector<std::string> names = editor->subPropertyNames();
+            if (index >= names.size()) {
+                return Node();
+            }
+            Node node;
+            node.kind = Kind::SubPropertyEntry;
+            node.property = container.property;
+            node.ownerClass = container.ownerClass;
+            node.ownerInstance = container.ownerInstance;
+            node.subPropertyIndex = index;
+            return node;
         }
         case Kind::DelegatesHeader: {
             std::vector<const Delegate*> delegates;
@@ -98,7 +125,7 @@ namespace CodeToolsVsix
             return properties.size() + (delegates.empty() ? 0 : 1);
         }
         case Kind::PropertyGroup: {
-            const Class* nested = classinfo(node.property->type());
+            const Class* nested = node.property->getClass(node.ownerInstance);
             void* nestedInstance = nested != nullptr ? node.property->address(node.ownerInstance) : nullptr;
             if (nested == nullptr || nestedInstance == nullptr) {
                 return 0;
@@ -106,6 +133,11 @@ namespace CodeToolsVsix
             std::vector<const Property*> properties;
             nested->allProperties(properties);
             return properties.size();
+        }
+        case Kind::PropertySubGroup: {
+            auto editor = PropertyEditorRegistry::instance().createEditor(
+                node.property, node.ownerClass, node.ownerInstance);
+            return editor != nullptr ? editor->subPropertyNames().size() : 0;
         }
         case Kind::DelegatesHeader: {
             std::vector<const Delegate*> delegates;
@@ -150,7 +182,14 @@ namespace CodeToolsVsix
         case Kind::PropertyLeaf:
         case Kind::PropertyGroup:
         case Kind::PropertyUnsupported:
+        case Kind::PropertySubGroup:
             return node.property->name();
+        case Kind::SubPropertyEntry: {
+            auto editor = PropertyEditorRegistry::instance().createEditor(
+                node.property, node.ownerClass, node.ownerInstance);
+            std::vector<std::string> names = editor != nullptr ? editor->subPropertyNames() : std::vector<std::string>();
+            return node.subPropertyIndex < names.size() ? names[node.subPropertyIndex] : std::string();
+        }
         case Kind::DelegatesHeader:
             return std::string("Delegates");
         case Kind::DelegateEntry:

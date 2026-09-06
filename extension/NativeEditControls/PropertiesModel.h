@@ -45,7 +45,19 @@ namespace CodeToolsVsix
     class PropertiesModel : public newui::TreeModel
     {
     public:
-        enum class Kind { Root, PropertyLeaf, PropertyGroup, PropertyUnsupported, DelegatesHeader, DelegateEntry, Invalid };
+        enum class Kind {
+            Root, PropertyLeaf, PropertyGroup, PropertyUnsupported, DelegatesHeader, DelegateEntry,
+            // A PropertyEditor::EditStyle::SubProperties leaf (e.g. bounds,
+            // a Rect) - PropertySubGroup is the group-header row itself
+            // (paints like PropertyGroup, but its children are synthetic,
+            // not a real nested Class/address()); SubPropertyEntry is one
+            // such synthetic child (e.g. "x") - see PropertyEditor::
+            // subPropertyNames()/subPropertyValueAsString()'s own comment
+            // for why these can't just be real PropertyGroup/PropertyLeaf
+            // nodes.
+            PropertySubGroup, SubPropertyEntry,
+            Invalid
+        };
 
         // Everything a caller (PropertyItem, the orchestrating TreeView)
         // needs beyond a display string to actually build a PropertyEditor
@@ -59,6 +71,12 @@ namespace CodeToolsVsix
             const newui::reflection::Class* ownerClass = nullptr;
             void* ownerInstance = nullptr;
             const newui::reflection::Delegate* delegate = nullptr;
+            // Kind::SubPropertyEntry only - property/ownerClass/
+            // ownerInstance above still describe the *parent* compound
+            // property (e.g. "bounds"), same as they would for its own
+            // PropertySubGroup node; this is the synthetic child's own
+            // index into PropertyEditor::subPropertyNames().
+            std::size_t subPropertyIndex = 0;
         };
 
         // Re-points at a newly-selected object (nullptr clears to an empty

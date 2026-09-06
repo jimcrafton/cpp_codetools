@@ -154,7 +154,19 @@ namespace CodeToolsVsix
         // itself would never fire for a click that lands on one of its own
         // children instead (hitTestChildren() always dispatches to the
         // deepest hit target, not its ancestors).
-        auto selectionOverlay = std::make_unique<SelectionOverlay>(viewDesignerController_);
+        // workspace_->canvasWell(), not rootViewProxy()/frameProxy() - a
+        // real, caught mistake: frameProxy_ is a *fixed* kDefaultCanvasWidth/
+        // Height (640x460) rect, centered inside canvasWell_ (the actual
+        // Splitter-constrained viewport pane - see Workspace.cpp's own
+        // "canvasWell_ is the one that grows/shrinks" comment). Clipping to
+        // frameProxy_/rootViewProxy_'s own bounds does nothing once the
+        // window is narrow enough that the fixed 640px canvas genuinely
+        // extends past canvasWell_'s own right edge, into the same screen
+        // region the Properties pane occupies - canvasWell_ itself is the
+        // one view guaranteed never to overlap the Toolbox/Properties
+        // panes either way, so it's the right clip target regardless of
+        // how frameProxy_'s own fixed size compares to it.
+        auto selectionOverlay = std::make_unique<SelectionOverlay>(viewDesignerController_, workspace_->canvasWell());
         selectionOverlay_ = selectionOverlay.get();
         root->setOverlay(std::move(selectionOverlay));
         root->onMouseDown.add(this, &DesignerEditor::handleMouseDownForSelection);
@@ -200,12 +212,27 @@ namespace CodeToolsVsix
         // the full reasoning for why this is driven from here rather than
         // CanvasWell's own onMouseDown.
         CanvasWell* canvasWell = workspace_ ? workspace_->canvasWell() : nullptr;
+        newui::Rect canvasWellBounds = canvasWell != nullptr ? SelectionOverlay::boundsInRootView(canvasWell) : newui::Rect();
         if (canvasWell != nullptr) {
-            newui::Rect canvasWellBounds = SelectionOverlay::boundsInRootView(canvasWell);
             newui::Point canvasLocalPt(pt.x - canvasWellBounds.left(), pt.y - canvasWellBounds.top());
             if (canvasWell->beginResizeDrag(canvasLocalPt)) {
                 return newui::SyncReturn::Handled;
             }
+        }
+
+        // Gate on canvasWellBounds first, before ever consulting
+        // rootViewProxy()'s own bounds below - a real, reported bug
+        // otherwise (same root cause SelectionOverlay's own clipView_ was
+        // added to fix): frameProxy_ is a *fixed* 640x460 rect that can
+        // extend past canvasWell's own edge into the Toolbox/Properties
+        // panes' screen region once the window is narrow enough, so a
+        // click on e.g. a Properties row's own expand arrow could still
+        // satisfy surfaceBounds.contains(pt) below and silently change the
+        // canvas selection underneath it. canvasWell is the one view
+        // guaranteed never to overlap those panes, so nothing outside it
+        // can possibly be a real click on the design surface.
+        if (canvasWell == nullptr || !canvasWellBounds.contains(pt)) {
+            return newui::SyncReturn::Ignored;
         }
 
         newui::RootViewProxy* surface = workspace_ ? workspace_->rootViewProxy() : nullptr;
@@ -214,10 +241,11 @@ namespace CodeToolsVsix
         }
 
         // pt is already root-local (same space RootView::mouseDown() passes
-        // to onMouseDown), matching what boundsInRootView() computes -
-        // outside the design surface entirely (a click on the Toolbox/
-        // Properties/animation dock chrome) leaves the current selection
-        // untouched.
+        // to onMouseDown), matching what boundsInRootView() computes - the
+        // canvasWellBounds gate above already excluded anything outside
+        // the visible canvas viewport; this one still matters on its own
+        // terms too (frameProxy_'s fixed size can leave real empty margin
+        // *inside* canvasWell around a smaller/centered canvas).
         newui::Rect surfaceBounds = SelectionOverlay::boundsInRootView(surface);
         if (!surfaceBounds.contains(pt)) {
             return newui::SyncReturn::Ignored;
