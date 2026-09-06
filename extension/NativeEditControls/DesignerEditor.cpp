@@ -161,7 +161,7 @@ namespace CodeToolsVsix
         root->onMouseMove.add(this, &DesignerEditor::handleMouseMoveForResize);
         root->onMouseUp.add(this, &DesignerEditor::handleMouseUpForResize);
 
-        // PropertiesPanel (and, later, Document Outline) learn about
+        // PropertiesGrid (and, later, Document Outline) learn about
         // selection changes this way - through ViewDesignerController's
         // own notification, not because this class knows they exist.
         viewDesignerController_.onSelectionChanged.add(this, &DesignerEditor::handleSelectionChanged);

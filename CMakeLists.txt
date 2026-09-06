@@ -194,8 +194,12 @@ add_library(NativeEditControls SHARED
     extension/NativeEditControls/CanvasWell.cpp
     extension/NativeEditControls/ViewDesignerController.h
     extension/NativeEditControls/ViewDesignerController.cpp
-    extension/NativeEditControls/PropertiesPanel.h
-    extension/NativeEditControls/PropertiesPanel.cpp
+    extension/NativeEditControls/PropertiesModel.h
+    extension/NativeEditControls/PropertiesModel.cpp
+    extension/NativeEditControls/PropertyItem.h
+    extension/NativeEditControls/PropertyItem.cpp
+    extension/NativeEditControls/PropertiesGrid.h
+    extension/NativeEditControls/PropertiesGrid.cpp
     extension/NativeEditControls/SelectionOverlay.h
     extension/NativeEditControls/SelectionOverlay.cpp
 
@@ -245,7 +249,9 @@ add_executable(testharness
     extension/NativeEditControls/Workspace.cpp
     extension/NativeEditControls/CanvasWell.cpp
     extension/NativeEditControls/ViewDesignerController.cpp
-    extension/NativeEditControls/PropertiesPanel.cpp
+    extension/NativeEditControls/PropertiesModel.cpp
+    extension/NativeEditControls/PropertyItem.cpp
+    extension/NativeEditControls/PropertiesGrid.cpp
     extension/NativeEditControls/SelectionOverlay.cpp
     extension/NativeEditControls/TextEncoding.cpp
     extension/NativeEditControls/Logging.cpp)

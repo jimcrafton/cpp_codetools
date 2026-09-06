@@ -56,7 +56,7 @@ namespace CodeToolsVsix
         SelectionOverlay* selectionOverlay() const { return selectionOverlay_; }
 
         // Owns the real selection state/logic (ViewDesignerController.h) -
-        // PropertiesPanel (and, later, Document Outline) subscribe to its
+        // PropertiesGrid (and, later, Document Outline) subscribe to its
         // onSelectionChanged independently, without this class needing to
         // know they exist (see the onSelectionChanged wiring in setupUI()).
         ViewDesignerController& viewDesignerController() { return viewDesignerController_; }
@@ -112,7 +112,7 @@ namespace CodeToolsVsix
 
         // Pushes viewDesignerController_'s new primary() into the
         // Properties panel - the one place this class still knows about a
-        // specific selection consumer, since PropertiesPanel is real and
+        // specific selection consumer, since PropertiesGrid is real and
         // built today; Document Outline (designer-plan.md 6.1 item 4, not
         // built yet) will subscribe its own handler onto
         // viewDesignerController_.onSelectionChanged the same way, once it

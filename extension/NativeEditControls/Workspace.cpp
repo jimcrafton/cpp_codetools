@@ -110,13 +110,17 @@ namespace CodeToolsVsix
         canvasWellBuilder.child(frameProxy_);
         canvasWell_ = canvasWellBuilder.build();
 
-        // PropertiesPanel's own constructor already sets visible(true) and
+        // PropertiesGrid's own constructor already sets visible(true) and
         // its background color (matching FrameProxy/RootViewProxy/
         // Splitter's own convention of doing that in the constructor
         // itself, not styleAsPane()) - it's a ScrollView, not a plain
         // SubView, so styleAsPane() (typed for ViewBuilder<SubView>&)
-        // doesn't apply here anyway.
-        newui::ViewBuilder<PropertiesPanel> propertiesBuilder;
+        // doesn't apply here anyway. Replaces the old PropertiesPanel
+        // (bluesky/property-grid-design.md's TreeView-based redesign,
+        // built this session) - same setSelection(newui::SubView*) call
+        // shape, so DesignerEditor::handleSelectionChanged() needed no
+        // change at all.
+        newui::ViewBuilder<PropertiesGrid> propertiesBuilder;
         propertiesBuilder.name("workspacePropertiesPane");
         propertiesPane_ = propertiesBuilder.build();
 

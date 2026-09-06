@@ -30,7 +30,9 @@ add_executable(nativeeditcontrols_tests
     test_toolbox_registry.cpp
     test_toolbox.cpp
     test_view_designer_controller.cpp
-    test_properties_panel.cpp
+    test_properties_model.cpp
+    test_property_item.cpp
+    test_properties_grid.cpp
     test_selection_overlay.cpp
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/PropertyEditor.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/ComponentEditor.cpp"
@@ -44,7 +46,9 @@ add_executable(nativeeditcontrols_tests
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/Workspace.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/CanvasWell.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/ViewDesignerController.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/PropertiesPanel.cpp"
+    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/PropertiesModel.cpp"
+    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/PropertyItem.cpp"
+    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/PropertiesGrid.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/SelectionOverlay.cpp"
 )
 
