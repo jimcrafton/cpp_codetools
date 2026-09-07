@@ -37,4 +37,10 @@ namespace CodeToolsVsix
         selected_.clear();
         onSelectionChanged(*this);
     }
+
+    void ViewDesignerController::setSelection(std::vector<newui::SubView*> views)
+    {
+        selected_ = std::move(views);
+        onSelectionChanged(*this);
+    }
 }

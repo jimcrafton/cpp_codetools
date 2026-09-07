@@ -120,13 +120,40 @@ namespace CodeToolsVsix
         // built this session) - same setSelection(newui::SubView*) call
         // shape, so DesignerEditor::handleSelectionChanged() needed no
         // change at all.
+        // Document Outline (designer-plan.md 6.1 item 4) - backed by
+        // ViewDesignerModel via setViewDesignerModel(), wired once
+        // DesignerEditor's own model exists (Workspace itself never
+        // constructs one - see DocumentOutline.h's own header comment for
+        // why that stays a plain, shared newui::Model rather than
+        // something Workspace owns).
+        newui::ViewBuilder<DocumentOutline> outlineBuilder;
+        outlineBuilder.name("workspaceDocumentOutlinePane");
+        documentOutlinePane_ = outlineBuilder.build();
+
         newui::ViewBuilder<PropertiesGrid> propertiesBuilder;
         propertiesBuilder.name("workspacePropertiesPane");
         propertiesPane_ = propertiesBuilder.build();
 
+        // rightDock: documentOutlinePane_ over propertiesPane_, a vertical
+        // split - fixedPane(First) is Splitter's own default (the Outline
+        // pinned at kDocumentOutlinePaneHeight, Properties absorbs the
+        // rest), matching Main.dc.html's own ".outline-panel"-over-
+        // ".properties-panel" stack (a fixed proportion there; a real,
+        // user-draggable Splitter here instead - see
+        // kDocumentOutlinePaneHeight's own comment).
+        newui::ViewBuilder<newui::Splitter> rightDockBuilder;
+        rightDockBuilder.name("workspaceRightDock")
+            .configure([](newui::Splitter& s) {
+                s.setOrientation(newui::Orientation::Vertical);
+                s.setSplitPosition(kDocumentOutlinePaneHeight);
+                s.setDividerThickness(kDividerThickness);
+            });
+        rightDockBuilder.child(documentOutlinePane_).child(propertiesPane_);
+        newui::Splitter* rightDock = rightDockBuilder.build();
+
         // centerAndRight: canvasWell_ (holding the design space) |
-        // propertiesPane_, a horizontal split - fixedPane(Second) so
-        // propertiesPane_ (the right-hand dock) stays pinned at its own
+        // rightDock, a horizontal split - fixedPane(Second) so rightDock
+        // (the Outline/Properties column) stays pinned at its own
         // configured width and canvasWell_ is the one that grows/shrinks
         // on any resize, matching the standard docking-IDE convention (and
         // bluesky/designer-surface/Main.dc.html's own
@@ -138,7 +165,7 @@ namespace CodeToolsVsix
                 s.setSplitPosition(kPropertiesPaneWidth);
                 s.setDividerThickness(kDividerThickness);
             });
-        centerAndRightBuilder.child(canvasWell_).child(propertiesPane_);
+        centerAndRightBuilder.child(canvasWell_).child(rightDock);
         newui::Splitter* centerAndRight = centerAndRightBuilder.build();
 
         // Double-click an entry creates it and attaches it directly onto
@@ -157,6 +184,7 @@ namespace CodeToolsVsix
                     // frameProxy_ are above.
                     created->setDesignTime(true);
                     rootViewProxy_->addChild(created);
+                    onDesignSurfaceChanged(*this);
                     return newui::SyncReturn::Handled;
                 });
             });

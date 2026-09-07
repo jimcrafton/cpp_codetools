@@ -1,9 +1,11 @@
 #pragma once
 
 #include "CanvasWell.h"
+#include "DocumentOutline.h"
 #include "PropertiesGrid.h"
 #include "Toolbox.h"
 
+#include <newui/delegate.h>
 #include <newui/frameproxy.h>
 #include <newui/rootviewproxy.h>
 #include <newui/splitter.h>
@@ -44,6 +46,16 @@ namespace CodeToolsVsix
         static constexpr float kToolboxPaneWidth = 220.0f;
         static constexpr float kPropertiesPaneWidth = 300.0f;
 
+        // Document Outline's own fixed height within the right-hand dock,
+        // above Properties (which absorbs the rest) - Main.dc.html's own
+        // ".outline-panel" is a relative "flex: 0 0 38%" of the whole
+        // rightpane's height, not a literal px value the way
+        // kPropertiesPaneWidth's 300px was, so this is a reasonable
+        // initial default rather than a direct port - the boundary is a
+        // real, user-draggable newui::Splitter (rightDock, Workspace.cpp),
+        // not fixed like Main.dc.html's own flex proportion.
+        static constexpr float kDocumentOutlinePaneHeight = 180.0f;
+
         // The Animations preview dock's own fixed height - kept small
         // deliberately (designer-plan.md's "in-context slice", not full
         // curve editing) relative to the main Toolbox/design-surface/
@@ -70,16 +82,27 @@ namespace CodeToolsVsix
         newui::SubView* topBar() const { return topBar_; }
         CanvasWell* canvasWell() const { return canvasWell_; }
         Toolbox* toolboxPane() const { return toolboxPane_; }
+        DocumentOutline* documentOutlinePane() const { return documentOutlinePane_; }
         PropertiesGrid* propertiesPane() const { return propertiesPane_; }
         newui::SubView* animationPane() const { return animationPane_; }
         newui::SubView* statusBar() const { return statusBar_; }
         newui::FrameProxy* frameProxy() const { return frameProxy_; }
         newui::RootViewProxy* rootViewProxy() const { return rootViewProxy_; }
 
+        // Fired right after anything here mutates rootViewProxy()'s own
+        // children directly (today: just the Toolbox double-click-to-add
+        // wiring below) - DesignerEditor subscribes to this to know when
+        // its own ViewDesignerModel needs refresh()ing, without Workspace
+        // needing to know that type exists (same "expose a delegate,
+        // don't reach into the owner" shape Toolbox::onEntryActivated
+        // already established).
+        newui::Delegate<Workspace> onDesignSurfaceChanged;
+
     private:
         newui::SubView* topBar_ = nullptr;
         CanvasWell* canvasWell_ = nullptr;
         Toolbox* toolboxPane_ = nullptr;
+        DocumentOutline* documentOutlinePane_ = nullptr;
         PropertiesGrid* propertiesPane_ = nullptr;
         newui::SubView* animationPane_ = nullptr;
         newui::SubView* statusBar_ = nullptr;

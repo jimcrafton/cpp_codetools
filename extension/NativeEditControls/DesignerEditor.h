@@ -2,10 +2,12 @@
 #include <Windows.h>
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 #include "NativeEditor.h"
 #include "SelectionOverlay.h"
 #include "ViewDesignerController.h"
+#include "ViewDesignerModel.h"
 #include "Workspace.h"
 
 namespace CodeToolsVsix
@@ -56,11 +58,22 @@ namespace CodeToolsVsix
         SelectionOverlay* selectionOverlay() const { return selectionOverlay_; }
 
         // Owns the real selection state/logic (ViewDesignerController.h) -
-        // PropertiesGrid (and, later, Document Outline) subscribe to its
+        // PropertiesGrid and Document Outline both subscribe to its
         // onSelectionChanged independently, without this class needing to
         // know they exist (see the onSelectionChanged wiring in setupUI()).
         ViewDesignerController& viewDesignerController() { return viewDesignerController_; }
         const ViewDesignerController& viewDesignerController() const { return viewDesignerController_; }
+
+        // The real Model behind viewDesignerController() (Controller::
+        // setModel(), wired in setupUI()) and Document Outline's own
+        // DocumentOutlineModel (a thin TreeModel adapter over this, see
+        // DocumentOutline.h) - one shared, live view onto
+        // workspace()->rootViewProxy()'s tree, not a copy. refresh()d
+        // whenever that tree structurally changes elsewhere (load()
+        // below, Workspace's own Toolbox-add wiring via
+        // onDesignSurfaceChanged).
+        ViewDesignerModel& viewDesignerModel() { return viewDesignerModel_; }
+        const ViewDesignerModel& viewDesignerModel() const { return viewDesignerModel_; }
 
         // filePath must be a real "<root>\Resources\<bundleName>.newui" -
         // derives bundleName/root from it (see resolveBundleNameAndRoot(),
@@ -110,17 +123,31 @@ namespace CodeToolsVsix
         newui::SyncReturn handleMouseUpForResize(newui::View& sender, const newui::Point& pt,
             std::uint32_t btnMask, std::uint32_t keyMask);
 
-        // Pushes viewDesignerController_'s new primary() into the
-        // Properties panel - the one place this class still knows about a
-        // specific selection consumer, since PropertiesGrid is real and
-        // built today; Document Outline (designer-plan.md 6.1 item 4, not
-        // built yet) will subscribe its own handler onto
-        // viewDesignerController_.onSelectionChanged the same way, once it
-        // exists, without needing to touch this one.
+        // Pushes viewDesignerController_'s new selection into both
+        // Properties (primary() only - it's a single-object panel) and
+        // Document Outline (the full selected() list, since Outline's own
+        // TreeView supports real multi-select - see DocumentOutline::
+        // setSelection()'s own comment for why this doesn't loop forever
+        // with handleOutlineSelectionActivated below).
         newui::SyncReturn handleSelectionChanged(ViewDesignerController& sender);
+
+        // The reverse direction - Document Outline's own row click/
+        // Ctrl+click resolved a new selection on its own (real TreeView
+        // input, not a programmatic setSelection() call - see
+        // DocumentOutline::onSelectionActivated's own comment) - applies
+        // it to the shared controller, which in turn calls
+        // handleSelectionChanged() above (a no-op back into the Outline,
+        // since it's already showing exactly this selection).
+        newui::SyncReturn handleOutlineSelectionActivated(DocumentOutline& sender, const std::vector<newui::SubView*>& views);
+
+        // Refreshes viewDesignerModel_ after Workspace's own Toolbox-add
+        // wiring mutates rootViewProxy()'s children directly (see
+        // Workspace::onDesignSurfaceChanged's own comment).
+        newui::SyncReturn handleDesignSurfaceChanged(Workspace& sender);
 
         Workspace* workspace_ = nullptr;
         SelectionOverlay* selectionOverlay_ = nullptr;
         ViewDesignerController viewDesignerController_;
+        ViewDesignerModel viewDesignerModel_;
     };
 }

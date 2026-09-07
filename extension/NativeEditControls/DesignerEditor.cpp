@@ -173,10 +173,24 @@ namespace CodeToolsVsix
         root->onMouseMove.add(this, &DesignerEditor::handleMouseMoveForResize);
         root->onMouseUp.add(this, &DesignerEditor::handleMouseUpForResize);
 
-        // PropertiesGrid (and, later, Document Outline) learn about
-        // selection changes this way - through ViewDesignerController's
-        // own notification, not because this class knows they exist.
+        // PropertiesGrid and Document Outline both learn about selection
+        // changes this way - through ViewDesignerController's own
+        // notification, not because this class knows they exist.
         viewDesignerController_.onSelectionChanged.add(this, &DesignerEditor::handleSelectionChanged);
+
+        // viewDesignerModel_ is the real Model behind both
+        // viewDesignerController_ (Controller::setModel(), previously
+        // left unpointed - see ViewDesignerModel.h's own header comment)
+        // and Document Outline's own DocumentOutlineModel adapter - wired
+        // to workspace_->rootViewProxy() once, here, since that pointer's
+        // identity never changes for this editor's lifetime (only its
+        // children do, over time - see refresh()'s own call sites below
+        // and in load()).
+        viewDesignerModel_.setRoot(workspace_->rootViewProxy());
+        viewDesignerController_.setModel(&viewDesignerModel_);
+        workspace_->documentOutlinePane()->setViewDesignerModel(&viewDesignerModel_);
+        workspace_->documentOutlinePane()->onSelectionActivated.add(this, &DesignerEditor::handleOutlineSelectionActivated);
+        workspace_->onDesignSurfaceChanged.add(this, &DesignerEditor::handleDesignSurfaceChanged);
 
         if (!this->rootViewOwned_) {
             if (!root->initialize())
@@ -309,7 +323,21 @@ namespace CodeToolsVsix
     {
         if (workspace_ != nullptr) {
             workspace_->propertiesPane()->setSelection(sender.primary());
+            workspace_->documentOutlinePane()->setSelection(sender.selected());
         }
+        return newui::SyncReturn::Ignored;
+    }
+
+    newui::SyncReturn DesignerEditor::handleOutlineSelectionActivated(DocumentOutline& /*sender*/,
+        const std::vector<newui::SubView*>& views)
+    {
+        viewDesignerController_.setSelection(views);
+        return newui::SyncReturn::Ignored;
+    }
+
+    newui::SyncReturn DesignerEditor::handleDesignSurfaceChanged(Workspace& /*sender*/)
+    {
+        viewDesignerModel_.refresh();
         return newui::SyncReturn::Ignored;
     }
 
@@ -394,6 +422,14 @@ namespace CodeToolsVsix
         // just repopulated rootViewProxy()'s children in place, and nothing
         // in that path asks Windows to actually paint the result.
         getRootView()->markDirty();
+
+        // loadRootView() repopulated rootViewProxy()'s children directly,
+        // bypassing viewDesignerModel_ entirely (same "View never
+        // notifies a Model of structural changes on its own" gap
+        // refresh()'s own header comment documents) - Document Outline
+        // (and anything else reading viewDesignerModel_) needs this to
+        // pick up the freshly loaded tree.
+        viewDesignerModel_.refresh();
 
         clearDirty();
         return true;

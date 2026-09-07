@@ -64,6 +64,18 @@ namespace CodeToolsVsix
 
         void clearSelection();
 
+        // Replaces the whole selection with exactly views (order
+        // preserved - primary() is views.back(), same convention
+        // selectExclusive() already established) - the multi-select
+        // analog of selectExclusive() for a caller (Document Outline's
+        // own Ctrl+click multi-select) that already knows the full
+        // target list rather than one view at a time. Always fires
+        // onSelectionChanged, same as every other mutator here - see
+        // selectExclusive()'s own comment for why that's safe (real
+        // callers only ever call this in direct response to an actual
+        // selection change, never speculatively).
+        void setSelection(std::vector<newui::SubView*> views);
+
     private:
         std::vector<newui::SubView*> selected_;
     };
