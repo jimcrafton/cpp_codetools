@@ -19,11 +19,9 @@
 
 namespace
 {
-    // DesignerEditor::load()/save() only work against a real
-    // "<root>\Resources\<bundleName>.newui" path (see
-    // resolveBundleNameAndRoot(), DesignerEditor.cpp) - builds and tears
-    // down exactly that shape under a temp directory, same on-disk-fixture
-    // discipline as newui's own NewuiFileFixture (unittests/test_bundle.cpp).
+    // DesignerEditor::load()/save() resolve an arbitrary absolute path
+    // directly (Bundle::loadRootViewFromFile()/writeRootViewToFile()) - a
+    // plain temp directory, no "\Resources\" shape required.
     class DesignerEditorFileFixture : public ::testing::Test
     {
     protected:
@@ -31,28 +29,30 @@ namespace
         {
             char tempPathBuf[MAX_PATH]{};
             ::GetTempPathA(MAX_PATH, tempPathBuf);
-            root_ = std::string(tempPathBuf) + "DesignerEditorTest";
-            resources_ = root_ + "\\Resources";
-            ::CreateDirectoryA(root_.c_str(), nullptr);
-            ::CreateDirectoryA(resources_.c_str(), nullptr);
+            dir_ = std::string(tempPathBuf) + "DesignerEditorTest";
+            ::CreateDirectoryA(dir_.c_str(), nullptr);
+            path_ = dir_ + "\\DesignerEditorProbe.newui";
         }
 
         void TearDown() override
         {
-            newui::Bundle::instance().setExecutableDirOverride("");  // restore, same shared-singleton discipline as Bundle's own tests
-            ::DeleteFileA((resources_ + "\\DesignerEditorProbe.newui").c_str());
-            ::RemoveDirectoryA(resources_.c_str());
-            ::RemoveDirectoryA(root_.c_str());
+            ::DeleteFileA(path_.c_str());
+            ::RemoveDirectoryA(dir_.c_str());
         }
 
         std::wstring filePath() const
         {
-            std::string narrow = resources_ + "\\DesignerEditorProbe.newui";
-            return std::wstring(narrow.begin(), narrow.end());
+            return std::wstring(path_.begin(), path_.end());
         }
 
-        std::string root_;
-        std::string resources_;
+        void writeFile(const std::string& contents)
+        {
+            std::ofstream file(path_, std::ios::binary);
+            file << contents;
+        }
+
+        std::string dir_;
+        std::string path_;
     };
 }
 
@@ -285,27 +285,27 @@ TEST_F(DesignerEditorFileFixture, ClickInFrameProxysOverflowPastCanvasWellIsIgno
     EXPECT_EQ(editor.viewDesignerController().primary(), nullptr);
 }
 
-TEST_F(DesignerEditorFileFixture, LoadFailsForAPathNotUnderAResourcesFolder)
+TEST_F(DesignerEditorFileFixture, LoadFailsForAMissingFile)
 {
     newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
     CodeToolsVsix::DesignerEditor editor(&view);
 
-    std::wstring badPath = L"C:\\SomewhereElse\\DesignerEditorProbe.newui";
-    EXPECT_FALSE(editor.load(badPath.c_str(), badPath.size()));
+    std::wstring path = filePath();
+    EXPECT_FALSE(editor.load(path.c_str(), path.size()));
 }
 
 TEST_F(DesignerEditorFileFixture, LoadPopulatesTheRootViewFromARealFrameShapedFile)
 {
-    newui::Frame sourceFrame;
-    sourceFrame.setName("DesignerEditorProbe");
-    sourceFrame.setTitle("Probe Title");
-    newui::SubView* child = new newui::SubView();
-    child->setName("probeChild");
-    sourceFrame.rootView().addChild(child);
-
-    newui::Bundle::instance().setExecutableDirOverride(root_);
-    ASSERT_TRUE(newui::Bundle::instance().writeFrame(sourceFrame));
-    newui::Bundle::instance().setExecutableDirOverride("");
+    writeFile(R"({
+        type: "Frame",
+        title: "Probe Title",
+        rootView: {
+            type: "RootView",
+            childViews: [
+                { type: "SubView", name: "probeChild" },
+            ],
+        },
+    })");
 
     newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
     CodeToolsVsix::DesignerEditor editor(&view);
@@ -325,29 +325,28 @@ TEST_F(DesignerEditorFileFixture, LoadPopulatesTheRootViewFromARealFrameShapedFi
     EXPECT_TRUE(editor.workspace()->rootViewProxy()->childViews()[0]->isDesignTime());
 }
 
-TEST_F(DesignerEditorFileFixture, SaveFailsForAPathNotUnderAResourcesFolder)
+TEST_F(DesignerEditorFileFixture, SaveFailsWhenTheContainingDirectoryDoesNotExist)
 {
     newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
     CodeToolsVsix::DesignerEditor editor(&view);
 
-    std::wstring badPath = L"C:\\SomewhereElse\\DesignerEditorProbe.newui";
+    std::wstring badPath = L"C:\\SomewhereThatDoesNotExist12345\\DesignerEditorProbe.newui";
     EXPECT_FALSE(editor.save(badPath.c_str(), badPath.size()));
 }
 
 TEST_F(DesignerEditorFileFixture, SavePreservesTitleAndBoundsWhileReplacingRootView)
 {
     // Seed a real Frame-shaped file, same as the load test above.
-    newui::Frame sourceFrame;
-    sourceFrame.setName("DesignerEditorProbe");
-    sourceFrame.setTitle("Original Title");
-    sourceFrame.setBounds(newui::Rect(1, 2, 300, 200));
-    newui::SubView* oldChild = new newui::SubView();
-    oldChild->setName("oldChild");
-    sourceFrame.rootView().addChild(oldChild);
-
-    newui::Bundle::instance().setExecutableDirOverride(root_);
-    ASSERT_TRUE(newui::Bundle::instance().writeFrame(sourceFrame));
-    newui::Bundle::instance().setExecutableDirOverride("");
+    writeFile(R"({
+        title: "Original Title",
+        bounds: { type: "Rect", pos: { type: "Point", x: 1, y: 2 }, size: { type: "Size", width: 300, height: 200 } },
+        rootView: {
+            type: "RootView",
+            childViews: [
+                { type: "SubView", name: "oldChild" },
+            ],
+        },
+    })");
 
     // A DesignerEditor whose own design surface (workspace()->
     // rootViewProxy(), not its hosting RootView directly - see this test
@@ -363,10 +362,7 @@ TEST_F(DesignerEditorFileFixture, SavePreservesTitleAndBoundsWhileReplacingRootV
     ASSERT_TRUE(editor.save(path.c_str(), path.size()));
 
     newui::Frame reloaded;
-    reloaded.setName("DesignerEditorProbe");
-    newui::Bundle::instance().setExecutableDirOverride(root_);
-    ASSERT_TRUE(newui::Bundle::instance().loadFrame(reloaded));
-    newui::Bundle::instance().setExecutableDirOverride("");
+    ASSERT_TRUE(newui::Bundle::instance().loadFrameFromFile(reloaded, path_));
 
     EXPECT_EQ(reloaded.getTitle(), "Original Title");
     EXPECT_EQ(reloaded.getBounds(), newui::Rect(1, 2, 300, 200));

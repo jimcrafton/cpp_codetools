@@ -276,6 +276,14 @@ add_dependencies(testharness cpptools_version)
 cpptools_copy_libclang_dll(NativeEditControls)
 cpptools_copy_libclang_dll(testharness)
 
+# Icon/image resources (extension/NativeEditControls/Resources/Images/...) - pulled from the
+# bluesky/ mockups, resolved at runtime via newui::Bundle::loadImage()/resourcesDir(). Copied via
+# newui's own newui_add_resources() helper (3rdparty/newui/CMakeLists.txt) for both the real DLL
+# and testharness, since Bundle::resourcesDir() is always <exe dir>/Resources - not shared between
+# targets, so both need their own copy next to their own .exe/.dll.
+newui_add_resources(NativeEditControls "${CMAKE_CURRENT_SOURCE_DIR}/extension/NativeEditControls/Resources")
+newui_add_resources(testharness "${CMAKE_CURRENT_SOURCE_DIR}/extension/NativeEditControls/Resources")
+
 # GoogleTest - Testing Framework
 # ==============================
 # Vendored under 3rdparty/ as a permanent part of the project (copied from newui's own vendored

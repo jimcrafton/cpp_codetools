@@ -113,8 +113,22 @@ namespace CodeToolsVsix
         // ".tb-cat"/".tb-item" (a real hierarchy needing collapse/expand
         // navigation would want the inherited indent; this is a flat,
         // always-expanded category listing instead).
-        newui::Rect textRect(clientBounds().left() + 12.0f, clientBounds().top(),
-            clientBounds().size().width - 12.0f, clientBounds().size().height);
+        float textLeft = clientBounds().left() + 12.0f;
+
+        // No icon for headers (matches Main.dc.html's own no-glyph
+        // ".tb-cat") - only entries (depth 1) call through to
+        // controller.iconFor(), same shared Item::paintItemIcon() static
+        // (items.h) TreeItem's own default paint() uses - a real category
+        // class ToolboxController::iconFor() hasn't been extended for yet
+        // just falls back to text-only (iconFor() returns nullopt).
+        if (!isHeader) {
+            double centerY = clientBounds().top() + clientBounds().size().height * 0.5;
+            textLeft += float(newui::Item::paintItemIcon(ctx, textLeft, centerY,
+                controller.iconFor(path), controller.iconSize(), controller.iconGap()));
+        }
+
+        newui::Rect textRect(textLeft, clientBounds().top(),
+            clientBounds().left() + clientBounds().size().width - textLeft, clientBounds().size().height);
 
         BLRgba32 color = isHeader
             ? newui::UIColorManager::colorFor(newui::UIColorRole::DisabledText).toBLRgba32()
@@ -131,6 +145,15 @@ namespace CodeToolsVsix
     float ToolboxController::itemHeight(std::size_t visibleIndex) const
     {
         return newui::treeDepthOf(pathAt(visibleIndex)) == 0 ? kCategoryRowHeight : kEntryRowHeight;
+    }
+
+    std::optional<std::string> ToolboxController::iconFor(const std::vector<std::size_t>& path) const
+    {
+        const ToolboxEntry* entry = entryAtPath(path);
+        if (entry == nullptr || entry->iconResourceName.empty()) {
+            return std::nullopt;
+        }
+        return entry->iconResourceName;
     }
 
     Toolbox::Toolbox()

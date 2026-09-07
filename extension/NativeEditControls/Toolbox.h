@@ -8,6 +8,8 @@
 #include <newui/models.h>
 
 #include <any>
+#include <optional>
+#include <string>
 #include <vector>
 
 namespace CodeToolsVsix
@@ -28,8 +30,12 @@ namespace CodeToolsVsix
     // TreeItem's own default (which reserves indent+glyph space for real
     // tree navigation - not what a flat, always-expanded category listing
     // needs) - matches bluesky/designer-surface/Main.dc.html's own
-    // ".tb-cat"/".tb-item" typography. No icons yet (deferred, per its own
-    // Toolbox class comment) - text only.
+    // ".tb-cat"/".tb-item" typography. Still a fully custom paint()
+    // override (not the inherited TreeItem::paint() default) because of
+    // that flat-layout difference, but the icon itself is drawn via the
+    // same shared newui::Item::paintItemIcon() static (items.h) the default uses,
+    // fed by ToolboxController::iconFor() below - not a second,
+    // hand-rolled cache.
     class ToolboxItem : public newui::TreeItem
     {
     public:
@@ -39,15 +45,27 @@ namespace CodeToolsVsix
 
     // Header rows taller than entry rows (Main.dc.html's own ".tb-cat"/
     // ".tb-item" padding) - createItem() returns ToolboxItem instead
-    // of the reflection-constructed default TreeItem.
+    // of the reflection-constructed default TreeItem. iconFor() resolves
+    // through the real ToolboxEntry (ToolboxRegistry.h's own
+    // iconResourceName) rather than the Model, matching this project's
+    // "icon is presentation policy, lives on the Controller" decision -
+    // ToolboxItem::paint() calls this directly (it doesn't use TreeItem's
+    // own default paint(), which also calls iconFor(), since headers need
+    // the flat, no-glyph layout described above).
     class ToolboxController : public newui::TreeController
     {
     public:
         static constexpr float kCategoryRowHeight = 24.0f;
         static constexpr float kEntryRowHeight = 22.0f;
+        static constexpr float kIconSize = 15.0f;
+        static constexpr float kIconGap = 9.0f;  // Main.dc.html's own ".tb-item { gap: 9px; }"
 
         newui::TreeItem* createItem(const std::vector<std::size_t>& path) override;
         float itemHeight(std::size_t visibleIndex) const override;
+
+        std::optional<std::string> iconFor(const std::vector<std::size_t>& path) const override;
+        float iconSize() const override { return kIconSize; }
+        float iconGap() const override { return kIconGap; }
     };
 
     // The Toolbox pane (designer-plan.md 6.1 item 1) - a real
@@ -60,8 +78,10 @@ namespace CodeToolsVsix
     // onScrollOffsetChanged (its own "virtualized content" hooks, same
     // mechanism ScrollView's own class comment documents) - so this needs
     // no manual setContentSize() call, and Toolbox itself needs no custom
-    // paint() at all. No custom icons for v1 - real icons (porting the
-    // mockup's ~20 hand-drawn SVG glyphs to Blend2D) deferred.
+    // paint() at all. Real icons (Resources/Images/icons/toolbox/*.svg,
+    // extracted from the mockup) are wired via ToolboxController::
+    // iconFor() - not every entry has one yet (ToolboxRegistry.cpp's own
+    // class-name-to-icon table), those fall back to text-only.
     //
     // Real drag-and-drop is out of scope for v1 (newui::dragndrop.h is
     // shaped for OS-level file/text/image drags across the shell

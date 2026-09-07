@@ -3,11 +3,13 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <string>
 
 // runloop.h must come before rootview.h/controls.h - see CppEditorControl.h's own comment on why
 // (Delegate<...>::postCall(RunLoop&, ...) needs RunLoop's full definition).
 #include <newui/runloop.h>
 #include <newui/rootview.h>
+#include <newui/bundle.h>
 
 #include <vsshell.h>
 #include <wil/com.h>
@@ -104,6 +106,20 @@ namespace CodeToolsVsix
 
 		static void setModuleHandle(HINSTANCE hInstance) {
 			instance().hInstance_ = hInstance;
+
+			// Bundle::instance() otherwise resolves resourcesDir() off the
+			// hosting process's own exe (devenv.exe in the VSIX) - point it
+			// at this DLL's own directory instead, where Resources/ is
+			// actually deployed (CodeToolsVsix.csproj).
+			char pathBuf[MAX_PATH]{};
+			DWORD len = ::GetModuleFileNameA(hInstance, pathBuf, MAX_PATH);
+			if (len > 0 && len < MAX_PATH) {
+				std::string path(pathBuf, len);
+				std::size_t pos = path.find_last_of("\\/");
+				if (pos != std::string::npos) {
+					newui::Bundle::instance().setExecutableDirOverride(path.substr(0, pos));
+				}
+			}
 		}
         static void setServiceProvider(IServiceProviderPtr svcProvPtr) {
             instance().svcProvPtr_ = svcProvPtr;

@@ -85,28 +85,13 @@ namespace CodeToolsVsix
         newui::UndoStack& undoStack() { return undoStack_; }
         const newui::UndoStack& undoStack() const { return undoStack_; }
 
-        // filePath must be a real "<root>\Resources\<bundleName>.newui" -
-        // derives bundleName/root from it (see resolveBundleNameAndRoot(),
-        // DesignerEditor.cpp), points Bundle::instance() at root via
-        // setExecutableDirOverride() (this DLL is hosted inside devenv.exe,
-        // whose own exe dir has nothing to do with the user's project), then
-        // Bundle::loadRootView()s just the "rootView" node into
-        // workspace()->rootViewProxy(), not this editor's own hosting
-        // RootView. isDesignTime() for the whole loaded tree already comes
-        // from setupUI()'s root->setDesignTime(true) (View::isDesignTime()
-        // defers to the owning RootView once attached - see setupUI()'s own
-        // comment), so this doesn't need Bundle's designMode flag itself.
-        // Returns false if the path isn't shaped that way, or for any of
-        // loadRootView()'s own failure reasons.
+        // filePath can be any real, absolute ".newui" path - a user's
+        // project document, unrelated to this DLL's own resource root.
+        // Uses Bundle::loadRootViewFromFile()/loadFrameFromFile() directly,
+        // not setExecutableDirOverride() (see bundle.h).
         bool load(const wchar_t* filePath, std::size_t filePathLength) override;
 
-        // Write-side counterpart to load() - Bundle::writeRootView() (design
-        // mode on, so the saved file's "type" tag reads "RootView", not
-        // "RootViewProxy" - unrelated to isDesignTime(), see Class::
-        // proxyFor()'s own comment), which preserves any other top-level
-        // keys (title, bounds, animations, ...) an existing Frame-shaped
-        // file already has; only "rootView" is replaced. Same path/root
-        // derivation and failure contract as load().
+        // Write-side counterpart to load() - Bundle::writeRootViewToFile().
         bool save(const wchar_t* filePath, std::size_t filePathLength) override;
 
         bool execCommand(EditorCommand command, std::uint32_t flags, const EditorCommandArgs* args) override;

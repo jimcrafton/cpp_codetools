@@ -58,18 +58,21 @@ namespace CodeToolsVsix
         // based rows do (ToolbarButton::paint() just centers whatever
         // text within its already-assigned clientBounds()), so an
         // explicit desiredSize() is required, not optional.
-        auto makeToolbarButton = [](const char* name, const std::string& text) {
+        auto makeToolbarButton = [](const char* name, const std::string& text, const std::string& icon) {
             newui::ViewBuilder<newui::ToolbarButton> b;
             b.name(name).desiredSize(newui::Size(50.0f, 24.0f))
-                .configure([&text](newui::ToolbarButton& btn) { btn.setText(text); });
+                .configure([&text, &icon](newui::ToolbarButton& btn) {
+                    btn.setText(text);
+                    btn.setIcon(icon);
+                });
             return b.build();
         };
 
-        newButton_ = makeToolbarButton("workspaceNewButton", "New");
-        openButton_ = makeToolbarButton("workspaceOpenButton", "Open");
-        saveButton_ = makeToolbarButton("workspaceSaveButton", "Save");
-        undoButton_ = makeToolbarButton("workspaceUndoButton", "Undo");
-        redoButton_ = makeToolbarButton("workspaceRedoButton", "Redo");
+        newButton_ = makeToolbarButton("workspaceNewButton", "New", "Images/icons/toolbar/new.svg");
+        openButton_ = makeToolbarButton("workspaceOpenButton", "Open", "Images/icons/toolbar/open.svg");
+        saveButton_ = makeToolbarButton("workspaceSaveButton", "Save", "Images/icons/toolbar/save.svg");
+        undoButton_ = makeToolbarButton("workspaceUndoButton", "Undo", "Images/icons/toolbar/undo.svg");
+        redoButton_ = makeToolbarButton("workspaceRedoButton", "Redo", "Images/icons/toolbar/redo.svg");
         // Nothing has been undone/redone yet when this pane is first
         // built - DesignerEditor refreshes these via undoStack().
         // onActionPushed and its own undo()/redo() handlers from here on.

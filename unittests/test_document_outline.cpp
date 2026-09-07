@@ -1,5 +1,7 @@
 #include "../extension/NativeEditControls/DocumentOutline.h"
+#include "../extension/NativeEditControls/ToolboxRegistry.h"
 
+#include <newui/controls.h>
 #include <newui/subview.h>
 
 #include <gtest/gtest.h>
@@ -11,8 +13,19 @@
 // resolve a real "SubView" Class.
 
 using CodeToolsVsix::DocumentOutline;
+using CodeToolsVsix::DocumentOutlineController;
+using CodeToolsVsix::DocumentOutlineItem;
 using CodeToolsVsix::DocumentOutlineModel;
+using CodeToolsVsix::ToolboxRegistry;
 using CodeToolsVsix::ViewDesignerModel;
+
+namespace {
+BLContext& SharedDocumentOutlinePaintContext() {
+    static BLImage image(200, 400, BL_FORMAT_PRGB32);
+    static BLContext ctx(image);
+    return ctx;
+}
+}
 
 TEST(DocumentOutlineModel, WithNoSourceEverythingIsEmpty)
 {
@@ -181,4 +194,65 @@ TEST(DocumentOutline, SetSelectionWithEmptyListClearsTreeSelection)
     EXPECT_TRUE(outline->treeView()->selectedPaths().empty());
 
     delete outline;
+}
+
+TEST(DocumentOutlineController, IconForARealChildMatchesTheRegistrysOwnIconResourceName)
+{
+    newui::SubView root;
+    auto* button = new newui::Button();
+    root.addChild(button);
+
+    ViewDesignerModel source;
+    source.setRoot(&root);
+    DocumentOutlineModel model;
+    model.setSource(&source);
+
+    DocumentOutlineController controller;
+    controller.setModel(&model);
+
+    auto icon = controller.iconFor(std::vector<std::size_t>{0, 0});
+    ASSERT_TRUE(icon.has_value());
+    EXPECT_EQ(*icon, ToolboxRegistry::iconResourceNameFor("Button"));
+}
+
+TEST(DocumentOutlineController, IconForAnOutOfRangePathIsNullopt)
+{
+    newui::SubView root;
+    ViewDesignerModel source;
+    source.setRoot(&root);
+    DocumentOutlineModel model;
+    model.setSource(&source);
+
+    DocumentOutlineController controller;
+    controller.setModel(&model);
+
+    EXPECT_FALSE(controller.iconFor(std::vector<std::size_t>{99}).has_value());
+}
+
+TEST(DocumentOutlineController, IconForWithNoModelIsNullopt)
+{
+    DocumentOutlineController controller;
+    EXPECT_FALSE(controller.iconFor(std::vector<std::size_t>{0}).has_value());
+}
+
+TEST(DocumentOutlineItem, PaintARealIconBearingRowDoesNotCrash)
+{
+    newui::SubView root;
+    auto* button = new newui::Button();
+    root.addChild(button);
+
+    ViewDesignerModel source;
+    source.setRoot(&root);
+    DocumentOutlineModel model;
+    model.setSource(&source);
+
+    DocumentOutlineController controller;
+    controller.setModel(&model);
+    auto* item = static_cast<DocumentOutlineItem*>(controller.createItem({0, 0}));
+    ASSERT_NE(item, nullptr);
+
+    item->paint(SharedDocumentOutlinePaintContext(), newui::Rect(0.0f, 0.0f, 180.0f, 22.0f),
+        std::vector<std::size_t>{0, 0}, controller);
+
+    controller.releaseItem(item);
 }

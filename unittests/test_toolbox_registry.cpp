@@ -1,5 +1,6 @@
 #include "../extension/NativeEditControls/ToolboxRegistry.h"
 
+#include <newui/bundle.h>
 #include <newui/controls.h>
 #include <newui/layout.h>
 #include <newui/subview.h>
@@ -29,6 +30,15 @@ namespace {
             }
         }
         return false;
+    }
+
+    const CodeToolsVsix::ToolboxEntry* findEntry(const CodeToolsVsix::ToolboxCategory& category, const std::string& name) {
+        for (const auto& entry : category.entries) {
+            if (entry.displayName == name) {
+                return &entry;
+            }
+        }
+        return nullptr;
     }
 }
 
@@ -89,6 +99,42 @@ TEST(ToolboxRegistry, ButtonFactoryBuildsARealButtonInstance) {
     ASSERT_NE(created, nullptr);
     EXPECT_NE(dynamic_cast<newui::Button*>(created), nullptr);
     delete created;
+}
+
+// Real files under extension/NativeEditControls/Resources/Images/, not
+// just a non-empty string - a typo'd/renamed filename in
+// ToolboxRegistry.cpp's own toolboxIconFor() table would otherwise pass
+// silently (Bundle::resourcePath() just returns "" for a missing file,
+// no throw) and only be noticed by actually looking at the running app.
+TEST(ToolboxRegistry, RealTaggedClassesHaveAResolvableIcon) {
+    const auto& categories = CodeToolsVsix::ToolboxRegistry::categories();
+    const newui::Bundle& bundle = newui::Bundle::instance();
+
+    const CodeToolsVsix::ToolboxEntry* button = findEntry(categories[1], "Button");
+    ASSERT_NE(button, nullptr);
+    EXPECT_FALSE(button->iconResourceName.empty());
+    EXPECT_FALSE(bundle.resourcePath(button->iconResourceName).empty())
+        << "iconResourceName '" << button->iconResourceName << "' doesn't resolve to a real file";
+
+    const CodeToolsVsix::ToolboxEntry* subView = findEntry(categories[0], "SubView");
+    ASSERT_NE(subView, nullptr);
+    EXPECT_FALSE(subView->iconResourceName.empty());
+    EXPECT_FALSE(bundle.resourcePath(subView->iconResourceName).empty())
+        << "iconResourceName '" << subView->iconResourceName << "' doesn't resolve to a real file";
+}
+
+TEST(ToolboxRegistry, FlexLayoutEntriesEachHaveTheirOwnDistinctResolvableIcon) {
+    const auto& categories = CodeToolsVsix::ToolboxRegistry::categories();
+    const newui::Bundle& bundle = newui::Bundle::instance();
+
+    const CodeToolsVsix::ToolboxEntry* vertical = findEntry(categories[0], "FlexLayout (Vertical)");
+    const CodeToolsVsix::ToolboxEntry* horizontal = findEntry(categories[0], "FlexLayout (Horizontal)");
+    ASSERT_NE(vertical, nullptr);
+    ASSERT_NE(horizontal, nullptr);
+
+    EXPECT_FALSE(bundle.resourcePath(vertical->iconResourceName).empty());
+    EXPECT_FALSE(bundle.resourcePath(horizontal->iconResourceName).empty());
+    EXPECT_NE(vertical->iconResourceName, horizontal->iconResourceName);
 }
 
 TEST(ToolboxRegistry, MenuItemIsDeliberatelyNotIncludedInMenuAndToolbar) {

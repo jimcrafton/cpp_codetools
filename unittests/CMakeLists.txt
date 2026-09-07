@@ -67,3 +67,9 @@ target_include_directories(nativeeditcontrols_tests PRIVATE "${CMAKE_SOURCE_DIR}
 target_link_libraries(nativeeditcontrols_tests PRIVATE cpptools newui user32.lib gdi32.lib comdlg32.lib GTest::gtest_main Threads::Threads)
 
 cpptools_copy_libclang_dll(nativeeditcontrols_tests)
+
+# Same Resources/Images/icons/... this binary's own tests resolve real
+# icon paths against (ToolboxRegistry/ToolboxController tests, e.g.) -
+# see the root CMakeLists.txt's own newui_add_resources() calls for
+# NativeEditControls/testharness for the fuller comment.
+newui_add_resources(nativeeditcontrols_tests "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/Resources")

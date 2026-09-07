@@ -170,9 +170,30 @@
          OutDir imperatively too - that part must not depend on pipeline-ordering nuance. -->
     <Copy SourceFiles="@(_NativeDeploymentFile)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
 
+    <!-- newui::Bundle::instance() (NativeEditControls.dll's own icon/resource loader) resolves
+         everything relative to a "Resources\" folder next to whatever .exe/.dll it's hosted in -
+         the CMake build above already produces one, via newui_add_resources(NativeEditControls
+         ...) (root CMakeLists.txt), at $(RepoBuildDir)\$(Configuration)\Resources. Unlike
+         NativeEditControls.dll/libclang.dll above (flat files), this is a real directory tree
+         (Resources\Images\icons\toolbox\..., etc.) that has to keep its own relative structure
+         once copied into OutDir/the .vsix, hence the separate ItemGroup/Copy/Content below instead
+         of folding it into _NativeDeploymentFile. -->
+    <ItemGroup>
+      <_NativeResourceFile Include="$(RepoBuildDir)\$(Configuration)\Resources\**\*.*" />
+    </ItemGroup>
+
+    <Copy SourceFiles="@(_NativeResourceFile)"
+          DestinationFiles="@(_NativeResourceFile -> '$(OutDir)Resources\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+
     <ItemGroup>
       <Content Include="@(_NativeDeploymentFile)">
         <Link>%(Filename)%(Extension)</Link>
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        <IncludeInVSIX>true</IncludeInVSIX>
+      </Content>
+      <Content Include="@(_NativeResourceFile)">
+        <Link>Resources\%(RecursiveDir)%(Filename)%(Extension)</Link>
         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
         <IncludeInVSIX>true</IncludeInVSIX>
       </Content>

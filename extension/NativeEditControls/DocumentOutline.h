@@ -9,6 +9,8 @@
 #include <newui/models.h>
 
 #include <any>
+#include <optional>
+#include <string>
 #include <vector>
 
 namespace CodeToolsVsix
@@ -68,7 +70,18 @@ namespace CodeToolsVsix
     class DocumentOutlineController : public newui::TreeController
     {
     public:
+        static constexpr float kIconSize = 15.0f;
+        static constexpr float kIconGap = 6.0f;
+
         newui::TreeItem* createItem(const std::vector<std::size_t>& path) override;
+
+        // Real icon for the SubView at path (via ToolboxRegistry's own
+        // class-name-to-icon table - Document Outline rows are real
+        // instances of the same classes Toolbox lists) - nullopt if that
+        // class has no icon yet.
+        std::optional<std::string> iconFor(const std::vector<std::size_t>& path) const override;
+        float iconSize() const override { return kIconSize; }
+        float iconGap() const override { return kIconGap; }
     };
 
     // The Document Outline pane (designer-plan.md 6.1 item 4) - a real

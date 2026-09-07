@@ -1,4 +1,5 @@
 #include "DocumentOutline.h"
+#include "ToolboxRegistry.h"
 
 #include <newui/fontmanager.h>
 #include <newui/layout.h>
@@ -190,13 +191,16 @@ namespace CodeToolsVsix
                 controller.isExpanded(path), rowTextColor(*this));
         }
 
-        double textLeft = clientBounds().left() + indent + newui::kTreeGlyphWidth;
-        newui::Rect textRect(float(textLeft), clientBounds().top(),
-            clientBounds().size().width - float(textLeft - clientBounds().left()), clientBounds().size().height);
-
         if (view == nullptr) {
             return;
         }
+
+        double textLeft = clientBounds().left() + indent + newui::kTreeGlyphWidth;
+        textLeft += newui::Item::paintItemIcon(ctx, textLeft, glyphCenterY,
+            controller.iconFor(path), controller.iconSize(), controller.iconGap());
+
+        newui::Rect textRect(float(textLeft), clientBounds().top(),
+            clientBounds().size().width - float(textLeft - clientBounds().left()), clientBounds().size().height);
 
         std::string name = view->name();
         if (name.empty()) {
@@ -220,6 +224,24 @@ namespace CodeToolsVsix
     newui::TreeItem* DocumentOutlineController::createItem(const std::vector<std::size_t>& /*path*/)
     {
         return new DocumentOutlineItem();
+    }
+
+    std::optional<std::string> DocumentOutlineController::iconFor(const std::vector<std::size_t>& path) const
+    {
+        const auto* docModel = dynamic_cast<const DocumentOutlineModel*>(model());
+        newui::SubView* view = docModel != nullptr && docModel->source() != nullptr
+            ? docModel->source()->viewAt(path) : nullptr;
+        if (view == nullptr) {
+            return std::nullopt;
+        }
+
+        const newui::reflection::Class* clazz = newui::reflection::classinfo(typeid(*view));
+        if (clazz == nullptr) {
+            return std::nullopt;
+        }
+
+        const std::string& icon = ToolboxRegistry::iconResourceNameFor(clazz->name());
+        return icon.empty() ? std::nullopt : std::optional<std::string>(icon);
     }
 
     DocumentOutline::DocumentOutline()

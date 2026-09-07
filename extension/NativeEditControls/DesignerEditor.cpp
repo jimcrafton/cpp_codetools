@@ -48,33 +48,12 @@ namespace CodeToolsVsix
             return pos == std::wstring::npos ? fileName : fileName.substr(0, pos);
         }
 
-        // DesignerEditor edits "<root>\Resources\<bundleName>.newui" files -
-        // the same convention bundle.h itself documents and Frame Map's own
-        // naming already uses. Bundle::instance() has no idea where the
-        // user's actual project lives (it's hosted inside devenv.exe, whose
-        // own exe directory means nothing here) - this derives Bundle's
-        // executableDir()-shaped root (the "<root>" above) plus the bare
-        // bundleName from the real absolute path VS hands load()/save(),
-        // to feed Bundle::setExecutableDirOverride() before every real call.
-        // Returns false if path doesn't look like it's under a \Resources\
-        // folder at all.
-        bool resolveBundleNameAndRoot(const std::wstring& path, std::wstring& outRoot, std::string& outBundleName)
+        // Bare filename, minus extension - for the throwaway scratchFrame's
+        // own name in load() below. Empty if path has no filename at all.
+        std::string bundleDisplayNameFor(const std::wstring& path)
         {
             auto [fileDir, fileName] = splitLastComponent(path);
-            if (fileDir.empty() || fileName.empty())
-            {
-                return false;
-            }
-
-            auto [root, resourcesFolder] = splitLastComponent(fileDir);
-            if (root.empty() || _wcsicmp(resourcesFolder.c_str(), L"Resources") != 0)
-            {
-                return false;
-            }
-
-            outRoot = root;
-            outBundleName = wideToUtf8(stripExtension(fileName));
-            return true;
+            return fileName.empty() ? std::string() : wideToUtf8(stripExtension(fileName));
         }
 
         // The real newui::Dialog::ShowOpenFile()/ShowSaveFile() (native
@@ -375,6 +354,10 @@ namespace CodeToolsVsix
         const std::vector<newui::SubView*>& views)
     {
         viewDesignerController_.setSelection(views);
+        // Same reasoning as handleMouseDownForSelection()'s own markDirty()
+        // call - nothing else repaints just because the overlay's selection
+        // state changed.
+        getRootView()->markDirty();
         return newui::SyncReturn::Ignored;
     }
 
@@ -481,25 +464,14 @@ namespace CodeToolsVsix
         }
 
         std::wstring path = copyPath(filePath, filePathLength);
-        std::wstring overrideRoot;
-        std::string bundleName;
-        if (!resolveBundleNameAndRoot(path, overrideRoot, bundleName))
-        {
-            logToDebugOut(L"DesignerEditor::load: path is not under a \\Resources\\ folder, can't resolve a bundle name");
-            return false;
-        }
+        std::string absolutePath = wideToUtf8(path);
+        std::string bundleName = bundleDisplayNameFor(path);
 
-        newui::Bundle::instance().setExecutableDirOverride(wideToUtf8(overrideRoot));
-        // designMode=true - propagates Component::setDesignTime(true) onto
-        // every freshly-constructed child read from the file (reflection.h's
-        // TypedClass<T>::read(), recurses through the whole loaded tree).
-        // Genuinely meaningful now that isDesignTime() no longer defers to
-        // an owning RootView's flag (view.cpp) - an earlier version left
-        // this at the default false since the propagation was moot either
-        // way back then.
-        if (!newui::Bundle::instance().loadRootView(*workspace_->rootViewProxy(), bundleName, /*designMode=*/true))
+        // designMode=true propagates setDesignTime(true) onto freshly-
+        // constructed children (reflection.h's TypedClass<T>::read()).
+        if (!newui::Bundle::instance().loadRootViewFromFile(*workspace_->rootViewProxy(), absolutePath, /*designMode=*/true))
         {
-            logToDebugOut(L"DesignerEditor::load: Bundle::loadRootView failed");
+            logToDebugOut(L"DesignerEditor::load: Bundle::loadRootViewFromFile failed");
             return false;
         }
 
@@ -532,7 +504,7 @@ namespace CodeToolsVsix
         // above, which already succeeded.
         newui::Frame scratchFrame;
         scratchFrame.setName(bundleName);
-        if (newui::Bundle::instance().loadFrame(scratchFrame))
+        if (newui::Bundle::instance().loadFrameFromFile(scratchFrame, absolutePath))
         {
             workspace_->frameProxy()->setTitle(scratchFrame.getTitle());
         }
@@ -575,18 +547,14 @@ namespace CodeToolsVsix
         }
 
         std::wstring path = copyPath(filePath, filePathLength);
-        std::wstring overrideRoot;
-        std::string bundleName;
-        if (!resolveBundleNameAndRoot(path, overrideRoot, bundleName))
-        {
-            logToDebugOut(L"DesignerEditor::save: path is not under a \\Resources\\ folder, can't resolve a bundle name");
-            return false;
-        }
+        std::string absolutePath = wideToUtf8(path);
 
-        newui::Bundle::instance().setExecutableDirOverride(wideToUtf8(overrideRoot));
-        if (!newui::Bundle::instance().writeRootView(*workspace_->rootViewProxy(), bundleName, /*designMode=*/true))
+        // No Bundle::setExecutableDirOverride() call here - see load()'s
+        // own comment. writeRootViewToFile() resolves directly against
+        // absolutePath.
+        if (!newui::Bundle::instance().writeRootViewToFile(*workspace_->rootViewProxy(), absolutePath, /*designMode=*/true))
         {
-            logToDebugOut(L"DesignerEditor::save: Bundle::writeRootView failed");
+            logToDebugOut(L"DesignerEditor::save: Bundle::writeRootViewToFile failed");
             return false;
         }
 

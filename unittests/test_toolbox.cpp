@@ -4,6 +4,14 @@
 
 #include <gtest/gtest.h>
 
+namespace {
+BLContext& SharedToolboxPaintContext() {
+    static BLImage image(200, 400, BL_FORMAT_PRGB32);
+    static BLContext ctx(image);
+    return ctx;
+}
+}
+
 // registerReflectionData() is already run once globally for this whole
 // binary by test_component_editor.cpp's own ::testing::Environment - no
 // separate registration needed here (same convention test_workspace.cpp's
@@ -35,6 +43,54 @@ TEST(ToolboxModel, ValueAtAnEntryPathIsItsDisplayName) {
     CodeToolsVsix::ToolboxModel model;
     std::any value = model.value(std::vector<std::size_t>{0, 0});
     EXPECT_EQ(std::any_cast<std::string>(value), "FlexLayout (Vertical)");
+}
+
+TEST(ToolboxController, IconForAnEntryPathMatchesTheRegistrysOwnIconResourceName) {
+    CodeToolsVsix::ToolboxController controller;
+    const auto& vertical = CodeToolsVsix::ToolboxRegistry::categories()[0].entries[0];  // "FlexLayout (Vertical)"
+
+    auto icon = controller.iconFor(std::vector<std::size_t>{0, 0});
+    ASSERT_TRUE(icon.has_value());
+    EXPECT_EQ(*icon, vertical.iconResourceName);
+}
+
+TEST(ToolboxController, IconForACategoryHeaderPathIsNullopt) {
+    CodeToolsVsix::ToolboxController controller;
+    EXPECT_FALSE(controller.iconFor(std::vector<std::size_t>{0}).has_value());
+}
+
+TEST(ToolboxController, IconForAnOutOfRangePathIsNullopt) {
+    CodeToolsVsix::ToolboxController controller;
+    EXPECT_FALSE(controller.iconFor(std::vector<std::size_t>{999, 0}).has_value());
+}
+
+TEST(ToolboxItem, PaintACategoryHeaderRowDoesNotCrash) {
+    CodeToolsVsix::ToolboxController controller;
+    auto* item = static_cast<CodeToolsVsix::ToolboxItem*>(controller.createItem({0}));
+    ASSERT_NE(item, nullptr);
+
+    item->paint(SharedToolboxPaintContext(), newui::Rect(0.0f, 0.0f, 180.0f, 24.0f),
+        std::vector<std::size_t>{0}, controller);
+
+    controller.releaseItem(item);
+}
+
+TEST(ToolboxItem, PaintARealIconBearingEntryRowDoesNotCrash) {
+    CodeToolsVsix::ToolboxController controller;
+    CodeToolsVsix::ToolboxModel model;
+    controller.setModel(&model);
+    auto* item = static_cast<CodeToolsVsix::ToolboxItem*>(controller.createItem({1, 0}));
+    ASSERT_NE(item, nullptr);
+
+    // Path {1, 0} - Basic's first entry, "Button" (ToolboxRegistry's own
+    // fixed order) - a real icon-bearing entry, exercising the actual
+    // controller.iconFor()/paintItemIcon() path this test file otherwise
+    // never touched (Toolbox's other tests never call ToolboxItem::paint()
+    // at all).
+    item->paint(SharedToolboxPaintContext(), newui::Rect(0.0f, 0.0f, 180.0f, 22.0f),
+        std::vector<std::size_t>{1, 0}, controller);
+
+    controller.releaseItem(item);
 }
 
 TEST(Toolbox, EveryCategoryStartsExpanded) {

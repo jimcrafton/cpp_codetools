@@ -16,6 +16,12 @@ namespace CodeToolsVsix
     {
         std::string displayName;
         std::function<newui::SubView*()> factory;
+
+        // Resources/-relative path (e.g. "Images/icons/toolbox/button.svg"),
+        // resolved via newui::Bundle::resourcePath() - empty if this entry
+        // has no icon yet (Toolbox.cpp falls back to text-only for those,
+        // same as before every entry had one).
+        std::string iconResourceName;
     };
 
     struct ToolboxCategory
@@ -37,5 +43,12 @@ namespace CodeToolsVsix
     {
     public:
         static const std::vector<ToolboxCategory>& categories();
+
+        // Real icon file for a reflected class's own name() (e.g.
+        // "Button" -> "Images/icons/toolbox/button.svg"), from the same
+        // table Toolbox itself uses - "" if this class has no icon yet.
+        // Shared with Document Outline, which shows instances of these
+        // same classes.
+        static const std::string& iconResourceNameFor(const std::string& className);
     };
 }
