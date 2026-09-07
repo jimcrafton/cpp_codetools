@@ -176,6 +176,14 @@ namespace CodeToolsVsix
         root->onMouseMove.add(this, &DesignerEditor::handleMouseMoveForResize);
         root->onMouseUp.add(this, &DesignerEditor::handleMouseUpForResize);
 
+        // root's own onKeyDown only fires when nothing else has focus
+        // (RootView::keyEvent(), rootview.cpp - it dispatches to
+        // focusedSubView_ instead when one exists) - a design-time canvas
+        // control never actually receives focus at all (RootView's own
+        // design-time input gating), so this is exactly "Delete while the
+        // canvas, not a Properties field or the Outline, has attention."
+        root->onKeyDown.add(this, &DesignerEditor::handleKeyDownForDelete);
+
         // PropertiesGrid and Document Outline both learn about selection
         // changes this way - through ViewDesignerController's own
         // notification, not because this class knows they exist.
@@ -196,12 +204,12 @@ namespace CodeToolsVsix
         workspace_->onDesignSurfaceChanged.add(this, &DesignerEditor::handleDesignSurfaceChanged);
 
         // undoStack_ backs PropertiesGrid's own undo-aware property
-        // commits (property edits only for now - see this class's own
-        // undoStack() header comment) and the toolbar's Undo/Redo
-        // buttons; onActionPushed keeps their enabled state honest after
-        // every real property commit, not just after an undo()/redo()
-        // click.
+        // commits, Workspace's own Toolbox-add wiring, this class's own
+        // Delete handling below, and the toolbar's Undo/Redo buttons -
+        // onActionPushed keeps their enabled state honest after any of
+        // those, not just after an undo()/redo() click.
         workspace_->propertiesPane()->setUndoStack(&undoStack_);
+        workspace_->setUndoStack(&undoStack_);
         undoStack_.onActionPushed.add(this, &DesignerEditor::handleUndoStackActionPushed);
 
         // New/Open/Save/Undo/Redo - temporary testing-phase convenience,
@@ -304,6 +312,68 @@ namespace CodeToolsVsix
         return newui::SyncReturn::Ignored;
     }
 
+    newui::SyncReturn DesignerEditor::handleKeyDownForDelete(newui::View& /*sender*/, std::uint32_t /*keyMask*/,
+        int /*keyCharVal*/, int /*repeatCount*/, std::uint32_t VKeyCode)
+    {
+        if (VKeyCode != static_cast<std::uint32_t>(newui::vkDelete) || workspace_ == nullptr) {
+            return newui::SyncReturn::Ignored;
+        }
+
+        std::vector<newui::SubView*> selected = viewDesignerController_.selected();
+        if (selected.empty()) {
+            return newui::SyncReturn::Ignored;
+        }
+
+        // A selected view's real parent can be any real SubView in the
+        // tree, not just rootViewProxy() directly (e.g. one nested inside
+        // a container row) - removeChild()/addChild() must target that
+        // real parent, not rootViewProxy() itself, or the view is left
+        // attached where it already was (delete no-ops) and a later
+        // undo re-attaches the same instance a second time, corrupting
+        // the tree (two parents pointing at one child).
+        std::vector<std::pair<newui::SubView*, newui::View*>> toDelete;
+        for (newui::SubView* view : selected) {
+            if (newui::View* parent = view->parent()) {
+                toDelete.emplace_back(view, parent);
+            }
+        }
+        if (toDelete.empty()) {
+            return newui::SyncReturn::Ignored;
+        }
+
+        viewDesignerController_.clearSelection();
+
+        newui::UndoableAction action;
+        action.description = toDelete.size() == 1 ? "Delete Control" : "Delete Controls";
+        // removeChild()/addChild() only ever detach/attach - never delete -
+        // same raw-pointer ownership handoff Workspace's own Toolbox-add
+        // wiring already relies on, so undoIt() can safely re-attach the
+        // exact same instances rather than reconstructing them. Known,
+        // narrow gap: if this pending action is discarded while its views
+        // are in the detached state (undoStack_.clear(), e.g. from a
+        // later "New") without ever running undoIt() first, those views
+        // leak - accepted for now, same "New is a temporary testing-phase
+        // convenience" scoping this toolbar's other buttons already carry.
+        action.doIt = [this, toDelete]() {
+            for (const auto& [view, parent] : toDelete) {
+                parent->removeChild(view);
+            }
+            viewDesignerModel_.refresh();
+            markDirty();
+            getRootView()->markDirty();
+        };
+        action.undoIt = [this, toDelete]() {
+            for (const auto& [view, parent] : toDelete) {
+                parent->addChild(view);
+            }
+            viewDesignerModel_.refresh();
+            markDirty();
+            getRootView()->markDirty();
+        };
+        undoStack_.push(action);
+        return newui::SyncReturn::Handled;
+    }
+
     newui::SyncReturn DesignerEditor::handleMouseMoveForResize(newui::View& /*sender*/, const newui::Point& pt,
         std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/)
     {
@@ -364,6 +434,7 @@ namespace CodeToolsVsix
     newui::SyncReturn DesignerEditor::handleDesignSurfaceChanged(Workspace& /*sender*/)
     {
         viewDesignerModel_.refresh();
+        markDirty();
         return newui::SyncReturn::Ignored;
     }
 
@@ -453,6 +524,16 @@ namespace CodeToolsVsix
         }
         workspace_->undoButton()->setEnabled(undoStack_.canUndo());
         workspace_->redoButton()->setEnabled(undoStack_.canRedo());
+
+        // Undo takes priority when both exist - matches the toolbar's own
+        // left-to-right Undo-then-Redo button order.
+        std::string status;
+        if (undoStack_.canUndo()) {
+            status = "Undo: " + undoStack_.undoDescription();
+        } else if (undoStack_.canRedo()) {
+            status = "Redo: " + undoStack_.redoDescription();
+        }
+        workspace_->undoRedoStatusLabel()->setText(status);
     }
 
     bool DesignerEditor::load(const wchar_t* filePath, std::size_t filePathLength)
@@ -533,6 +614,14 @@ namespace CodeToolsVsix
         // (and anything else reading viewDesignerModel_) needs this to
         // pick up the freshly loaded tree.
         viewDesignerModel_.refresh();
+
+        // A freshly loaded document has no undo history of its own - same
+        // "New" already does (handleNewClicked()). Without this, a stale
+        // Undo/Redo state from before this load (or from editing a
+        // previous document without ever clicking New) would carry over.
+        viewDesignerController_.clearSelection();
+        undoStack_.clear();
+        refreshUndoRedoButtons();
 
         clearDirty();
         return true;

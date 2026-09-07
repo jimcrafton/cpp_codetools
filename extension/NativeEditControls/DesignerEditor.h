@@ -118,6 +118,12 @@ namespace CodeToolsVsix
         newui::SyncReturn handleMouseUpForResize(newui::View& sender, const newui::Point& pt,
             std::uint32_t btnMask, std::uint32_t keyMask);
 
+        // Deletes the current canvas selection (viewDesignerController_.
+        // selected()) as one undo-aware step - only fires when the canvas
+        // itself has focus (see setupUI()'s own comment on root->onKeyDown).
+        newui::SyncReturn handleKeyDownForDelete(newui::View& sender, std::uint32_t keyMask,
+            int keyCharVal, int repeatCount, std::uint32_t VKeyCode);
+
         // Pushes viewDesignerController_'s new selection into both
         // Properties (primary() only - it's a single-object panel) and
         // Document Outline (the full selected() list, since Outline's own

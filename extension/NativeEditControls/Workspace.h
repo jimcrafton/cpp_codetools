@@ -12,6 +12,7 @@
 #include <newui/segmentedcontrol.h>
 #include <newui/splitter.h>
 #include <newui/subview.h>
+#include <newui/undostack.h>
 
 namespace CodeToolsVsix
 {
@@ -99,6 +100,14 @@ namespace CodeToolsVsix
         PropertiesGrid* propertiesPane() const { return propertiesPane_; }
         newui::SubView* animationPane() const { return animationPane_; }
         newui::SubView* statusBar() const { return statusBar_; }
+
+        // Left-anchored text inside statusBar_ - DesignerEditor's own
+        // refreshUndoRedoButtons() sets this to "Undo: <description>" /
+        // "Redo: <description>" (whichever undoStack_.canUndo()/canRedo()
+        // says is next), "" when neither is available. The rest of
+        // Main.dc.html's own three-section status bar (bounds/filename)
+        // isn't built yet - a separate, deferred piece.
+        newui::Label* undoRedoStatusLabel() const { return undoRedoStatusLabel_; }
         newui::FrameProxy* frameProxy() const { return frameProxy_; }
         newui::RootViewProxy* rootViewProxy() const { return rootViewProxy_; }
 
@@ -140,6 +149,12 @@ namespace CodeToolsVsix
         // already established).
         newui::Delegate<Workspace> onDesignSurfaceChanged;
 
+        // Same "nullptr = direct commit, no undo" convention PropertyEditor::
+        // setUndoStack() already established - makes the Toolbox
+        // double-click-to-add wiring below undo-aware once DesignerEditor
+        // sets a real stack (setupUI()).
+        void setUndoStack(newui::UndoStack* undoStack) { undoStack_ = undoStack; }
+
     private:
         newui::Toolbar* topBar_ = nullptr;
         CanvasWell* canvasWell_ = nullptr;
@@ -157,5 +172,7 @@ namespace CodeToolsVsix
         newui::ToolbarButton* redoButton_ = nullptr;
         newui::SegmentedControl* modeControl_ = nullptr;
         newui::Label* zoomLabel_ = nullptr;
+        newui::Label* undoRedoStatusLabel_ = nullptr;
+        newui::UndoStack* undoStack_ = nullptr;
     };
 }

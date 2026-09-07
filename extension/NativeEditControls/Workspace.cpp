@@ -1,6 +1,7 @@
 #include "Workspace.h"
 
 #include <newui/layout.h>
+#include <newui/reflection.h>
 #include <newui/uicolormanager.h>
 #include <newui/viewbuilder.h>
 
@@ -272,8 +273,25 @@ namespace CodeToolsVsix
                     // explicitly, right here, same as rootViewProxy_/
                     // frameProxy_ are above.
                     created->setDesignTime(true);
-                    rootViewProxy_->addChild(created);
-                    onDesignSurfaceChanged(*this);
+
+                    if (undoStack_ == nullptr) {
+                        rootViewProxy_->addChild(created);
+                        onDesignSurfaceChanged(*this);
+                        return newui::SyncReturn::Handled;
+                    }
+
+                    const newui::reflection::Class* clazz = newui::reflection::classinfo(typeid(*created));
+                    newui::UndoableAction action;
+                    action.description = "Add " + (clazz != nullptr ? clazz->name() : std::string("Control"));
+                    action.doIt = [this, created]() {
+                        rootViewProxy_->addChild(created);
+                        onDesignSurfaceChanged(*this);
+                    };
+                    action.undoIt = [this, created]() {
+                        rootViewProxy_->removeChild(created);
+                        onDesignSurfaceChanged(*this);
+                    };
+                    undoStack_->push(action);
                     return newui::SyncReturn::Handled;
                 });
             });
@@ -323,6 +341,31 @@ namespace CodeToolsVsix
         newui::ViewBuilder<newui::SubView> statusBuilder;
         statusBuilder.name("workspaceStatusBar").desiredSize(newui::Size(0.0f, kStatusBarHeight));
         styleAsPane(statusBuilder, newui::UIColorRole::HighlightBackground);
+
+        // HighlightText pairs with the status bar's own HighlightBackground
+        // above, same role pairing FrameProxy's title text already uses.
+        // Empty until a real undo/redo action exists - refreshUndoRedoButtons()
+        // (DesignerEditor.cpp) keeps this in sync from here on.
+        newui::ViewBuilder<newui::Label> undoRedoStatusLabelBuilder;
+        undoRedoStatusLabelBuilder.name("workspaceUndoRedoStatusLabel")
+            .layoutParams<newui::AnchorLayoutParams>([](newui::AnchorLayoutParams& p) {
+                // width/height, not desiredSize() - AnchorLayout only reads
+                // desiredSize() for a stretched axis (Left+Right/Top+Bottom);
+                // a single-edge anchor like this one sizes from these
+                // params fields instead (real bug found live: this was
+                // originally left at its 0.0f default, so the label always
+                // painted into a zero-width rect regardless of its text).
+                p.anchors = newui::Anchor::Left | newui::Anchor::CenterY;
+                p.leftMargin = 8.0f;
+                p.width = 400.0f;
+                p.height = Workspace::kStatusBarHeight;
+            })
+            .configure([](newui::Label& label) {
+                label.setTextColor(newui::UIColorManager::colorFor(newui::UIColorRole::HighlightText).toBLRgba32());
+            });
+        undoRedoStatusLabel_ = undoRedoStatusLabelBuilder.build();
+
+        statusBuilder.layout<newui::AnchorLayout>().child(undoRedoStatusLabel_);
         statusBar_ = statusBuilder.build();
 
         self.child(topBar_).child(middle).child(statusBar_);

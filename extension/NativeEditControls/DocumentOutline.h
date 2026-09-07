@@ -147,6 +147,11 @@ namespace CodeToolsVsix
     private:
         newui::SyncReturn handleTreeSelectionChanged(newui::TreeView& sender);
 
+        // Expands every proper-prefix ancestor of path (not path itself)
+        // so a canvas-driven selection under a collapsed ancestor is
+        // actually visible, not just logically selected.
+        void expandAncestorsOf(const std::vector<std::size_t>& path);
+
         DocumentOutlineModel model_;
         newui::TreeView* treeView_ = nullptr;
         bool applyingExternalSelection_ = false;

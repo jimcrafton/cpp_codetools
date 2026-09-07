@@ -305,9 +305,19 @@ namespace CodeToolsVsix
         applyingExternalSelection_ = true;
         treeView_->clearSelection();
         for (const auto& path : targetPaths) {
+            expandAncestorsOf(path);
             treeView_->addToSelection(path);
         }
         applyingExternalSelection_ = false;
+    }
+
+    void DocumentOutline::expandAncestorsOf(const std::vector<std::size_t>& path)
+    {
+        std::vector<std::size_t> prefix;
+        for (std::size_t i = 0; i + 1 < path.size(); ++i) {
+            prefix.push_back(path[i]);
+            treeView_->controller().setExpanded(prefix, true);
+        }
     }
 
     newui::SyncReturn DocumentOutline::handleTreeSelectionChanged(newui::TreeView& sender)

@@ -436,6 +436,127 @@ TEST(DesignerEditorToolbar, PushingARealUndoableActionEnablesUndoAndOnUndoEnable
     EXPECT_TRUE(editor.workspace()->redoButton()->isEnabled());
 }
 
+TEST(DesignerEditorToolbar, ToolboxAddIsUndoAwareAndMarksTheDocumentDirty)
+{
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+    ASSERT_FALSE(editor.isDirty());
+    ASSERT_FALSE(editor.workspace()->undoButton()->isEnabled());
+
+    auto* created = new newui::SubView();
+    created->setName("addedChild");
+    editor.workspace()->toolboxPane()->onEntryActivated(*editor.workspace()->toolboxPane(), created);
+
+    ASSERT_EQ(editor.workspace()->rootViewProxy()->childViews().size(), 1u);
+    EXPECT_EQ(editor.workspace()->rootViewProxy()->childViews()[0], created);
+    EXPECT_TRUE(created->isDesignTime());
+    EXPECT_TRUE(editor.isDirty());
+    EXPECT_TRUE(editor.workspace()->undoButton()->isEnabled());
+
+    editor.workspace()->undoButton()->onClick(*editor.workspace()->undoButton());
+    EXPECT_TRUE(editor.workspace()->rootViewProxy()->childViews().empty());
+
+    editor.workspace()->redoButton()->onClick(*editor.workspace()->redoButton());
+    ASSERT_EQ(editor.workspace()->rootViewProxy()->childViews().size(), 1u);
+    EXPECT_EQ(editor.workspace()->rootViewProxy()->childViews()[0], created);
+}
+
+TEST(DesignerEditorToolbar, DeleteKeyRemovesTheSelectedControlAndIsUndoAware)
+{
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+
+    auto* child = new newui::SubView();
+    editor.workspace()->rootViewProxy()->addChild(child);
+    editor.viewDesignerController().selectExclusive(child);
+    ASSERT_FALSE(editor.isDirty());
+
+    view.onKeyDown(view, 0, 0, 0, static_cast<std::uint32_t>(newui::vkDelete));
+
+    EXPECT_TRUE(editor.workspace()->rootViewProxy()->childViews().empty());
+    EXPECT_EQ(editor.viewDesignerController().primary(), nullptr);
+    EXPECT_TRUE(editor.isDirty());
+    EXPECT_TRUE(editor.workspace()->undoButton()->isEnabled());
+
+    editor.workspace()->undoButton()->onClick(*editor.workspace()->undoButton());
+    ASSERT_EQ(editor.workspace()->rootViewProxy()->childViews().size(), 1u);
+    EXPECT_EQ(editor.workspace()->rootViewProxy()->childViews()[0], child);
+}
+
+// Real bug caught live: the first version of handleKeyDownForDelete()
+// called removeChild()/addChild() on rootViewProxy() unconditionally,
+// which silently no-oped for a view nested inside a container SubView
+// (delete did nothing) and, on undo, re-attached the same instance a
+// SECOND time directly under rootViewProxy() - leaving it attached to
+// two parents at once (corrupting the tree, and crashing on teardown
+// since both parents then try to delete the same object).
+TEST(DesignerEditorToolbar, DeleteKeyRemovesAControlNestedInsideAContainerAndUndoRestoresItToTheSameParent)
+{
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+
+    auto* container = new newui::SubView();
+    container->setName("buttonRow");
+    auto* nested = new newui::SubView();
+    nested->setName("toggleButton");
+    editor.workspace()->rootViewProxy()->addChild(container);
+    container->addChild(nested);
+
+    editor.viewDesignerController().selectExclusive(nested);
+    view.onKeyDown(view, 0, 0, 0, static_cast<std::uint32_t>(newui::vkDelete));
+
+    ASSERT_TRUE(container->childViews().empty());
+    ASSERT_EQ(editor.workspace()->rootViewProxy()->childViews().size(), 1u);
+    EXPECT_EQ(editor.workspace()->rootViewProxy()->childViews()[0], container);
+
+    editor.workspace()->undoButton()->onClick(*editor.workspace()->undoButton());
+
+    ASSERT_EQ(container->childViews().size(), 1u);
+    EXPECT_EQ(container->childViews()[0], nested);
+    EXPECT_EQ(editor.workspace()->rootViewProxy()->childViews().size(), 1u);  // not re-added a second time here
+}
+
+TEST(DesignerEditorToolbar, DeleteKeyWithNoSelectionDoesNothing)
+{
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+
+    auto* child = new newui::SubView();
+    editor.workspace()->rootViewProxy()->addChild(child);
+
+    view.onKeyDown(view, 0, 0, 0, static_cast<std::uint32_t>(newui::vkDelete));
+
+    EXPECT_EQ(editor.workspace()->rootViewProxy()->childViews().size(), 1u);
+    EXPECT_FALSE(editor.workspace()->undoButton()->isEnabled());
+}
+
+TEST(DesignerEditorToolbar, UndoRedoStatusLabelReflectsTheStackTopAsActionsAreCommittedUndoneAndRedone)
+{
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+    // Real, live-reported bug: text() alone doesn't prove anything renders.
+    // The actual cause was a zero desiredSize() - Label (unlike a plain
+    // SubView) already defaults to visible, but this codebase's Labels/
+    // ToolbarButtons never self-measure (see zoomLabel()'s own real
+    // desiredSize() right next to this one) - with none set, AnchorLayout
+    // gave it zero width, so it painted nothing regardless of its text.
+    // A real resize (matching WorkspaceGetsRealBoundsWhenAddedAlongside...
+    // above) is needed for bounds() to reflect anything beyond the tiny
+    // 10x10 construction-time default.
+    view.setBounds(newui::Rect(0, 0, 1000, 700));
+    ASSERT_GT(editor.workspace()->undoRedoStatusLabel()->bounds().size().width, 0.0f);
+    ASSERT_TRUE(editor.workspace()->undoRedoStatusLabel()->text().empty());
+
+    editor.undoStack().push(newui::UndoableAction{"Add Button", [](){}, [](){}});
+    EXPECT_EQ(editor.workspace()->undoRedoStatusLabel()->text(), "Undo: Add Button");
+
+    editor.workspace()->undoButton()->onClick(*editor.workspace()->undoButton());
+    EXPECT_EQ(editor.workspace()->undoRedoStatusLabel()->text(), "Redo: Add Button");
+
+    editor.workspace()->redoButton()->onClick(*editor.workspace()->redoButton());
+    EXPECT_EQ(editor.workspace()->undoRedoStatusLabel()->text(), "Undo: Add Button");
+}
+
 TEST(DesignerEditorToolbar, ClickingNewClearsTheDesignSurfaceAndSelection)
 {
     newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");

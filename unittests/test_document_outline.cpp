@@ -178,6 +178,32 @@ TEST(DocumentOutline, RealTreeSelectionChangeFiresOnSelectionActivatedWithResolv
     delete outline;
 }
 
+TEST(DocumentOutline, SetSelectionExpandsCollapsedAncestorsOfTheTarget)
+{
+    auto* outline = new DocumentOutline();
+    newui::SubView root;
+    auto* group = new newui::SubView();
+    auto* nested = new newui::SubView();
+    root.addChild(group);
+    group->addChild(nested);
+
+    ViewDesignerModel source;
+    source.setRoot(&root);
+    outline->setViewDesignerModel(&source);
+
+    // {0} (root) starts expanded by default; {0, 0} (group) does not -
+    // nested (path {0, 0, 0}) is invisible until it does.
+    ASSERT_FALSE(outline->treeView()->controller().isExpanded(std::vector<std::size_t>{0, 0}));
+
+    outline->setSelection(std::vector<newui::SubView*>{nested});
+
+    EXPECT_TRUE(outline->treeView()->controller().isExpanded(std::vector<std::size_t>{0}));
+    EXPECT_TRUE(outline->treeView()->controller().isExpanded(std::vector<std::size_t>{0, 0}));
+    EXPECT_TRUE(outline->treeView()->isSelected(std::vector<std::size_t>{0, 0, 0}));
+
+    delete outline;
+}
+
 TEST(DocumentOutline, SetSelectionWithEmptyListClearsTreeSelection)
 {
     auto* outline = new DocumentOutline();
