@@ -10,6 +10,8 @@
 #include "ViewDesignerModel.h"
 #include "Workspace.h"
 
+#include <newui/undostack.h>
+
 namespace CodeToolsVsix
 {
     // What NativeEditManager::createEditor constructs for DocumentType::Designer (see
@@ -74,6 +76,14 @@ namespace CodeToolsVsix
         // onDesignSurfaceChanged).
         ViewDesignerModel& viewDesignerModel() { return viewDesignerModel_; }
         const ViewDesignerModel& viewDesignerModel() const { return viewDesignerModel_; }
+
+        // Backs the toolbar's Undo/Redo buttons and PropertiesGrid's own
+        // undo-aware property commits (PropertyEditor::setUndoStack(),
+        // wired in setupUI()) - property edits only for now (see this
+        // toolbar's own commit message/session notes for why adding/
+        // deleting/moving controls isn't undo-aware yet).
+        newui::UndoStack& undoStack() { return undoStack_; }
+        const newui::UndoStack& undoStack() const { return undoStack_; }
 
         // filePath must be a real "<root>\Resources\<bundleName>.newui" -
         // derives bundleName/root from it (see resolveBundleNameAndRoot(),
@@ -145,9 +155,26 @@ namespace CodeToolsVsix
         // Workspace::onDesignSurfaceChanged's own comment).
         newui::SyncReturn handleDesignSurfaceChanged(Workspace& sender);
 
+        // Toolbar handlers - New/Open/Save/Undo/Redo are a temporary
+        // testing-phase convenience (see workspace()->newButton() etc.'s
+        // own header comment, Workspace.h) - wired directly onto each
+        // ToolbarButton's inherited Control::onClick in setupUI().
+        newui::SyncReturn handleNewClicked(newui::Control& sender);
+        newui::SyncReturn handleOpenClicked(newui::Control& sender);
+        newui::SyncReturn handleSaveClicked(newui::Control& sender);
+        newui::SyncReturn handleUndoClicked(newui::Control& sender);
+        newui::SyncReturn handleRedoClicked(newui::Control& sender);
+        // Fired by undoStack_.onActionPushed (a real property commit) in
+        // addition to the Undo/Redo handlers above - three real call
+        // sites can each change canUndo()/canRedo(), so this is the one
+        // place that actually pushes that state onto the two buttons.
+        newui::SyncReturn handleUndoStackActionPushed(newui::UndoStack& sender, const newui::UndoableAction& action);
+        void refreshUndoRedoButtons();
+
         Workspace* workspace_ = nullptr;
         SelectionOverlay* selectionOverlay_ = nullptr;
         ViewDesignerController viewDesignerController_;
         ViewDesignerModel viewDesignerModel_;
+        newui::UndoStack undoStack_;
     };
 }

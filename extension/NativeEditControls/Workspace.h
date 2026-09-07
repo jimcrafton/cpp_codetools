@@ -5,9 +5,11 @@
 #include "PropertiesGrid.h"
 #include "Toolbox.h"
 
+#include <newui/controls.h>
 #include <newui/delegate.h>
 #include <newui/frameproxy.h>
 #include <newui/rootviewproxy.h>
+#include <newui/segmentedcontrol.h>
 #include <newui/splitter.h>
 #include <newui/subview.h>
 
@@ -77,9 +79,20 @@ namespace CodeToolsVsix
         // side by side than the default would.
         static constexpr float kDividerThickness = 2.0f;
 
+        // Design/Source/Data Flow, matching Main.dc.html's own ".segmented"
+        // - only "Design" is real today, so Source/Data Flow are built
+        // enabled=false (SegmentedControl::setSegmentEnabled()) rather than
+        // omitted, an honest "not built yet" signal instead of missing
+        // chrome. Indices into the segmented control's own segments() list
+        // - not an enum, since nothing outside Workspace/DesignerEditor's
+        // own wiring needs to name these yet.
+        static constexpr std::size_t kDesignModeSegment = 0;
+        static constexpr std::size_t kSourceModeSegment = 1;
+        static constexpr std::size_t kDataFlowModeSegment = 2;
+
         Workspace();
 
-        newui::SubView* topBar() const { return topBar_; }
+        newui::Toolbar* topBar() const { return topBar_; }
         CanvasWell* canvasWell() const { return canvasWell_; }
         Toolbox* toolboxPane() const { return toolboxPane_; }
         DocumentOutline* documentOutlinePane() const { return documentOutlinePane_; }
@@ -88,6 +101,35 @@ namespace CodeToolsVsix
         newui::SubView* statusBar() const { return statusBar_; }
         newui::FrameProxy* frameProxy() const { return frameProxy_; }
         newui::RootViewProxy* rootViewProxy() const { return rootViewProxy_; }
+
+        // New/Open/Save/Undo/Redo - temporary testing-phase conveniences,
+        // per the user's own framing: testharness has no host IDE
+        // providing these, but a real VS-hosted DesignerEditor eventually
+        // won't need them either (File>Open/Save/Undo/Redo already exist
+        // at the IDE level there). Exposed as real child pointers rather
+        // than Workspace inventing its own forwarding delegates - same
+        // "expose the real child, DesignerEditor wires the actual
+        // behavior" convention toolboxPane()/propertiesPane()/etc.
+        // already follow (DesignerEditor::setupUI() subscribes directly
+        // to each button's own inherited Control::onClick).
+        newui::ToolbarButton* newButton() const { return newButton_; }
+        newui::ToolbarButton* openButton() const { return openButton_; }
+        newui::ToolbarButton* saveButton() const { return saveButton_; }
+        newui::ToolbarButton* undoButton() const { return undoButton_; }
+        newui::ToolbarButton* redoButton() const { return redoButton_; }
+
+        // Design/Source/Data Flow mode switch - see kDesignModeSegment
+        // etc.'s own comment above for why Source/Data Flow are present
+        // but disabled. DesignerEditor subscribes to its
+        // onSelectionChanged the same "reach the real child" way as the
+        // buttons above.
+        newui::SegmentedControl* modeControl() const { return modeControl_; }
+
+        // Static "100%" placeholder (Main.dc.html's own ".tb-zoom") - no
+        // real canvas zoom exists yet, so this never changes on its own;
+        // exposed only so a future real zoom feature has something to
+        // update rather than needing to rebuild the toolbar.
+        newui::Label* zoomLabel() const { return zoomLabel_; }
 
         // Fired right after anything here mutates rootViewProxy()'s own
         // children directly (today: just the Toolbox double-click-to-add
@@ -99,7 +141,7 @@ namespace CodeToolsVsix
         newui::Delegate<Workspace> onDesignSurfaceChanged;
 
     private:
-        newui::SubView* topBar_ = nullptr;
+        newui::Toolbar* topBar_ = nullptr;
         CanvasWell* canvasWell_ = nullptr;
         Toolbox* toolboxPane_ = nullptr;
         DocumentOutline* documentOutlinePane_ = nullptr;
@@ -108,5 +150,12 @@ namespace CodeToolsVsix
         newui::SubView* statusBar_ = nullptr;
         newui::FrameProxy* frameProxy_ = nullptr;
         newui::RootViewProxy* rootViewProxy_ = nullptr;
+        newui::ToolbarButton* newButton_ = nullptr;
+        newui::ToolbarButton* openButton_ = nullptr;
+        newui::ToolbarButton* saveButton_ = nullptr;
+        newui::ToolbarButton* undoButton_ = nullptr;
+        newui::ToolbarButton* redoButton_ = nullptr;
+        newui::SegmentedControl* modeControl_ = nullptr;
+        newui::Label* zoomLabel_ = nullptr;
     };
 }

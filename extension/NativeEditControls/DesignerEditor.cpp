@@ -7,6 +7,7 @@
 #include <newui/layout.h>
 #include <newui/uicolormanager.h>
 #include <newui/bundle.h>
+#include <newui/dialogs.h>
 #include <newui/frame.h>
 #include <newui/viewbuilder.h>
 #include <newui/keyboard_constants.h>
@@ -74,6 +75,29 @@ namespace CodeToolsVsix
             outRoot = root;
             outBundleName = wideToUtf8(stripExtension(fileName));
             return true;
+        }
+
+        // The real newui::Dialog::ShowOpenFile()/ShowSaveFile() (native
+        // IFileDialog, dialogs.h) - not a raw GetOpenFileNameW()/
+        // GetSaveFileNameW() call, which would've duplicated a real,
+        // already-built mechanism. Filtered to *.newui specifically,
+        // since load()/save() only ever accept a real "<root>\Resources\
+        // <bundleName>.newui" path anyway (resolveBundleNameAndRoot()
+        // above). Backs the toolbar's own Open/Save buttons - see their
+        // own header comment (Workspace.h) for why those are only a
+        // temporary testing-phase convenience. Returns an empty string
+        // if the user cancels or the dialog couldn't be shown.
+        std::wstring showNewuiFileDialog(HWND hwndOwner, bool forSave)
+        {
+            newui::FileDialogOptions options;
+            options.title = forSave ? "Save Designer Document" : "Open Designer Document";
+            options.defaultExtension = "newui";
+            options.filters.push_back({"newui files", "*.newui"});
+
+            std::string utf8Path;
+            bool ok = forSave ? newui::Dialog::ShowSaveFile(hwndOwner, options, utf8Path)
+                               : newui::Dialog::ShowOpenFile(hwndOwner, options, utf8Path);
+            return ok ? utf8ToWide(utf8Path) : std::wstring();
         }
     }
 
@@ -191,6 +215,25 @@ namespace CodeToolsVsix
         workspace_->documentOutlinePane()->setViewDesignerModel(&viewDesignerModel_);
         workspace_->documentOutlinePane()->onSelectionActivated.add(this, &DesignerEditor::handleOutlineSelectionActivated);
         workspace_->onDesignSurfaceChanged.add(this, &DesignerEditor::handleDesignSurfaceChanged);
+
+        // undoStack_ backs PropertiesGrid's own undo-aware property
+        // commits (property edits only for now - see this class's own
+        // undoStack() header comment) and the toolbar's Undo/Redo
+        // buttons; onActionPushed keeps their enabled state honest after
+        // every real property commit, not just after an undo()/redo()
+        // click.
+        workspace_->propertiesPane()->setUndoStack(&undoStack_);
+        undoStack_.onActionPushed.add(this, &DesignerEditor::handleUndoStackActionPushed);
+
+        // New/Open/Save/Undo/Redo - temporary testing-phase convenience,
+        // see workspace_->newButton() etc.'s own header comment
+        // (Workspace.h) for why. Control::onClick, inherited by
+        // ToolbarButton - not a ToolbarButton-specific delegate.
+        workspace_->newButton()->onClick.add(this, &DesignerEditor::handleNewClicked);
+        workspace_->openButton()->onClick.add(this, &DesignerEditor::handleOpenClicked);
+        workspace_->saveButton()->onClick.add(this, &DesignerEditor::handleSaveClicked);
+        workspace_->undoButton()->onClick.add(this, &DesignerEditor::handleUndoClicked);
+        workspace_->redoButton()->onClick.add(this, &DesignerEditor::handleRedoClicked);
 
         if (!this->rootViewOwned_) {
             if (!root->initialize())
@@ -339,6 +382,94 @@ namespace CodeToolsVsix
     {
         viewDesignerModel_.refresh();
         return newui::SyncReturn::Ignored;
+    }
+
+    newui::SyncReturn DesignerEditor::handleNewClicked(newui::Control& /*sender*/)
+    {
+        newui::RootViewProxy* surface = workspace_ != nullptr ? workspace_->rootViewProxy() : nullptr;
+        if (surface == nullptr) {
+            return newui::SyncReturn::Ignored;
+        }
+
+        viewDesignerController_.clearSelection();
+
+        // removeChild() only detaches - it never deletes (same "raw-
+        // pointer ownership handoff" contract View::addChild() itself
+        // has, see Toolbox::onEntryActivated's own comment) - copy the
+        // list first since removeChild() mutates the live childViews().
+        std::vector<newui::SubView*> children = surface->childViews();
+        for (newui::SubView* child : children) {
+            surface->removeChild(child);
+            delete child;
+        }
+
+        workspace_->frameProxy()->setTitle(std::string());
+        viewDesignerModel_.refresh();
+        undoStack_.clear();
+        refreshUndoRedoButtons();
+        clearDirty();
+        getRootView()->markDirty();
+        return newui::SyncReturn::Handled;
+    }
+
+    newui::SyncReturn DesignerEditor::handleOpenClicked(newui::Control& /*sender*/)
+    {
+        std::wstring path = showNewuiFileDialog(windowHandle(), /*forSave=*/false);
+        if (path.empty()) {
+            return newui::SyncReturn::Ignored;
+        }
+        if (!load(path.c_str(), path.size())) {
+            logToDebugOut(L"DesignerEditor: toolbar Open failed");
+        }
+        return newui::SyncReturn::Handled;
+    }
+
+    newui::SyncReturn DesignerEditor::handleSaveClicked(newui::Control& /*sender*/)
+    {
+        std::wstring path = showNewuiFileDialog(windowHandle(), /*forSave=*/true);
+        if (path.empty()) {
+            return newui::SyncReturn::Ignored;
+        }
+        if (!save(path.c_str(), path.size())) {
+            logToDebugOut(L"DesignerEditor: toolbar Save failed");
+        }
+        return newui::SyncReturn::Handled;
+    }
+
+    newui::SyncReturn DesignerEditor::handleUndoClicked(newui::Control& /*sender*/)
+    {
+        if (undoStack_.canUndo()) {
+            undoStack_.undo();
+        }
+        refreshUndoRedoButtons();
+        getRootView()->markDirty();
+        return newui::SyncReturn::Handled;
+    }
+
+    newui::SyncReturn DesignerEditor::handleRedoClicked(newui::Control& /*sender*/)
+    {
+        if (undoStack_.canRedo()) {
+            undoStack_.redo();
+        }
+        refreshUndoRedoButtons();
+        getRootView()->markDirty();
+        return newui::SyncReturn::Handled;
+    }
+
+    newui::SyncReturn DesignerEditor::handleUndoStackActionPushed(newui::UndoStack& /*sender*/,
+        const newui::UndoableAction& /*action*/)
+    {
+        refreshUndoRedoButtons();
+        return newui::SyncReturn::Ignored;
+    }
+
+    void DesignerEditor::refreshUndoRedoButtons()
+    {
+        if (workspace_ == nullptr) {
+            return;
+        }
+        workspace_->undoButton()->setEnabled(undoStack_.canUndo());
+        workspace_->redoButton()->setEnabled(undoStack_.canRedo());
     }
 
     bool DesignerEditor::load(const wchar_t* filePath, std::size_t filePathLength)

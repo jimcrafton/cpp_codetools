@@ -373,3 +373,87 @@ TEST_F(DesignerEditorFileFixture, SavePreservesTitleAndBoundsWhileReplacingRootV
     ASSERT_EQ(reloaded.rootView().childViews().size(), 1u);
     EXPECT_EQ(reloaded.rootView().childViews()[0]->name(), "editedChild");
 }
+
+// Toolbar (top of Workspace) - real newui::Toolbar/ToolbarButton/
+// SegmentedControl, not the plain SubView it used to be. No file needed -
+// same bare-RootView construction as ConstructionSetsDesignTimeOnly... above.
+TEST(DesignerEditorToolbar, TopBarHasFiveButtonsAndAModeControl)
+{
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+
+    ASSERT_NE(editor.workspace(), nullptr);
+    EXPECT_NE(editor.workspace()->newButton(), nullptr);
+    EXPECT_NE(editor.workspace()->openButton(), nullptr);
+    EXPECT_NE(editor.workspace()->saveButton(), nullptr);
+    EXPECT_NE(editor.workspace()->undoButton(), nullptr);
+    EXPECT_NE(editor.workspace()->redoButton(), nullptr);
+    EXPECT_NE(editor.workspace()->modeControl(), nullptr);
+}
+
+TEST(DesignerEditorToolbar, ModeControlHasDesignSourceDataFlowWithOnlyDesignEnabled)
+{
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+
+    auto* mode = editor.workspace()->modeControl();
+    ASSERT_EQ(mode->segments().size(), 3u);
+    EXPECT_EQ(mode->segments()[0], "Design");
+    EXPECT_EQ(mode->segments()[1], "Source");
+    EXPECT_EQ(mode->segments()[2], "Data Flow");
+    EXPECT_TRUE(mode->isSegmentEnabled(CodeToolsVsix::Workspace::kDesignModeSegment));
+    EXPECT_FALSE(mode->isSegmentEnabled(CodeToolsVsix::Workspace::kSourceModeSegment));
+    EXPECT_FALSE(mode->isSegmentEnabled(CodeToolsVsix::Workspace::kDataFlowModeSegment));
+    EXPECT_EQ(mode->selectedIndex(), CodeToolsVsix::Workspace::kDesignModeSegment);
+}
+
+TEST(DesignerEditorToolbar, UndoRedoButtonsStartDisabled)
+{
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+
+    EXPECT_FALSE(editor.workspace()->undoButton()->isEnabled());
+    EXPECT_FALSE(editor.workspace()->redoButton()->isEnabled());
+}
+
+// Fires the real Control::onClick delegate directly - the same "call the
+// real public API, not a synthesized OS mouse event" convention Toolbox's
+// own onEntryActivated tests already use (test_toolbox.cpp), not the
+// keyboard/mouse-handler simulation [[feedback_no_synthetic_input_unit_tests]]
+// warns against - this exercises the business logic a click reaches, not
+// whether a click reaches it.
+TEST(DesignerEditorToolbar, PushingARealUndoableActionEnablesUndoAndOnUndoEnablesRedo)
+{
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+
+    bool didUndo = false;
+    editor.undoStack().push(newui::UndoableAction{"test action", [](){}, [&didUndo](){ didUndo = true; }});
+
+    EXPECT_TRUE(editor.workspace()->undoButton()->isEnabled());
+    EXPECT_FALSE(editor.workspace()->redoButton()->isEnabled());
+
+    editor.workspace()->undoButton()->onClick(*editor.workspace()->undoButton());
+
+    EXPECT_TRUE(didUndo);
+    EXPECT_FALSE(editor.workspace()->undoButton()->isEnabled());
+    EXPECT_TRUE(editor.workspace()->redoButton()->isEnabled());
+}
+
+TEST(DesignerEditorToolbar, ClickingNewClearsTheDesignSurfaceAndSelection)
+{
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+
+    auto* child = new newui::SubView();
+    editor.workspace()->rootViewProxy()->addChild(child);
+    editor.viewDesignerController().selectExclusive(child);
+    ASSERT_FALSE(editor.workspace()->rootViewProxy()->childViews().empty());
+    ASSERT_NE(editor.viewDesignerController().primary(), nullptr);
+
+    editor.workspace()->newButton()->onClick(*editor.workspace()->newButton());
+
+    EXPECT_TRUE(editor.workspace()->rootViewProxy()->childViews().empty());
+    EXPECT_EQ(editor.viewDesignerController().primary(), nullptr);
+    EXPECT_FALSE(editor.isDirty());
+}

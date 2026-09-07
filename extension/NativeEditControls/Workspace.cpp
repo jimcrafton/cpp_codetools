@@ -5,6 +5,7 @@
 #include <newui/viewbuilder.h>
 
 #include <memory>
+#include <string>
 
 namespace CodeToolsVsix
 {
@@ -42,10 +43,95 @@ namespace CodeToolsVsix
             l.setPadding(0.0f);
         });
 
-        newui::ViewBuilder<newui::SubView> topBuilder;
+        // A real newui::Toolbar (own ThemedRebarBandStyle chrome, not
+        // styleAsPane()'s flat fill - Toolbar already themes itself) -
+        // see newButton()/openButton()/.../modeControl()'s own header
+        // comments for what each child actually does and why New/Open/
+        // Save/Undo/Redo are only a temporary testing-phase convenience.
+        newui::ViewBuilder<newui::Toolbar> topBuilder;
         topBuilder.name("workspaceTopBar").desiredSize(newui::Size(0.0f, kTopBarHeight));
-        styleAsPane(topBuilder, newui::UIColorRole::ControlBackground);
         topBar_ = topBuilder.build();
+
+        // Fixed widths matching examples/controls1.cpp's own real
+        // ToolbarButton usage (50x24) - a ToolbarButton never
+        // self-measures its own text the way this project's own Item-
+        // based rows do (ToolbarButton::paint() just centers whatever
+        // text within its already-assigned clientBounds()), so an
+        // explicit desiredSize() is required, not optional.
+        auto makeToolbarButton = [](const char* name, const std::string& text) {
+            newui::ViewBuilder<newui::ToolbarButton> b;
+            b.name(name).desiredSize(newui::Size(50.0f, 24.0f))
+                .configure([&text](newui::ToolbarButton& btn) { btn.setText(text); });
+            return b.build();
+        };
+
+        newButton_ = makeToolbarButton("workspaceNewButton", "New");
+        openButton_ = makeToolbarButton("workspaceOpenButton", "Open");
+        saveButton_ = makeToolbarButton("workspaceSaveButton", "Save");
+        undoButton_ = makeToolbarButton("workspaceUndoButton", "Undo");
+        redoButton_ = makeToolbarButton("workspaceRedoButton", "Redo");
+        // Nothing has been undone/redone yet when this pane is first
+        // built - DesignerEditor refreshes these via undoStack().
+        // onActionPushed and its own undo()/redo() handlers from here on.
+        undoButton_->setEnabled(false);
+        redoButton_->setEnabled(false);
+
+        newui::ViewBuilder<newui::ToolbarSeparator> fileUndoSepBuilder;
+        fileUndoSepBuilder.name("workspaceToolbarFileUndoSep");
+        newui::ToolbarSeparator* fileUndoSep = fileUndoSepBuilder.build();
+
+        newui::ViewBuilder<newui::ToolbarSeparator> undoModeSepBuilder;
+        undoModeSepBuilder.name("workspaceToolbarUndoModeSep");
+        newui::ToolbarSeparator* undoModeSep = undoModeSepBuilder.build();
+
+        // Design/Source/Data Flow - only Design is real (see
+        // kSourceModeSegment/kDataFlowModeSegment's own comment,
+        // Workspace.h), so those two segments are built present but
+        // disabled rather than omitted, an honest "not built yet" signal
+        // instead of missing chrome.
+        newui::ViewBuilder<newui::SegmentedControl> modeControlBuilder;
+        modeControlBuilder.name("workspaceModeControl")
+            .configure([](newui::SegmentedControl& control) {
+                control.setSegments({"Design", "Source", "Data Flow"});
+                control.setSegmentEnabled(Workspace::kSourceModeSegment, false);
+                control.setSegmentEnabled(Workspace::kDataFlowModeSegment, false);
+            });
+        modeControl_ = modeControlBuilder.build();
+        modeControl_->setDesiredSize(modeControl_->naturalSize());
+
+        // "100%" (Main.dc.html's own ".tb-zoom") - a static placeholder,
+        // not wired to anything real (no canvas zoom feature exists yet -
+        // see zoomLabel()'s own header comment). Fixed width, same
+        // "ToolbarButton never self-measures, the caller assigns a size"
+        // convention makeToolbarButton() above already follows.
+        newui::ViewBuilder<newui::Label> zoomLabelBuilder;
+        zoomLabelBuilder.name("workspaceZoomLabel")
+            .desiredSize(newui::Size(40.0f, 24.0f))
+            .configure([](newui::Label& label) { label.setText("100%"); });
+        zoomLabel_ = zoomLabelBuilder.build();
+
+        // A plain, invisible-content spacer with the only nonzero flex
+        // weight in this Toolbar's FlexLayout (every button/separator/
+        // the mode control above is weight-0, sized to its own
+        // desiredSize()) - absorbs all left-over width, pushing the zoom
+        // label and mode control to the right edge, matching
+        // Main.dc.html's own ".tb-spacer { flex: 1 }".
+        newui::ViewBuilder<newui::SubView> toolbarSpacerBuilder;
+        toolbarSpacerBuilder.name("workspaceToolbarSpacer")
+            .visible(true)
+            .layoutParams(std::make_unique<newui::FlexLayoutParams>(1.0f));
+        newui::SubView* toolbarSpacer = toolbarSpacerBuilder.build();
+
+        topBar_->addChild(newButton_);
+        topBar_->addChild(openButton_);
+        topBar_->addChild(saveButton_);
+        topBar_->addChild(fileUndoSep);
+        topBar_->addChild(undoButton_);
+        topBar_->addChild(redoButton_);
+        topBar_->addChild(undoModeSep);
+        topBar_->addChild(toolbarSpacer);
+        topBar_->addChild(zoomLabel_);
+        topBar_->addChild(modeControl_);
 
         // isDesignTime() no longer defers to an owning RootView's flag
         // (view.cpp - a View reports only its own explicitly-set flag) -
