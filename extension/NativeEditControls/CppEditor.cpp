@@ -176,11 +176,11 @@ namespace CodeToolsVsix
         }
     }
 
-    CppEditor::CppEditor(newui::RootView* rootView)
+    CppEditor::CppEditor(newui::RootView* rootView, newui::SubView* contentHost)
     {
         rootViewOwned_ = true;
 
-        if (!setupUI(rootView))
+        if (!setupUI(rootView, contentHost))
         {
             return;
         }
@@ -210,20 +210,28 @@ namespace CodeToolsVsix
         logToDebugOut(L"CppEditorControl completed");
     }
 
-    bool CppEditor::setupUI(newui::RootView* root)
+    bool CppEditor::setupUI(newui::RootView* root, newui::SubView* contentHost)
     {
         root->style().setBackgroundColor(newui::UIColorManager::colorFor(newui::UIColorRole::WindowBackground));
+
+        // contentHost: nullptr (the default - every pre-existing caller) means root itself gets
+        // both the layout and the two TextControls below, unchanged from before this parameter
+        // existed. A caller that already built other chrome directly onto root (e.g.
+        // testharness's own directory tree pane, added as a sibling of contentHost under root's
+        // own top-level layout) passes that pane instead, so this editor's own layout/content
+        // only ever touches its own subtree, never displacing that other chrome.
+        newui::View* host = contentHost != nullptr ? static_cast<newui::View*>(contentHost) : static_cast<newui::View*>(root);
 
         auto rootLayout = std::make_unique<newui::FlexLayout>(newui::Orientation::Vertical);
         rootLayout->setSpacing(0.0f);
         rootLayout->setPadding(0.0f);
-        root->setLayout(std::move(rootLayout));
+        host->setLayout(std::move(rootLayout));
 
         auto* textControl = new newui::TextControl();
         textControl->setVisible(true);
         // Most of the space - the outline pane below gets the rest.
         textControl->setLayoutParams(std::make_unique<newui::FlexLayoutParams>(3.0f));
-        root->addChild(textControl);
+        host->addChild(textControl);
 
         auto* outlineControl = new newui::TextControl();
         outlineControl->setVisible(true);
@@ -232,7 +240,7 @@ namespace CodeToolsVsix
         // Visually distinct from the editable pane above it, so it doesn't read as "more of the
         // same editable buffer" - same UIColorManager pattern the root's own background uses.
         outlineControl->style().setBackgroundColor(newui::UIColorManager::colorFor(newui::UIColorRole::ControlBackground));
-        root->addChild(outlineControl);
+        host->addChild(outlineControl);
         if (!this->rootViewOwned_) {
             if (!root->initialize())
             {

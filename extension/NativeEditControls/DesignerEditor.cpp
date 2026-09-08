@@ -91,10 +91,10 @@ namespace CodeToolsVsix
         }
     }
 
-    DesignerEditor::DesignerEditor(newui::RootView* rootView)
+    DesignerEditor::DesignerEditor(newui::RootView* rootView, newui::SubView* contentHost)
     {
         rootViewOwned_ = true;
-        if (!setupUI(rootView))
+        if (!setupUI(rootView, contentHost))
         {
             return;
         }
@@ -120,7 +120,7 @@ namespace CodeToolsVsix
         logToDebugOut(L"DesignerEditor completed");
     }
 
-    bool DesignerEditor::setupUI(newui::RootView* root)
+    bool DesignerEditor::setupUI(newui::RootView* root, newui::SubView* contentHost)
     {
         root->style().setBackgroundColor(newui::UIColorManager::colorFor(newui::UIColorRole::WindowBackground));
 
@@ -134,17 +134,21 @@ namespace CodeToolsVsix
 
         // Workspace fills the whole pane - root itself is never the edited
         // document (see this class's own header comment); load()/save()
-        // work against workspace_->rootViewProxy() instead.
-        newui::ViewBuilder<newui::RootView> rootBuilder(root);
-        rootBuilder.layout<newui::FlexLayout>([](newui::FlexLayout& l) {
-            l.setOrientation(newui::Orientation::Vertical);
-            l.setSpacing(0.0f);
-            l.setPadding(0.0f);
-        });
+        // work against workspace_->rootViewProxy() instead. contentHost
+        // (nullptr by default - see this class's own constructor comment)
+        // is where workspace_'s own layout/child placement actually goes;
+        // root-level concerns below (overlay, global mouse/key hooks,
+        // initialize()) still always target root itself.
+        newui::View* host = contentHost != nullptr ? static_cast<newui::View*>(contentHost) : static_cast<newui::View*>(root);
+        auto hostLayout = std::make_unique<newui::FlexLayout>(newui::Orientation::Vertical);
+        hostLayout->setSpacing(0.0f);
+        hostLayout->setPadding(0.0f);
+        host->setLayout(std::move(hostLayout));
+
         newui::ViewBuilder<Workspace> workspaceBuilder;
         workspaceBuilder.layoutParams(std::make_unique<newui::FlexLayoutParams>(1.0f));
         workspace_ = workspaceBuilder.build();
-        rootBuilder.child(workspace_);
+        host->addChild(workspace_);
 
         // Selection + handles (designer-plan.md 6.1 item 3) - root owns the
         // overlay (Overlay isn't a SubView, see overlay.h), painted last on

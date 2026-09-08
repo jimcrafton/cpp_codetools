@@ -29,7 +29,12 @@ namespace CodeToolsVsix
     public:
         DesignerEditor(HWND hwndParent, int x, int y, int width, int height);
 
-        DesignerEditor(newui::RootView* rootView);
+        // contentHost: see NativeEditManager::createEditor()'s own comment - nullptr (default)
+        // means workspace_ is added directly to rootView, matching every pre-existing caller.
+        // root-level concerns (background, the selection overlay, the global mouse/key hooks
+        // below) always target rootView itself regardless - only workspace_'s own layout/
+        // placement moves to contentHost when one is given.
+        DesignerEditor(newui::RootView* rootView, newui::SubView* contentHost = nullptr);
 
         // Explicit (not implicit-default): root's own Overlay (set in
         // setupUI() below) holds a const reference into
@@ -48,7 +53,8 @@ namespace CodeToolsVsix
         // viewDesignerController_ still exists.
         ~DesignerEditor() override;
 
-        bool setupUI(newui::RootView* root);
+        // contentHost: see the constructor's own comment above.
+        bool setupUI(newui::RootView* root, newui::SubView* contentHost = nullptr);
 
         // Non-owning - workspace_ is owned by the View tree (root->addChild()'d in setupUI()),
         // freed when root is. Exposes the Toolbox/Outline/Properties panes and the FrameProxy/

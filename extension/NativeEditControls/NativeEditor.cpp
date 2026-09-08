@@ -66,7 +66,8 @@ namespace CodeToolsVsix
         instance.runLoopThread_.join();
     }
 
-    NativeEditor* NativeEditManager::createEditor(newui::RootView* rootView, DocumentType documentType)
+    NativeEditor* NativeEditManager::createEditor(newui::RootView* rootView, DocumentType documentType,
+        newui::SubView* contentHost)
     {
         auto& instance = NativeEditManager::instance();
 
@@ -76,11 +77,11 @@ namespace CodeToolsVsix
         switch (documentType)
         {
             case DocumentType::Designer:
-                editor = std::make_unique<DesignerEditor>(rootView);
+                editor = std::make_unique<DesignerEditor>(rootView, contentHost);
                 break;
             case DocumentType::CppSource:
             default:
-                editor = std::make_unique<CppEditor>(rootView);
+                editor = std::make_unique<CppEditor>(rootView, contentHost);
                 break;
         }
     

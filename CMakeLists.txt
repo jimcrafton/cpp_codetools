@@ -259,6 +259,7 @@ add_executable(testharness
     extension/NativeEditControls/PropertiesGrid.cpp
     extension/NativeEditControls/DocumentOutline.cpp
     extension/NativeEditControls/SelectionOverlay.cpp
+    extension/NativeEditControls/DirectoryTree.cpp
     extension/NativeEditControls/TextEncoding.cpp
     extension/NativeEditControls/Logging.cpp)
 

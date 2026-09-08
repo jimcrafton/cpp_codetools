@@ -39,7 +39,10 @@ namespace CodeToolsVsix
         // throw across the P/Invoke boundary" convention).
         CppEditor(HWND hwndParent, int x, int y, int width, int height);
 
-        CppEditor(newui::RootView* rootView);
+        // contentHost: see NativeEditManager::createEditor()'s own comment - nullptr (default)
+        // means the two TextControls below are added directly to rootView, matching every
+        // pre-existing caller.
+        CppEditor(newui::RootView* rootView, newui::SubView* contentHost = nullptr);
 
         // Reads filePath (UTF-8), sets it as the editable TextControl's text, and separately
         // populates the read-only outline pane with a cpptools outline if parsing finds any
@@ -56,7 +59,8 @@ namespace CodeToolsVsix
         // returns true; real per-command behavior is out of scope for this phase.
         bool execCommand(EditorCommand command, std::uint32_t flags, const EditorCommandArgs* args) override;
 
-		bool setupUI(newui::RootView* root);
+		// contentHost: see the constructor's own comment above.
+		bool setupUI(newui::RootView* root, newui::SubView* contentHost = nullptr);
     private:
         newui::TextControl* textControl_ = nullptr;     // owned by the base's RootView child tree - editable source
         newui::TextControl* outlineControl_ = nullptr;  // owned by the base's RootView child tree - read-only outline

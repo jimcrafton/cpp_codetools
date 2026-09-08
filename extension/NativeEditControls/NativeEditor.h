@@ -141,7 +141,16 @@ namespace CodeToolsVsix
 
         static NativeEditor* createEditor(HWND hwndParent, int x, int y, int width, int height, DocumentType documentType);
 
-        static NativeEditor* createEditor(newui::RootView* rootView, DocumentType documentType);
+        // contentHost: where the editor's own content children get added -
+        // nullptr (default) means rootView itself, matching every existing
+        // caller (the VSIX extension always wants its content filling the
+        // whole hosting RootView). A caller that's already built other
+        // chrome onto rootView (e.g. testharness's own directory tree pane)
+        // passes a child SubView of rootView instead, so the editor's
+        // content lands there rather than displacing that chrome - see
+        // CppEditor::setupUI()/DesignerEditor::setupUI()'s own comments.
+        static NativeEditor* createEditor(newui::RootView* rootView, DocumentType documentType,
+            newui::SubView* contentHost = nullptr);
 
 		static bool closeEditor(HWND hwnd) {
 			auto& instance = NativeEditManager::instance();
