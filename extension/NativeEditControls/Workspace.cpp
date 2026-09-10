@@ -150,6 +150,16 @@ namespace CodeToolsVsix
                           | newui::Anchor::Right | newui::Anchor::Bottom;
                 p.topMargin = newui::FrameProxy::kTitleBarHeight;
             })
+            // rootViewProxy_'s own children (the edited document's real controls) get a real
+            // AnchorLayout so a dragged/moved control's position is expressed as a real,
+            // reflectable AnchorLayoutParams (leftMargin/topMargin/width/height - plain public
+            // fields, unlike the private, non-property View::bounds_) rather than a raw
+            // setBounds() call that would never round-trip through Bundle save/load.
+            // AnchorLayout::arrange() already skips any child with no AnchorLayoutParams at all
+            // ("unconfigured child - left exactly where it was", layout.cpp) - a real, already-
+            // load-bearing behavior confirmed by reading, not assumed - so this is non-breaking
+            // for every existing Toolbox-added child, which has none yet.
+            .layout<newui::AnchorLayout>()
             .configure([](newui::RootViewProxy& v) {
                 v.setDesignTime(true);
                 // Matches FrameProxy's own body radius - see

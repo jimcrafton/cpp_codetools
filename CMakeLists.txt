@@ -206,6 +206,8 @@ add_library(NativeEditControls SHARED
     extension/NativeEditControls/DocumentOutline.cpp
     extension/NativeEditControls/SelectionOverlay.h
     extension/NativeEditControls/SelectionOverlay.cpp
+    extension/NativeEditControls/LayoutEditingPolicy.h
+    extension/NativeEditControls/LayoutEditingPolicy.cpp
 
 
     extension/NativeEditControls/NativeEditControlApi.cpp
@@ -259,6 +261,7 @@ add_executable(testharness
     extension/NativeEditControls/PropertiesGrid.cpp
     extension/NativeEditControls/DocumentOutline.cpp
     extension/NativeEditControls/SelectionOverlay.cpp
+    extension/NativeEditControls/LayoutEditingPolicy.cpp
     extension/NativeEditControls/DirectoryTree.cpp
     extension/NativeEditControls/TextEncoding.cpp
     extension/NativeEditControls/Logging.cpp)

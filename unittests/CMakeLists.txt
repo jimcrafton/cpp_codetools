@@ -36,6 +36,7 @@ add_executable(nativeeditcontrols_tests
     test_properties_grid.cpp
     test_document_outline.cpp
     test_selection_overlay.cpp
+    test_layout_editing_policy.cpp
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/PropertyEditor.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/ComponentEditor.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/ToolboxRegistry.cpp"
@@ -54,6 +55,7 @@ add_executable(nativeeditcontrols_tests
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/PropertiesGrid.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/DocumentOutline.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/SelectionOverlay.cpp"
+    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/LayoutEditingPolicy.cpp"
 )
 
 target_compile_definitions(nativeeditcontrols_tests PRIVATE

@@ -285,6 +285,166 @@ TEST_F(DesignerEditorFileFixture, ClickInFrameProxysOverflowPastCanvasWellIsIgno
     EXPECT_EQ(editor.viewDesignerController().primary(), nullptr);
 }
 
+// ---------------------------------------------------------------------------
+// Move - drag-to-reposition/-reorder/-recell, routed through
+// LayoutEditingPolicy::policyFor() (LayoutEditingPolicy.h). Real
+// onMouseDown/onMouseMove/onMouseUp Delegate calls, same convention the
+// Selection tests above already use - not a synthetic bypass of anything
+// (see [[feedback_no_synthetic_input_unit_tests]]'s own carve-out).
+// ---------------------------------------------------------------------------
+
+TEST_F(DesignerEditorFileFixture, DraggingAFreeCanvasControlMovesItAndPushesOneUndoStep)
+{
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&root);
+    ASSERT_NE(editor.workspace(), nullptr);
+    root.setBounds(newui::Rect(0, 0, 1400, 700));
+
+    newui::RootViewProxy* surface = editor.workspace()->rootViewProxy();
+    ASSERT_NE(surface, nullptr);
+
+    auto* control = new newui::SubView();
+    control->setName("probeControl");
+    control->setVisible(true);
+    control->setBounds(newui::Rect(10, 10, 40, 20));
+    surface->addChild(control);
+
+    newui::Rect surfaceBounds = CodeToolsVsix::SelectionOverlay::boundsInRootView(surface);
+    newui::Point startPt(surfaceBounds.left() + 20.0f, surfaceBounds.top() + 15.0f);
+    root.onMouseDown(root, startPt, newui::mbmLeftButton, newui::kmUndefined);
+    ASSERT_EQ(editor.viewDesignerController().primary(), control);
+
+    newui::Point draggedPt = startPt + newui::Point(50.0f, 30.0f);
+    root.onMouseMove(root, draggedPt, newui::mbmLeftButton, 0);
+    EXPECT_EQ(control->bounds(), newui::Rect(60.0f, 40.0f, 40.0f, 20.0f));
+
+    root.onMouseUp(root, draggedPt, newui::mbmLeftButton, 0);
+
+    EXPECT_TRUE(editor.undoStack().canUndo());
+    editor.undoStack().undo();
+    EXPECT_EQ(control->bounds(), newui::Rect(10.0f, 10.0f, 40.0f, 20.0f));
+}
+
+TEST_F(DesignerEditorFileFixture, DraggingAFlexLayoutChildReordersItAndPushesOneUndoStep)
+{
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&root);
+    ASSERT_NE(editor.workspace(), nullptr);
+    root.setBounds(newui::Rect(0, 0, 1400, 700));
+
+    newui::RootViewProxy* surface = editor.workspace()->rootViewProxy();
+    ASSERT_NE(surface, nullptr);
+
+    auto* row = new newui::SubView();
+    row->setName("row");
+    row->setVisible(true);
+    row->setBounds(newui::Rect(10, 10, 300, 20));
+    row->setLayout(std::make_unique<newui::FlexLayout>(newui::Orientation::Horizontal));
+    surface->addChild(row);
+
+    auto* a = new newui::SubView();
+    a->setName("a");
+    a->setVisible(true);
+    a->setDesiredSize(newui::Size(100.0f, 20.0f));
+    auto* b = new newui::SubView();
+    b->setName("b");
+    b->setVisible(true);
+    b->setDesiredSize(newui::Size(100.0f, 20.0f));
+    auto* c = new newui::SubView();
+    c->setName("c");
+    c->setVisible(true);
+    c->setDesiredSize(newui::Size(100.0f, 20.0f));
+    row->addChild(a);
+    row->addChild(b);
+    row->addChild(c);
+    // a: [0,100), b: [100,200), c: [200,300) within row's own local space, after FlexLayout arranges them.
+
+    newui::Rect rowBounds = CodeToolsVsix::SelectionOverlay::boundsInRootView(row);
+    newui::Point startPt(rowBounds.left() + 50.0f, rowBounds.top() + 10.0f);  // inside a
+    root.onMouseDown(root, startPt, newui::mbmLeftButton, newui::kmUndefined);
+    ASSERT_EQ(editor.viewDesignerController().primary(), a);
+
+    // a's hypothetical center (200) lands past b's own center (150), before c's (250).
+    newui::Point draggedPt = startPt + newui::Point(150.0f, 0.0f);
+    root.onMouseMove(root, draggedPt, newui::mbmLeftButton, 0);
+
+    ASSERT_EQ(row->childViews()[0], b);
+    ASSERT_EQ(row->childViews()[1], a);
+    ASSERT_EQ(row->childViews()[2], c);
+
+    root.onMouseUp(root, draggedPt, newui::mbmLeftButton, 0);
+
+    EXPECT_TRUE(editor.undoStack().canUndo());
+    editor.undoStack().undo();
+    EXPECT_EQ(row->childViews()[0], a);
+    EXPECT_EQ(row->childViews()[1], b);
+    EXPECT_EQ(row->childViews()[2], c);
+}
+
+TEST_F(DesignerEditorFileFixture, ClickWithoutDraggingPushesNoUndoStep)
+{
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&root);
+    ASSERT_NE(editor.workspace(), nullptr);
+    root.setBounds(newui::Rect(0, 0, 1400, 700));
+
+    newui::RootViewProxy* surface = editor.workspace()->rootViewProxy();
+    ASSERT_NE(surface, nullptr);
+    auto* control = new newui::SubView();
+    control->setName("probeControl");
+    control->setVisible(true);
+    control->setBounds(newui::Rect(10, 10, 40, 20));
+    surface->addChild(control);
+
+    newui::Rect surfaceBounds = CodeToolsVsix::SelectionOverlay::boundsInRootView(surface);
+    newui::Point pt(surfaceBounds.left() + 20.0f, surfaceBounds.top() + 15.0f);
+    root.onMouseDown(root, pt, newui::mbmLeftButton, newui::kmUndefined);
+    root.onMouseMove(root, pt, newui::mbmLeftButton, 0);  // zero movement - never crosses the drag threshold
+    root.onMouseUp(root, pt, newui::mbmLeftButton, 0);
+
+    EXPECT_FALSE(editor.undoStack().canUndo());
+    EXPECT_EQ(control->bounds(), newui::Rect(10.0f, 10.0f, 40.0f, 20.0f));
+}
+
+TEST_F(DesignerEditorFileFixture, ACardLayoutChildCannotBeDraggedAtAll)
+{
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&root);
+    ASSERT_NE(editor.workspace(), nullptr);
+    root.setBounds(newui::Rect(0, 0, 1400, 700));
+
+    newui::RootViewProxy* surface = editor.workspace()->rootViewProxy();
+    ASSERT_NE(surface, nullptr);
+
+    auto* stack = new newui::SubView();
+    stack->setName("stack");
+    stack->setVisible(true);
+    stack->setBounds(newui::Rect(10, 10, 100, 50));
+    stack->setLayout(std::make_unique<newui::CardLayout>());
+    surface->addChild(stack);
+
+    auto* page = new newui::SubView();
+    page->setName("page");
+    page->setVisible(true);
+    stack->addChild(page);
+    // CardLayout::arrange() fills the container completely - page's own bounds are stack's own
+    // client size, at stack's *local* origin (0,0), not stack's own parent-local position.
+    newui::Rect expectedPageBounds(0.0f, 0.0f, stack->bounds().size().width, stack->bounds().size().height);
+    ASSERT_EQ(page->bounds(), expectedPageBounds);
+
+    newui::Rect pageBounds = CodeToolsVsix::SelectionOverlay::boundsInRootView(page);
+    newui::Point startPt(pageBounds.left() + 10.0f, pageBounds.top() + 10.0f);
+    root.onMouseDown(root, startPt, newui::mbmLeftButton, newui::kmUndefined);
+    ASSERT_EQ(editor.viewDesignerController().primary(), page);
+
+    newui::Point draggedPt = startPt + newui::Point(50.0f, 0.0f);
+    root.onMouseMove(root, draggedPt, newui::mbmLeftButton, 0);
+    root.onMouseUp(root, draggedPt, newui::mbmLeftButton, 0);
+
+    EXPECT_EQ(page->bounds(), expectedPageBounds);
+    EXPECT_FALSE(editor.undoStack().canUndo());
+}
+
 TEST_F(DesignerEditorFileFixture, LoadFailsForAMissingFile)
 {
     newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");

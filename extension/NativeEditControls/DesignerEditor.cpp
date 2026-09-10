@@ -175,10 +175,13 @@ namespace CodeToolsVsix
         // how frameProxy_'s own fixed size compares to it.
         auto selectionOverlay = std::make_unique<SelectionOverlay>(viewDesignerController_, workspace_->canvasWell());
         selectionOverlay_ = selectionOverlay.get();
+        selectionOverlay_->setActiveDragCuesProvider([this]() { return activeMoveDragCues(); });
         root->setOverlay(std::move(selectionOverlay));
         root->onMouseDown.add(this, &DesignerEditor::handleMouseDownForSelection);
         root->onMouseMove.add(this, &DesignerEditor::handleMouseMoveForResize);
         root->onMouseUp.add(this, &DesignerEditor::handleMouseUpForResize);
+        root->onMouseMove.add(this, &DesignerEditor::handleMouseMoveForMove);
+        root->onMouseUp.add(this, &DesignerEditor::handleMouseUpForMove);
 
         // root's own onKeyDown only fires when nothing else has focus
         // (RootView::keyEvent(), rootview.cpp - it dispatches to
@@ -313,7 +316,74 @@ namespace CodeToolsVsix
         // nothing else asks Windows to repaint just because the overlay's
         // own selection state changed.
         getRootView()->markDirty();
+
+        // Arms a potential move-drag for whatever's selected now (empty if target was null and
+        // nothing else was already selected, or if a Ctrl+click just toggled the only selected
+        // view off) - handleMouseMoveForMove()/handleMouseUpForMove() do nothing at all while
+        // moveDragEntries_ is empty. A view with no real parent() (shouldn't happen for anything
+        // actually attached to the tree, but real - a freshly-toolbox-created, not-yet-attached
+        // instance could theoretically reach here) is skipped rather than captured with a null
+        // parent. A view whose parent's real Layout affords no per-child geometry edit at all
+        // (policyFor(...).kind() == None - CardLayout, or any future/unrecognized Layout subtype)
+        // is skipped too - matching how the real running app behaves, that Layout always computes
+        // this view's position; there's no free "wherever you left it" input to drag in the first
+        // place, so dragging is refused outright rather than allowed and left to silently disagree
+        // with the layout later. AnchorLayout/no-Layout, FlexLayout, and GridLayout parents are
+        // all now draggable (previously only AnchorLayout/no-Layout was) - see
+        // LayoutEditingPolicy.h's own FreePosition/LinearReorder/GridCell policies.
+        moveDragEntries_.clear();
+        moveDragStarted_ = false;
+        if (target != nullptr) {
+            moveDragStartPt_ = pt;
+            for (newui::SubView* view : viewDesignerController_.selected()) {
+                newui::View* parent = view->parent();
+                if (parent == nullptr) {
+                    continue;
+                }
+                const LayoutEditingPolicy& policy = policyFor(parent->layout());
+                if (policy.kind() == GeometryEditKind::None) {
+                    continue;
+                }
+                newui::Rect startBounds = view->bounds();
+                GeometryDragContext ctx;
+                ctx.view = view;
+                ctx.parent = parent;
+                ctx.startBounds = startBounds;
+                ctx.startPt = pt;
+                ctx.currentPt = pt;
+                GeometryEditResult startResult = policy.resolve(ctx);
+                moveDragEntries_.push_back({ view, parent, startBounds, &policy, startResult, startResult, pt });
+            }
+        }
         return newui::SyncReturn::Ignored;
+    }
+
+    GeometryDragContext DesignerEditor::dragContextFor(const MoveDragEntry& entry, const newui::Point& currentPt) const
+    {
+        GeometryDragContext ctx;
+        ctx.view = entry.view;
+        ctx.parent = entry.parent;
+        ctx.startBounds = entry.startBounds;
+        ctx.startPt = moveDragStartPt_;
+        ctx.currentPt = currentPt;
+        return ctx;
+    }
+
+    std::vector<ActiveGeometryDrag> DesignerEditor::activeMoveDragCues() const
+    {
+        std::vector<ActiveGeometryDrag> cues;
+        if (!moveDragStarted_) {
+            return cues;  // a plain click that never crossed the drag threshold has nothing to show
+        }
+        cues.reserve(moveDragEntries_.size());
+        for (const MoveDragEntry& entry : moveDragEntries_) {
+            ActiveGeometryDrag drag;
+            drag.policy = entry.policy;
+            drag.ctx = dragContextFor(entry, entry.lastPt);
+            drag.result = entry.lastResult;
+            cues.push_back(drag);
+        }
+        return cues;
     }
 
     newui::SyncReturn DesignerEditor::handleKeyDownForDelete(newui::View& /*sender*/, std::uint32_t /*keyMask*/,
@@ -412,6 +482,89 @@ namespace CodeToolsVsix
             return newui::SyncReturn::Ignored;
         }
         canvasWell->endResizeDrag();
+        return newui::SyncReturn::Handled;
+    }
+
+    newui::SyncReturn DesignerEditor::handleMouseMoveForMove(newui::View& /*sender*/, const newui::Point& pt,
+        std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/)
+    {
+        if (moveDragEntries_.empty()) {
+            return newui::SyncReturn::Ignored;
+        }
+
+        if (!moveDragStarted_) {
+            // Squared-distance compare - same threshold test, no sqrt needed.
+            newui::Point delta = pt - moveDragStartPt_;
+            float distSq = delta.x * delta.x + delta.y * delta.y;
+            if (distSq < kMoveDragThresholdPixels * kMoveDragThresholdPixels) {
+                return newui::SyncReturn::Ignored;
+            }
+            moveDragStarted_ = true;
+        }
+
+        for (MoveDragEntry& entry : moveDragEntries_) {
+            GeometryDragContext ctx = dragContextFor(entry, pt);
+            entry.lastResult = entry.policy->resolve(ctx);
+            entry.lastPt = pt;
+            entry.policy->applyPreview(ctx, entry.lastResult);
+        }
+
+        // Same reasoning as handleMouseMoveForResize()'s own markDirty() call - nothing else asks
+        // Windows to repaint just because applyPreview() moved/reordered/re-celled these views (or
+        // just because a drag cue now needs painting where it didn't before).
+        getRootView()->markDirty();
+        return newui::SyncReturn::Handled;
+    }
+
+    newui::SyncReturn DesignerEditor::handleMouseUpForMove(newui::View& /*sender*/, const newui::Point& pt,
+        std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/)
+    {
+        if (moveDragEntries_.empty()) {
+            return newui::SyncReturn::Ignored;
+        }
+
+        std::vector<MoveDragEntry> entries = std::move(moveDragEntries_);
+        moveDragEntries_.clear();
+        bool started = moveDragStarted_;
+        moveDragStarted_ = false;
+
+        // A plain click, or a real mouse-down/up pair that never crossed
+        // kMoveDragThresholdPixels, leaves every view exactly where applyPreview() never touched -
+        // skip pushing a no-op undo entry for it, matching Delete's own "nothing to do" early-outs
+        // elsewhere in this file.
+        if (!started) {
+            return newui::SyncReturn::Ignored;
+        }
+
+        // One UndoableAction per dragged entry, each already resolved/committed against its own
+        // real policy (a multi-select drag can freely mix FreePosition/LinearReorder/GridCell
+        // entries, one per view's own parent) - composed below into a single combined step so a
+        // multi-select Move still undoes/redoes as one action, matching every other multi-view
+        // gesture in this file (see handleKeyDownForDelete()).
+        std::vector<newui::UndoableAction> actions;
+        actions.reserve(entries.size());
+        for (const MoveDragEntry& entry : entries) {
+            GeometryDragContext ctx = dragContextFor(entry, pt);
+            actions.push_back(entry.policy->commit(ctx, entry.startResult, entry.lastResult));
+        }
+
+        newui::UndoableAction action;
+        action.description = actions.size() == 1 ? actions.front().description : "Move Controls";
+        action.doIt = [this, actions]() {
+            for (const newui::UndoableAction& sub : actions) {
+                sub.doIt();
+            }
+            markDirty();
+            getRootView()->markDirty();
+        };
+        action.undoIt = [this, actions]() {
+            for (auto it = actions.rbegin(); it != actions.rend(); ++it) {
+                it->undoIt();
+            }
+            markDirty();
+            getRootView()->markDirty();
+        };
+        undoStack_.push(action);
         return newui::SyncReturn::Handled;
     }
 

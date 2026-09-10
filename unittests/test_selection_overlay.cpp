@@ -1,11 +1,14 @@
 #include "../extension/NativeEditControls/SelectionOverlay.h"
 
+#include <newui/layout.h>
 #include <newui/rootview.h>
 #include <newui/subview.h>
 
 #include <blend2d/blend2d.h>
 
 #include <gtest/gtest.h>
+
+#include <memory>
 
 using CodeToolsVsix::SelectionOverlay;
 using CodeToolsVsix::ViewDesignerController;
@@ -128,6 +131,87 @@ TEST(SelectionOverlay, PaintWithNoClipViewGivenStaysUnclipped)
     ctx.end();
 
     EXPECT_TRUE(anyPixelPainted(surface, 64, 64));
+}
+
+TEST(SelectionOverlay, PaintDrawsALayoutAdornmentAboveTheParentForANestedSelection)
+{
+    // The layout adornment (parent boundary + a badge naming its real Layout) sits strictly
+    // above the parent's own top edge - a region the plain outline/handles (drawn around
+    // child, y in [40,70]) never reach - so any painted pixel up there can only be this.
+    ViewDesignerController controller;
+
+    newui::RootView root(nullptr, newui::Rect(0, 0, 200, 200), "root");
+    auto* container = new newui::SubView();
+    container->setBounds(newui::Rect(20, 40, 100, 100));
+    container->setLayout(std::make_unique<newui::FlexLayout>(newui::Orientation::Horizontal));
+    root.addChild(container);
+
+    auto* child = new newui::SubView();
+    child->setBounds(newui::Rect(0, 0, 30, 30));
+    child->setVisible(true);
+    container->addChild(child);
+
+    controller.selectExclusive(child);
+    SelectionOverlay overlay(controller);
+
+    BLImage surface;
+    ASSERT_EQ(surface.create(200, 200, BL_FORMAT_PRGB32), BL_SUCCESS);
+    BLContext ctx(surface);
+    ctx.clear_all();
+    overlay.paint(ctx, newui::Rect(0, 0, 200, 200));
+    ctx.end();
+
+    BLImageData data;
+    surface.get_data(&data);
+    const uint8_t* bytes = static_cast<const uint8_t*>(data.pixel_data);
+    bool paintedAboveTheParent = false;
+    for (int row = 0; row < 39 && !paintedAboveTheParent; ++row) {
+        const uint8_t* rowBytes = bytes + row * data.stride;
+        for (int i = 0; i < 200 * 4; ++i) {
+            if (rowBytes[i] != 0) {
+                paintedAboveTheParent = true;
+                break;
+            }
+        }
+    }
+    EXPECT_TRUE(paintedAboveTheParent);
+}
+
+TEST(SelectionOverlay, PaintSkipsTheLayoutAdornmentWhenParentIsTheTopLevelRootView)
+{
+    // Regression test for a real bug this feature's own addition caused: a child added
+    // directly to the top-level RootView (parent->parent() == nullptr) previously got a
+    // parent-boundary/badge drawn for the *entire* RootView, which broke clipping (the
+    // RootView is bigger than any real clip target) and conveyed nothing useful anyway.
+    ViewDesignerController controller;
+
+    newui::RootView root(nullptr, newui::Rect(0, 0, 64, 64), "root");
+    auto* child = new newui::SubView();
+    child->setBounds(newui::Rect(10, 10, 30, 30));
+    root.addChild(child);
+    controller.selectExclusive(child);
+    SelectionOverlay overlay(controller);
+
+    BLImage surface;
+    ASSERT_EQ(surface.create(64, 64, BL_FORMAT_PRGB32), BL_SUCCESS);
+    BLContext ctx(surface);
+    ctx.clear_all();
+    overlay.paint(ctx, newui::Rect(0, 0, 64, 64));
+    ctx.end();
+
+    // Row 0 sits well above child's own outline/handles (child's top-left handle is centered
+    // at y=10, 7px tall) - a parent-boundary/badge for root would paint there; nothing else does.
+    BLImageData data;
+    surface.get_data(&data);
+    const uint8_t* row0 = static_cast<const uint8_t*>(data.pixel_data);
+    bool paintedOnRootsOwnTopEdge = false;
+    for (int i = 0; i < 64 * 4; ++i) {
+        if (row0[i] != 0) {
+            paintedOnRootsOwnTopEdge = true;
+            break;
+        }
+    }
+    EXPECT_FALSE(paintedOnRootsOwnTopEdge);
 }
 
 TEST(SelectionOverlay, BoundsInRootViewForADirectChildOfRootIsItsOwnBounds)

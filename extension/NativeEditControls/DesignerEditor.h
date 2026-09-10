@@ -112,6 +112,10 @@ namespace CodeToolsVsix
         // pane can be checked against the design surface's/canvas well's
         // own bounds and, if inside, hit-tested against its real children.
         // See DesignerEditor.cpp for the full reasoning.
+        // Also arms a potential move-drag (see moveDragEntries_'s own comment below) for whatever
+        // the selection ends up being right after this same click, when the click landed on a
+        // real control (target != nullptr) - the same click that selects a control is also the
+        // one that can start dragging it, matching ordinary design-tool click-and-drag behavior.
         newui::SyncReturn handleMouseDownForSelection(newui::View& sender, const newui::Point& pt,
             std::uint32_t btnMask, std::uint32_t keyMask);
 
@@ -122,6 +126,21 @@ namespace CodeToolsVsix
         newui::SyncReturn handleMouseMoveForResize(newui::View& sender, const newui::Point& pt,
             std::uint32_t btnMask, std::uint32_t keyMask);
         newui::SyncReturn handleMouseUpForResize(newui::View& sender, const newui::Point& pt,
+            std::uint32_t btnMask, std::uint32_t keyMask);
+
+        // Moving the current canvas selection (designer-plan.md's deferred "Move" piece, built
+        // after Add/Delete) - a separate onMouseMove/onMouseUp pair rather than folded into the
+        // CanvasWell-resize handlers above (those are about dragging the artboard's own guide
+        // lines, an unrelated gesture; Delegate<> already supports more than one listener on the
+        // same root->onMouseMove/onMouseUp). Live feedback during the drag is a plain setBounds()
+        // per dragged view (works the same regardless of whether that view's real parent has a
+        // Layout of its own - a view nested in a layout-managed container just snaps back to
+        // wherever that Layout puts it next, an accepted, honest gap rather than special-cased
+        // away); only mouseUp commits one real UndoableAction, and only for a real, nonzero total
+        // drag - a plain click that never actually moved the mouse pushes nothing.
+        newui::SyncReturn handleMouseMoveForMove(newui::View& sender, const newui::Point& pt,
+            std::uint32_t btnMask, std::uint32_t keyMask);
+        newui::SyncReturn handleMouseUpForMove(newui::View& sender, const newui::Point& pt,
             std::uint32_t btnMask, std::uint32_t keyMask);
 
         // Deletes the current canvas selection (viewDesignerController_.
@@ -167,6 +186,58 @@ namespace CodeToolsVsix
         // place that actually pushes that state onto the two buttons.
         newui::SyncReturn handleUndoStackActionPushed(newui::UndoStack& sender, const newui::UndoableAction& action);
         void refreshUndoRedoButtons();
+
+        // One dragged view's starting state, captured at mouseDown - parent is the view's real
+        // parent() (never assumed to be rootViewProxy() - a selected view can be nested inside
+        // any container), startBounds is its bounds() at drag start (parent-local, same space
+        // setBounds() itself takes). policy is resolved once, at mouseDown, from parent->layout()
+        // (see handleMouseDownForSelection()) - startResult is what policy->resolve() returned at
+        // that same moment (zero delta), the undo target; lastResult is updated on every
+        // handleMouseMoveForMove() call, the redo/doIt target and what drawCue() paints against.
+        struct MoveDragEntry {
+            newui::SubView* view;
+            newui::View* parent;
+            newui::Rect startBounds;
+            const LayoutEditingPolicy* policy;
+            GeometryEditResult startResult;
+            GeometryEditResult lastResult;
+            newui::Point lastPt;
+        };
+
+        // Builds the context resolve()/applyPreview()/commit() all need for entry, given the
+        // drag's current point (moveDragStartPt_ is always the start) - shared by every mouse
+        // handler below so ctx construction can't drift out of sync between them.
+        GeometryDragContext dragContextFor(const MoveDragEntry& entry, const newui::Point& currentPt) const;
+
+        // What SelectionOverlay's own paint() should draw for whatever Move drag is active right
+        // now - wired in via selectionOverlay_->setActiveDragCuesProvider() in setupUI(). Empty
+        // whenever moveDragEntries_ is empty or the drag never crossed kMoveDragThresholdPixels
+        // (a plain click has nothing to show a cue for).
+        std::vector<ActiveGeometryDrag> activeMoveDragCues() const;
+
+        // Below this many pixels of total mouse movement since mouseDown, handleMouseMoveForMove()
+        // doesn't touch bounds() at all - a real, caught bug otherwise: with no threshold at all,
+        // an ordinary click-to-select (armed the same as any potential drag, see
+        // handleMouseDownForSelection()'s own comment) still generates at least one WM_MOUSEMOVE
+        // before the matching mouseUp even with no perceptible hand movement, calling setBounds()
+        // "live" for a plain click - confirmed hitting a live newui::SubView::setBounds()
+        // breakpoint from nothing but a click. Matches ordinary design-tool click-vs-drag
+        // distinction (a small dead zone before a click gesture counts as dragging).
+        static constexpr float kMoveDragThresholdPixels = 3.0f;
+
+        // Non-empty only between a mouseDown that hit a real control and the matching mouseUp -
+        // root-local (moveDragStartPt_) since pt itself always is; a pure translation delta
+        // (currentPt - moveDragStartPt_) is the same delta in every view's own parent-local space
+        // too (nothing in this tree scales or rotates), so startBounds + that delta is always the
+        // right new parent-local position regardless of how deep view sits.
+        std::vector<MoveDragEntry> moveDragEntries_;
+        newui::Point moveDragStartPt_;
+
+        // Latches true the first time total movement crosses kMoveDragThresholdPixels since this
+        // arming's own mouseDown - once true, stays true for the rest of this same drag (no need
+        // to re-check every move once it's a real drag), reset to false each time
+        // handleMouseDownForSelection() re-arms moveDragEntries_.
+        bool moveDragStarted_ = false;
 
         Workspace* workspace_ = nullptr;
         SelectionOverlay* selectionOverlay_ = nullptr;

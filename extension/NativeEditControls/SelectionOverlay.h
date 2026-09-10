@@ -1,10 +1,14 @@
 #pragma once
 
+#include "LayoutEditingPolicy.h"
 #include "ViewDesignerController.h"
 
 #include <newui/geometry.h>
 #include <newui/overlay.h>
 #include <newui/subview.h>
+
+#include <functional>
+#include <vector>
 
 namespace CodeToolsVsix
 {
@@ -46,6 +50,17 @@ namespace CodeToolsVsix
         explicit SelectionOverlay(const ViewDesignerController& controller, const newui::View* clipView = nullptr)
             : controller_(controller), clipView_(clipView) {}
 
+        // Supplies whatever Move drag cue(s) to paint on top of the ordinary selection outline -
+        // set by DesignerEditor once, in setupUI(), after both it and this overlay exist (a
+        // lambda capturing `this`, not a direct dependency on DesignerEditor's own type, so this
+        // header stays decoupled from it - see ActiveGeometryDrag's own comment). Left unset (the
+        // default, empty std::function) paints nothing extra, same as every existing test
+        // constructing a SelectionOverlay without calling this at all.
+        void setActiveDragCuesProvider(std::function<std::vector<ActiveGeometryDrag>()> provider)
+        {
+            activeDragCuesProvider_ = std::move(provider);
+        }
+
         // view's bounds in the coordinate space Overlay::paint() itself
         // already draws in (overlay.h - (0,0) at the hosting RootView's own
         // top-left). Walks view->parent() up to the root, undoing each
@@ -62,5 +77,6 @@ namespace CodeToolsVsix
     private:
         const ViewDesignerController& controller_;
         const newui::View* clipView_;
+        std::function<std::vector<ActiveGeometryDrag>()> activeDragCuesProvider_;
     };
 }
