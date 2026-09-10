@@ -14,6 +14,8 @@
 #include <newui/subview.h>
 #include <newui/undostack.h>
 
+#include <functional>
+
 namespace CodeToolsVsix
 {
     // Design-specific chrome skeleton for View Designer's own editor pane -
@@ -155,6 +157,19 @@ namespace CodeToolsVsix
         // sets a real stack (setupUI()).
         void setUndoStack(newui::UndoStack* undoStack) { undoStack_ = undoStack; }
 
+        // Consulted by the Toolbox double-click-to-add wiring below to decide where a newly
+        // created control actually lands: the current primary selection, when one exists and is
+        // a real design-time container (its registered @reflect category=containers - the same
+        // tag ToolboxRegistry's own "containers" grouping already uses), otherwise
+        // rootViewProxy() as before. Left unset (the default, no provider) always adds to
+        // rootViewProxy() - matches every existing test constructing a Workspace directly.
+        // Same "expose a hook, don't reach into the owner" shape setUndoStack()/
+        // onDesignSurfaceChanged already established - Workspace doesn't need to know
+        // ViewDesignerController exists to ask it this one question.
+        void setPrimarySelectionProvider(std::function<newui::SubView*()> provider) {
+            primarySelectionProvider_ = std::move(provider);
+        }
+
     private:
         newui::Toolbar* topBar_ = nullptr;
         CanvasWell* canvasWell_ = nullptr;
@@ -174,5 +189,6 @@ namespace CodeToolsVsix
         newui::Label* zoomLabel_ = nullptr;
         newui::Label* undoRedoStatusLabel_ = nullptr;
         newui::UndoStack* undoStack_ = nullptr;
+        std::function<newui::SubView*()> primarySelectionProvider_;
     };
 }

@@ -445,6 +445,358 @@ TEST_F(DesignerEditorFileFixture, ACardLayoutChildCannotBeDraggedAtAll)
     EXPECT_FALSE(editor.undoStack().canUndo());
 }
 
+TEST_F(DesignerEditorFileFixture, DraggingAFreeCanvasControlIntoAnotherContainerReparentsItAndPushesOneUndoStep)
+{
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&root);
+    ASSERT_NE(editor.workspace(), nullptr);
+    root.setBounds(newui::Rect(0, 0, 1400, 700));
+
+    newui::RootViewProxy* surface = editor.workspace()->rootViewProxy();
+    ASSERT_NE(surface, nullptr);
+
+    auto* containerA = new newui::SubView();
+    containerA->setName("containerA");
+    containerA->setVisible(true);
+    containerA->setBounds(newui::Rect(10, 10, 100, 100));
+    containerA->setLayout(std::make_unique<newui::AnchorLayout>());
+    surface->addChild(containerA);
+
+    auto* containerB = new newui::SubView();
+    containerB->setName("containerB");
+    containerB->setVisible(true);
+    containerB->setBounds(newui::Rect(200, 10, 100, 100));
+    containerB->setLayout(std::make_unique<newui::AnchorLayout>());
+    surface->addChild(containerB);
+
+    auto* control = new newui::SubView();
+    control->setName("control");
+    control->setVisible(true);
+    control->setBounds(newui::Rect(10, 10, 30, 20));  // containerA-local
+    containerA->addChild(control);
+
+    newui::Rect controlRootBounds = CodeToolsVsix::SelectionOverlay::boundsInRootView(control);
+    newui::Point startPt(controlRootBounds.left() + 5.0f, controlRootBounds.top() + 5.0f);
+    root.onMouseDown(root, startPt, newui::mbmLeftButton, newui::kmUndefined);
+    ASSERT_EQ(editor.viewDesignerController().primary(), control);
+
+    newui::Rect containerBRootBounds = CodeToolsVsix::SelectionOverlay::boundsInRootView(containerB);
+    newui::Point dropPt(containerBRootBounds.left() + 20.0f, containerBRootBounds.top() + 20.0f);
+    root.onMouseMove(root, dropPt, newui::mbmLeftButton, 0);
+    root.onMouseUp(root, dropPt, newui::mbmLeftButton, 0);
+
+    EXPECT_TRUE(containerA->childViews().empty());
+    ASSERT_EQ(containerB->childViews().size(), 1u);
+    EXPECT_EQ(containerB->childViews()[0], control);
+    EXPECT_EQ(control->parent(), containerB);
+
+    // Regression coverage for a real, reported bug: reparenting changes the tree's real
+    // structure (unlike an ordinary same-parent Move), but the commit originally never called
+    // viewDesignerModel_.refresh() - Document Outline kept showing the pre-reparent shape,
+    // including a stale empty row for containerA that emptied PropertiesGrid when clicked.
+    // {0} addresses root() itself in this model's own path convention - containerA is
+    // root()'s child 0, so its own children live at {0, 0}; containerB's at {0, 1}.
+    EXPECT_EQ(editor.viewDesignerModel().childCount({0, 0}), 0u);
+    EXPECT_EQ(editor.viewDesignerModel().childCount({0, 1}), 1u);
+
+    EXPECT_TRUE(editor.undoStack().canUndo());
+    editor.undoStack().undo();
+
+    EXPECT_TRUE(containerB->childViews().empty());
+    ASSERT_EQ(containerA->childViews().size(), 1u);
+    EXPECT_EQ(containerA->childViews()[0], control);
+    EXPECT_EQ(control->parent(), containerA);
+    EXPECT_EQ(control->bounds(), newui::Rect(10.0f, 10.0f, 30.0f, 20.0f));
+
+    EXPECT_EQ(editor.viewDesignerModel().childCount({0, 0}), 1u);
+    EXPECT_EQ(editor.viewDesignerModel().childCount({0, 1}), 0u);
+}
+
+TEST_F(DesignerEditorFileFixture, DraggingAFlexLayoutChildOutOfItsRowReparentsItIntoAnotherContainer)
+{
+    // Regression test for a real, reported bug: cross-container reparenting first shipped
+    // gated to FreePosition-sourced entries only, leaving a FlexLayout-row child (the only
+    // real container in most actual test documents, e.g. examples/overlay1.cpp's own
+    // buttonRow/sliderRow) able to reorder within its row but never reparent out of it at all.
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&root);
+    ASSERT_NE(editor.workspace(), nullptr);
+    root.setBounds(newui::Rect(0, 0, 1400, 700));
+
+    newui::RootViewProxy* surface = editor.workspace()->rootViewProxy();
+    ASSERT_NE(surface, nullptr);
+
+    auto* row = new newui::SubView();
+    row->setName("row");
+    row->setVisible(true);
+    row->setBounds(newui::Rect(10, 10, 200, 30));
+    row->setLayout(std::make_unique<newui::FlexLayout>(newui::Orientation::Horizontal));
+    surface->addChild(row);
+
+    auto* a = new newui::SubView();
+    a->setName("a");
+    a->setVisible(true);
+    a->setDesiredSize(newui::Size(80.0f, 30.0f));
+    row->addChild(a);
+
+    auto* target = new newui::SubView();
+    target->setName("target");
+    target->setVisible(true);
+    target->setBounds(newui::Rect(300, 10, 100, 100));
+    target->setLayout(std::make_unique<newui::AnchorLayout>());
+    surface->addChild(target);
+
+    newui::Rect aRootBounds = CodeToolsVsix::SelectionOverlay::boundsInRootView(a);
+    newui::Point startPt(aRootBounds.left() + 5.0f, aRootBounds.top() + 5.0f);
+    root.onMouseDown(root, startPt, newui::mbmLeftButton, newui::kmUndefined);
+    ASSERT_EQ(editor.viewDesignerController().primary(), a);
+
+    newui::Rect targetRootBounds = CodeToolsVsix::SelectionOverlay::boundsInRootView(target);
+    newui::Point dropPt(targetRootBounds.left() + 20.0f, targetRootBounds.top() + 20.0f);
+    root.onMouseMove(root, dropPt, newui::mbmLeftButton, 0);
+    root.onMouseUp(root, dropPt, newui::mbmLeftButton, 0);
+
+    EXPECT_TRUE(row->childViews().empty());
+    ASSERT_EQ(target->childViews().size(), 1u);
+    EXPECT_EQ(target->childViews()[0], a);
+    EXPECT_EQ(a->parent(), target);
+
+    EXPECT_TRUE(editor.undoStack().canUndo());
+    editor.undoStack().undo();
+
+    EXPECT_TRUE(target->childViews().empty());
+    ASSERT_EQ(row->childViews().size(), 1u);
+    EXPECT_EQ(row->childViews()[0], a);
+    EXPECT_EQ(a->parent(), row);
+}
+
+TEST_F(DesignerEditorFileFixture, DraggingAFlexLayoutChildIntoAVerticalFlexLayoutTargetLandsAtTheDropPointNotAStaleSourceIndex)
+{
+    // Regression test for a real, reported bug: buildReparentAction() used to read the dragged
+    // view's own bounds() to figure out "where is it right now" - correct for a FreePosition
+    // source (whose bounds() really do track the cursor), but wrong for a LinearReorder source
+    // (whose bounds() are managed by the *source* row's own FlexLayout the whole time, never the
+    // cursor) - the control landed wherever the source row's own layout last put it (e.g. the
+    // 3rd slot), not at the real drop point.
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&root);
+    ASSERT_NE(editor.workspace(), nullptr);
+    root.setBounds(newui::Rect(0, 0, 1400, 700));
+
+    newui::RootViewProxy* surface = editor.workspace()->rootViewProxy();
+    ASSERT_NE(surface, nullptr);
+
+    auto* row = new newui::SubView();
+    row->setName("row");
+    row->setVisible(true);
+    row->setBounds(newui::Rect(10, 10, 200, 30));
+    row->setLayout(std::make_unique<newui::FlexLayout>(newui::Orientation::Horizontal));
+    surface->addChild(row);
+
+    auto* a = new newui::SubView();
+    a->setName("a");
+    a->setVisible(true);
+    a->setDesiredSize(newui::Size(80.0f, 30.0f));
+    row->addChild(a);
+
+    auto* target = new newui::SubView();
+    target->setName("target");
+    target->setVisible(true);
+    target->setBounds(newui::Rect(300, 10, 100, 200));
+    target->setLayout(std::make_unique<newui::FlexLayout>(newui::Orientation::Vertical));
+    surface->addChild(target);
+
+    auto* t0 = new newui::SubView();
+    t0->setName("t0");
+    t0->setVisible(true);
+    t0->setDesiredSize(newui::Size(100.0f, 50.0f));
+    target->addChild(t0);
+
+    auto* t1 = new newui::SubView();
+    t1->setName("t1");
+    t1->setVisible(true);
+    t1->setDesiredSize(newui::Size(100.0f, 50.0f));
+    target->addChild(t1);
+
+    newui::Rect aRootBounds = CodeToolsVsix::SelectionOverlay::boundsInRootView(a);
+    newui::Point startPt(aRootBounds.left() + 5.0f, aRootBounds.top() + 5.0f);
+    root.onMouseDown(root, startPt, newui::mbmLeftButton, newui::kmUndefined);
+    ASSERT_EQ(editor.viewDesignerController().primary(), a);
+
+    // Drop near target's own top edge - above t0's own center - so a should land at index 0.
+    newui::Rect targetRootBounds = CodeToolsVsix::SelectionOverlay::boundsInRootView(target);
+    newui::Point dropPt(targetRootBounds.left() + 10.0f, targetRootBounds.top() + 5.0f);
+    root.onMouseMove(root, dropPt, newui::mbmLeftButton, 0);
+    root.onMouseUp(root, dropPt, newui::mbmLeftButton, 0);
+
+    ASSERT_EQ(target->childViews().size(), 3u);
+    EXPECT_EQ(target->childViews()[0], a);
+    EXPECT_EQ(target->childViews()[1], t0);
+    EXPECT_EQ(target->childViews()[2], t1);
+}
+
+TEST_F(DesignerEditorFileFixture, DraggingATopLevelControlIntoASiblingContainerReparentsIntoIt)
+{
+    // Regression test for a real, reported bug: once a control's own parent is rootViewProxy()
+    // itself, it becomes rootViewProxy()'s own frontmost child - an ordinary hit-test always
+    // re-hit the dragged control itself first (a FreePosition drag's cursor is always inside its
+    // own live-tracked bounds), never reaching a sibling container at all, and the old "only
+    // hit-test once outside the current parent's own bounds" gate could never fire either, since
+    // every sibling sits *within* rootViewProxy()'s own bounds.
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&root);
+    ASSERT_NE(editor.workspace(), nullptr);
+    root.setBounds(newui::Rect(0, 0, 1400, 700));
+
+    newui::RootViewProxy* surface = editor.workspace()->rootViewProxy();
+    ASSERT_NE(surface, nullptr);
+
+    auto* control = new newui::SubView();
+    control->setName("control");
+    control->setVisible(true);
+    control->setBounds(newui::Rect(10, 10, 30, 20));  // surface-local
+    surface->addChild(control);
+
+    auto* target = new newui::SubView();
+    target->setName("target");
+    target->setVisible(true);
+    target->setBounds(newui::Rect(200, 10, 100, 100));  // well clear of control
+    target->setLayout(std::make_unique<newui::AnchorLayout>());
+    surface->addChild(target);
+
+    newui::Rect controlRootBounds = CodeToolsVsix::SelectionOverlay::boundsInRootView(control);
+    newui::Point startPt(controlRootBounds.left() + 5.0f, controlRootBounds.top() + 5.0f);
+    root.onMouseDown(root, startPt, newui::mbmLeftButton, newui::kmUndefined);
+    ASSERT_EQ(editor.viewDesignerController().primary(), control);
+
+    newui::Rect targetRootBounds = CodeToolsVsix::SelectionOverlay::boundsInRootView(target);
+    newui::Point dropPt(targetRootBounds.left() + 20.0f, targetRootBounds.top() + 20.0f);
+    root.onMouseMove(root, dropPt, newui::mbmLeftButton, 0);
+    root.onMouseUp(root, dropPt, newui::mbmLeftButton, 0);
+
+    ASSERT_EQ(target->childViews().size(), 1u);
+    EXPECT_EQ(target->childViews()[0], control);
+    EXPECT_EQ(control->parent(), target);
+    ASSERT_EQ(surface->childViews().size(), 1u);
+    EXPECT_EQ(surface->childViews()[0], target);
+
+    editor.undoStack().undo();
+
+    EXPECT_TRUE(target->childViews().empty());
+    EXPECT_EQ(control->parent(), surface);
+}
+
+TEST_F(DesignerEditorFileFixture, DraggingOutsideAnyContainerFallsBackToRootViewProxyAsTheReparentTarget)
+{
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&root);
+    ASSERT_NE(editor.workspace(), nullptr);
+    root.setBounds(newui::Rect(0, 0, 1400, 700));
+
+    newui::RootViewProxy* surface = editor.workspace()->rootViewProxy();
+    ASSERT_NE(surface, nullptr);
+
+    auto* container = new newui::SubView();
+    container->setName("container");
+    container->setVisible(true);
+    container->setBounds(newui::Rect(10, 10, 60, 60));
+    container->setLayout(std::make_unique<newui::AnchorLayout>());
+    surface->addChild(container);
+
+    auto* control = new newui::SubView();
+    control->setName("control");
+    control->setVisible(true);
+    control->setBounds(newui::Rect(5, 5, 20, 20));  // container-local
+    container->addChild(control);
+
+    newui::Rect controlRootBounds = CodeToolsVsix::SelectionOverlay::boundsInRootView(control);
+    newui::Point startPt(controlRootBounds.left() + 5.0f, controlRootBounds.top() + 5.0f);
+    root.onMouseDown(root, startPt, newui::mbmLeftButton, newui::kmUndefined);
+    ASSERT_EQ(editor.viewDesignerController().primary(), control);
+
+    // Well clear of container's own 60x60 bounds, still inside the surface itself.
+    newui::Rect surfaceBounds = CodeToolsVsix::SelectionOverlay::boundsInRootView(surface);
+    newui::Point dropPt(surfaceBounds.left() + 300.0f, surfaceBounds.top() + 300.0f);
+    root.onMouseMove(root, dropPt, newui::mbmLeftButton, 0);
+    root.onMouseUp(root, dropPt, newui::mbmLeftButton, 0);
+
+    EXPECT_TRUE(container->childViews().empty());
+    EXPECT_EQ(control->parent(), surface);
+
+    editor.undoStack().undo();
+
+    EXPECT_EQ(control->parent(), container);
+    EXPECT_EQ(control->bounds(), newui::Rect(5.0f, 5.0f, 20.0f, 20.0f));
+}
+
+TEST(DesignerEditor, OutlineReparentRequestedMovesTheDraggedViewAndIsUndoAware)
+{
+    // Document Outline's own drag gesture only detects/reports (DocumentOutline::
+    // onReparentRequested) - DesignerEditor::handleOutlineReparentRequested() is what actually
+    // performs the real, undo-aware View::setParent() mutation. Fire the delegate directly, same
+    // "real public Delegate calls are an approved exception" convention the canvas' own
+    // root.onMouseDown()/onMouseMove()/onMouseUp() drag tests already use.
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&root);
+    ASSERT_NE(editor.workspace(), nullptr);
+    root.setBounds(newui::Rect(0, 0, 1400, 700));
+
+    newui::RootViewProxy* surface = editor.workspace()->rootViewProxy();
+    ASSERT_NE(surface, nullptr);
+
+    auto* control = new newui::SubView();
+    control->setName("control");
+    control->setVisible(true);
+    control->setBounds(newui::Rect(10, 10, 30, 20));
+    surface->addChild(control);
+
+    auto* target = new newui::SubView();
+    target->setName("target");
+    target->setVisible(true);
+    target->setBounds(newui::Rect(200, 10, 100, 100));
+    target->setLayout(std::make_unique<newui::AnchorLayout>());
+    surface->addChild(target);
+
+    CodeToolsVsix::DocumentOutline* outline = editor.workspace()->documentOutlinePane();
+    ASSERT_NE(outline, nullptr);
+    outline->onReparentRequested(*outline, control, target);
+
+    ASSERT_EQ(target->childViews().size(), 1u);
+    EXPECT_EQ(target->childViews()[0], control);
+    EXPECT_EQ(control->parent(), target);
+    EXPECT_TRUE(surface->childViews().size() == 1u && surface->childViews()[0] == target);
+
+    ASSERT_TRUE(editor.undoStack().canUndo());
+    editor.undoStack().undo();
+
+    EXPECT_TRUE(target->childViews().empty());
+    EXPECT_EQ(control->parent(), surface);
+}
+
+TEST(DesignerEditor, OutlineReparentRequestedIgnoresADropOntoTheDraggedViewsOwnCurrentParent)
+{
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&root);
+    ASSERT_NE(editor.workspace(), nullptr);
+    root.setBounds(newui::Rect(0, 0, 1400, 700));
+
+    newui::RootViewProxy* surface = editor.workspace()->rootViewProxy();
+    ASSERT_NE(surface, nullptr);
+
+    auto* control = new newui::SubView();
+    control->setName("control");
+    control->setVisible(true);
+    control->setBounds(newui::Rect(10, 10, 30, 20));
+    surface->addChild(control);
+
+    CodeToolsVsix::DocumentOutline* outline = editor.workspace()->documentOutlinePane();
+    ASSERT_NE(outline, nullptr);
+    outline->onReparentRequested(*outline, control, surface);
+
+    EXPECT_FALSE(editor.undoStack().canUndo());
+    EXPECT_EQ(control->parent(), surface);
+}
+
 TEST_F(DesignerEditorFileFixture, LoadFailsForAMissingFile)
 {
     newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
@@ -619,6 +971,94 @@ TEST(DesignerEditorToolbar, ToolboxAddIsUndoAwareAndMarksTheDocumentDirty)
     editor.workspace()->redoButton()->onClick(*editor.workspace()->redoButton());
     ASSERT_EQ(editor.workspace()->rootViewProxy()->childViews().size(), 1u);
     EXPECT_EQ(editor.workspace()->rootViewProxy()->childViews()[0], created);
+}
+
+TEST(DesignerEditorToolbar, ToolboxAddGivesTheNewControlSensibleDefaultBoundsAndLayoutParams)
+{
+    // Regression test for a real, reported bug: a freshly-created Toolbox control used to
+    // land at Rect() = (0,0,0,0) with no LayoutParams at all - since rootViewProxy_'s own
+    // AnchorLayout leaves an unconfigured child exactly where it is forever, it stayed pinned
+    // at the top-left corner through every future resize too.
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+
+    auto* created = new newui::SubView();
+    editor.workspace()->toolboxPane()->onEntryActivated(*editor.workspace()->toolboxPane(), created);
+
+    EXPECT_TRUE(created->isVisible());
+    EXPECT_NE(created->bounds(), newui::Rect());
+    EXPECT_GT(created->bounds().size().width, 0.0f);
+    EXPECT_GT(created->bounds().size().height, 0.0f);
+
+    auto* params = dynamic_cast<newui::AnchorLayoutParams*>(created->layoutParams());
+    ASSERT_NE(params, nullptr);
+    EXPECT_TRUE(newui::hasAnchor(params->anchors, newui::Anchor::Left));
+    EXPECT_TRUE(newui::hasAnchor(params->anchors, newui::Anchor::Top));
+    EXPECT_GT(params->width, 0.0f);
+    EXPECT_GT(params->height, 0.0f);
+}
+
+TEST(DesignerEditorToolbar, ToolboxAddNestsIntoTheSelectedContainerWhenOneExists)
+{
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+
+    // ToolboxRegistry::isContainer() requires a real Layout attached - the live signal that
+    // dropping a child into it actually does something.
+    auto* container = new newui::SubView();
+    container->setName("container");
+    container->setVisible(true);
+    container->setLayout(std::make_unique<newui::AnchorLayout>());
+    editor.workspace()->rootViewProxy()->addChild(container);
+    editor.viewDesignerController().selectExclusive(container);
+
+    auto* created = new newui::SubView();
+    editor.workspace()->toolboxPane()->onEntryActivated(*editor.workspace()->toolboxPane(), created);
+
+    ASSERT_EQ(container->childViews().size(), 1u);
+    EXPECT_EQ(container->childViews()[0], created);
+    // rootViewProxy_ itself only ever gained the one container, not created too.
+    EXPECT_EQ(editor.workspace()->rootViewProxy()->childViews().size(), 1u);
+}
+
+TEST(DesignerEditorToolbar, ToolboxAddFallsBackToRootViewProxyWhenTheSelectionHasNoLayout)
+{
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+
+    // A bare SubView with no Layout attached isn't a container yet (per the current, deliberate
+    // "reject until a Layout can actually be added/changed/removed on it from the Properties
+    // panel" scoping) - not a legitimate drop target.
+    auto* bareSubView = new newui::SubView();
+    bareSubView->setVisible(true);
+    editor.workspace()->rootViewProxy()->addChild(bareSubView);
+    editor.viewDesignerController().selectExclusive(bareSubView);
+
+    auto* created = new newui::SubView();
+    editor.workspace()->toolboxPane()->onEntryActivated(*editor.workspace()->toolboxPane(), created);
+
+    EXPECT_TRUE(bareSubView->childViews().empty());
+    ASSERT_EQ(editor.workspace()->rootViewProxy()->childViews().size(), 2u);
+    EXPECT_EQ(editor.workspace()->rootViewProxy()->childViews()[1], created);
+}
+
+TEST(DesignerEditorToolbar, ToolboxAddFallsBackToRootViewProxyWhenTheSelectionIsNotAContainer)
+{
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+
+    // A Button has no Layout of its own either - not a legitimate drop target.
+    auto* button = new newui::Button();
+    button->setVisible(true);
+    editor.workspace()->rootViewProxy()->addChild(button);
+    editor.viewDesignerController().selectExclusive(button);
+
+    auto* created = new newui::SubView();
+    editor.workspace()->toolboxPane()->onEntryActivated(*editor.workspace()->toolboxPane(), created);
+
+    EXPECT_TRUE(button->childViews().empty());
+    ASSERT_EQ(editor.workspace()->rootViewProxy()->childViews().size(), 2u);
+    EXPECT_EQ(editor.workspace()->rootViewProxy()->childViews()[1], created);
 }
 
 TEST(DesignerEditorToolbar, DeleteKeyRemovesTheSelectedControlAndIsUndoAware)

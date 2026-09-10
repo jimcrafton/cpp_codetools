@@ -70,6 +70,12 @@ namespace CodeToolsVsix
         const LayoutEditingPolicy* policy = nullptr;
         GeometryDragContext ctx;
         GeometryEditResult result;
+
+        // True for the cue drawn against a *different* container the drag is poised to
+        // reparent into (SelectionOverlay colors this one green, the same "valid drop target"
+        // color as the container highlight box, instead of the ordinary accent) - false for the
+        // everyday "still reordering within its own current parent" cue.
+        bool isReparentTargetCue = false;
     };
 
     // Resolves/previews/draws/commits one newui::Layout kind's real editing
@@ -100,8 +106,13 @@ namespace CodeToolsVsix
         // Paints this gesture's adorner cue for the current drag - called
         // from SelectionOverlay::paint() while a drag is active. bl is
         // already in root-local coordinates, same space Overlay::paint()
-        // itself draws in (see SelectionOverlay::boundsInRootView()).
-        virtual void drawCue(BLContext& bl, const GeometryDragContext& ctx, const GeometryEditResult& result) const = 0;
+        // itself draws in (see SelectionOverlay::boundsInRootView()). color
+        // is the accent to draw with - SelectionOverlay picks it (the
+        // ordinary selection accent for a same-parent cue, green for a
+        // cross-container reparent-target cue - see ActiveGeometryDrag's own
+        // isReparentTargetCue) so this class doesn't need to know about
+        // UIColorManager or reparenting at all.
+        virtual void drawCue(BLContext& bl, const GeometryDragContext& ctx, const GeometryEditResult& result, BLRgba32 color) const = 0;
 
         // Builds the UndoableAction to push at mouse-up (empty description
         // = nothing to push). startResult is what resolve() would have

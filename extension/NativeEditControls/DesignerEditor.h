@@ -166,6 +166,17 @@ namespace CodeToolsVsix
         // since it's already showing exactly this selection).
         newui::SyncReturn handleOutlineSelectionActivated(DocumentOutline& sender, const std::vector<newui::SubView*>& views);
 
+        // Document Outline's own drag-and-drop reparent gesture (DocumentOutline::
+        // onReparentRequested) - unlike buildReparentAction() above, there's no live drag/
+        // drop-point to speak of here (the outline's own mouse handling only detects the
+        // gesture, see DocumentOutline.h's own comment), so dragged's real, current bounds()
+        // stand in for both "where it starts" (undo target) and "where it visually is right
+        // now" (converted into target's local space, the same on-screen-position-preserving
+        // placement buildReparentAction() itself does) - pushes one real UndoableAction onto
+        // undoStack_ directly, since there's no larger multi-entry gesture to compose into
+        // like handleMouseUpForMove() has.
+        newui::SyncReturn handleOutlineReparentRequested(DocumentOutline& sender, newui::SubView* dragged, newui::SubView* target);
+
         // Refreshes viewDesignerModel_ after Workspace's own Toolbox-add
         // wiring mutates rootViewProxy()'s children directly (see
         // Workspace::onDesignSurfaceChanged's own comment).
@@ -194,6 +205,13 @@ namespace CodeToolsVsix
         // (see handleMouseDownForSelection()) - startResult is what policy->resolve() returned at
         // that same moment (zero delta), the undo target; lastResult is updated on every
         // handleMouseMoveForMove() call, the redo/doIt target and what drawCue() paints against.
+        // pendingReparentTarget is non-null only while the drag point sits outside parent's own
+        // bounds AND a different real container was found under the cursor there (see
+        // findReparentTargetAt()) - tracked regardless of the source policy kind
+        // (FreePosition/LinearReorder/GridCell); the within-parent resolve()/applyPreview() keeps
+        // running unchanged the whole time (harmless even once the cursor is outside the
+        // container - see handleMouseMoveForMove()'s own comment), buildReparentAction() takes
+        // over on drop if this ends up set.
         struct MoveDragEntry {
             newui::SubView* view;
             newui::View* parent;
@@ -202,6 +220,7 @@ namespace CodeToolsVsix
             GeometryEditResult startResult;
             GeometryEditResult lastResult;
             newui::Point lastPt;
+            newui::SubView* pendingReparentTarget = nullptr;
         };
 
         // Builds the context resolve()/applyPreview()/commit() all need for entry, given the
@@ -209,11 +228,45 @@ namespace CodeToolsVsix
         // handler below so ctx construction can't drift out of sync between them.
         GeometryDragContext dragContextFor(const MoveDragEntry& entry, const newui::Point& currentPt) const;
 
+        // Where entry.view would be on screen right now (root-local) if it had been freely
+        // FreePosition-dragged the whole time - the same delta math FreePositionPolicy::
+        // resolve() itself uses, computed independently of entry.view's own real bounds().
+        // Needed because a LinearReorder/GridCell-sourced entry's real bounds() are managed by
+        // its own *source* container's layout the whole drag, never tracking the cursor at all -
+        // used by both buildReparentAction() (at drop) and activeMoveDragCues() (live, for the
+        // reparent-target insertion-line cue) so they can't disagree about where the view
+        // "really" is.
+        newui::Rect currentDraggedRootLocalBounds(const MoveDragEntry& entry) const;
+
+        // The innermost real container (ToolboxRegistry::isContainer()) under rootLocalPt, or
+        // rootViewProxy() itself as the ultimate fallback (always a valid drop target regardless
+        // of its own container-ness) - walks up from whatever's actually hit there via parent().
+        // dragged and its own descendants are never returned (excluded from the walk's starting
+        // point entirely) - a FreePosition drag already tracks the cursor via setBounds(), so an
+        // ordinary hit-test would otherwise just re-hit the thing being dragged. Returns nullptr
+        // only when rootLocalPt falls outside the design surface entirely.
+        newui::SubView* findReparentTargetAt(const newui::Point& rootLocalPt, newui::SubView* dragged) const;
+
+        // Builds the UndoableAction for one entry whose drop actually reparents it - view moves to
+        // target via the real, safe View::setParent(), then target's own policy places it (resolved
+        // fresh, zero-delta, from the view's current on-screen position converted into target's
+        // local space) same as a brand-new placement would be; undoIt() reverses via entry's own
+        // original policy/parent/startResult - already exactly what's needed to restore the
+        // pre-drag state. Not const - its own doIt()/undoIt() capture `this` to call
+        // viewDesignerModel_.refresh()/markDirty() (real structural changes, unlike an ordinary
+        // same-parent Move commit), which need non-const access.
+        newui::UndoableAction buildReparentAction(const MoveDragEntry& entry, newui::SubView* target);
+
         // What SelectionOverlay's own paint() should draw for whatever Move drag is active right
         // now - wired in via selectionOverlay_->setActiveDragCuesProvider() in setupUI(). Empty
         // whenever moveDragEntries_ is empty or the drag never crossed kMoveDragThresholdPixels
         // (a plain click has nothing to show a cue for).
         std::vector<ActiveGeometryDrag> activeMoveDragCues() const;
+
+        // The pending reparent target(s) (see MoveDragEntry's own comment) SelectionOverlay's
+        // paint() should highlight right now - wired in via
+        // selectionOverlay_->setReparentTargetProvider() in setupUI().
+        std::vector<newui::SubView*> reparentTargets() const;
 
         // Below this many pixels of total mouse movement since mouseDown, handleMouseMoveForMove()
         // doesn't touch bounds() at all - a real, caught bug otherwise: with no threshold at all,

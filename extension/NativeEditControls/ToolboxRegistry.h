@@ -50,5 +50,16 @@ namespace CodeToolsVsix
         // Shared with Document Outline, which shows instances of these
         // same classes.
         static const std::string& iconResourceNameFor(const std::string& className);
+
+        // Whether view is a legitimate design-time drop target right now - has a real
+        // newui::Layout attached (view->layout() != nullptr), the live signal that dropping a
+        // child into it actually does something (the Layout will arrange it), rather than a
+        // class-level @reflect category=containers tag. A bare SubView with no Layout set is
+        // rejected - not a container yet, though it's expected to become one once a future
+        // Properties-panel feature lets a Layout be added/changed/removed on it; RootViewProxy
+        // already qualifies for free, since it has a real AnchorLayout from construction.
+        // Shared by Workspace's own Toolbox-add wiring (nesting into the current selection)
+        // and DesignerEditor's canvas drag-to-reparent hit-testing.
+        static bool isContainer(newui::SubView* view);
     };
 }

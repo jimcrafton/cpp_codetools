@@ -7,6 +7,8 @@
 
 #include <gtest/gtest.h>
 
+#include <memory>
+
 // registerReflectionData() is already run once globally for this whole
 // binary by test_component_editor.cpp's own ::testing::Environment - no
 // separate registration needed here (same convention test_workspace.cpp's
@@ -145,4 +147,23 @@ TEST(ToolboxRegistry, MenuItemIsDeliberatelyNotIncludedInMenuAndToolbar) {
     const auto& categories = CodeToolsVsix::ToolboxRegistry::categories();
     const auto& menuAndToolbar = categories[4];
     EXPECT_FALSE(hasEntry(menuAndToolbar, "MenuItem"));
+}
+
+TEST(ToolboxRegistryIsContainer, TrueForAViewWithARealLayoutAttached) {
+    auto* view = new newui::SubView();
+    view->setLayout(std::make_unique<newui::AnchorLayout>());
+    EXPECT_TRUE(CodeToolsVsix::ToolboxRegistry::isContainer(view));
+    delete view;
+}
+
+TEST(ToolboxRegistryIsContainer, FalseForABareViewWithNoLayout) {
+    // Deliberate, temporary - see ToolboxRegistry.h's own comment: this is expected to change
+    // once a Properties-panel feature lets a Layout be added/changed/removed on a view.
+    auto* view = new newui::SubView();
+    EXPECT_FALSE(CodeToolsVsix::ToolboxRegistry::isContainer(view));
+    delete view;
+}
+
+TEST(ToolboxRegistryIsContainer, FalseForNullptr) {
+    EXPECT_FALSE(CodeToolsVsix::ToolboxRegistry::isContainer(nullptr));
 }

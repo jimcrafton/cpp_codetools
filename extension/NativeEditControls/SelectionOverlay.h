@@ -61,6 +61,16 @@ namespace CodeToolsVsix
             activeDragCuesProvider_ = std::move(provider);
         }
 
+        // Supplies whatever container(s) a Move drag is currently poised to reparent its dragged
+        // view into (DesignerEditor::reparentTargets()) - drawn with the same amber box+badge as
+        // the selection-time layout adornment (paintContainerHighlight(), .cpp), just triggered by
+        // an active drag instead of a plain selection. Same "left unset paints nothing extra"
+        // default as setActiveDragCuesProvider() above.
+        void setReparentTargetProvider(std::function<std::vector<newui::SubView*>()> provider)
+        {
+            reparentTargetProvider_ = std::move(provider);
+        }
+
         // view's bounds in the coordinate space Overlay::paint() itself
         // already draws in (overlay.h - (0,0) at the hosting RootView's own
         // top-left). Walks view->parent() up to the root, undoing each
@@ -78,5 +88,6 @@ namespace CodeToolsVsix
         const ViewDesignerController& controller_;
         const newui::View* clipView_;
         std::function<std::vector<ActiveGeometryDrag>()> activeDragCuesProvider_;
+        std::function<std::vector<newui::SubView*>()> reparentTargetProvider_;
     };
 }

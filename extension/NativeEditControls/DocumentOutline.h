@@ -82,6 +82,16 @@ namespace CodeToolsVsix
         std::optional<std::string> iconFor(const std::vector<std::size_t>& path) const override;
         float iconSize() const override { return kIconSize; }
         float iconGap() const override { return kIconGap; }
+
+        // The row a drag-and-drop reparent is currently poised to drop onto, if any - set by
+        // DocumentOutline's own mouse handling, read by DocumentOutlineItem::paint() to draw a
+        // highlight. nullopt (the default) draws nothing extra.
+        void setPendingDropTargetPath(std::optional<std::vector<std::size_t>> path) { pendingDropTargetPath_ = std::move(path); }
+        const std::optional<std::vector<std::size_t>>& pendingDropTargetPath() const { return pendingDropTargetPath_; }
+        bool isPendingDropTarget(const std::vector<std::size_t>& path) const { return pendingDropTargetPath_ == path; }
+
+    private:
+        std::optional<std::vector<std::size_t>> pendingDropTargetPath_;
     };
 
     // The Document Outline pane (designer-plan.md 6.1 item 4) - a real
@@ -139,6 +149,18 @@ namespace CodeToolsVsix
         typedef newui::Delegate<DocumentOutline, const std::vector<newui::SubView*>&> SelectionActivatedDelegate;
         SelectionActivatedDelegate onSelectionActivated;
 
+        // Real drag-and-drop reparenting - mouse-down on a row arms a potential drag (a
+        // kDragThresholdPixels dead zone before it counts as one, same ordinary click-vs-drag
+        // distinction the canvas' own Move drag already uses), mouse-move hit-tests which
+        // *other* row is under the cursor and highlights it via the controller's own
+        // setPendingDropTargetPath(), mouse-up fires this if a real, different, legitimate
+        // container (ToolboxRegistry::isContainer()) was found there. This class only ever
+        // detects/reports the gesture - DesignerEditor wires it to the real, undo-aware
+        // View::setParent() call, same "expose a hook, don't reach into the owner" shape
+        // onSelectionActivated above already established.
+        typedef newui::Delegate<DocumentOutline, newui::SubView*, newui::SubView*> ReparentRequestedDelegate;
+        ReparentRequestedDelegate onReparentRequested;
+
         // Exposed for testability - same convention Toolbox::treeView()
         // already uses.
         newui::TreeView* treeView() const { return treeView_; }
@@ -152,8 +174,26 @@ namespace CodeToolsVsix
         // actually visible, not just logically selected.
         void expandAncestorsOf(const std::vector<std::size_t>& path);
 
+        newui::SyncReturn handleTreeMouseDown(newui::View& sender, const newui::Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
+        newui::SyncReturn handleTreeMouseMove(newui::View& sender, const newui::Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
+        newui::SyncReturn handleTreeMouseUp(newui::View& sender, const newui::Point& pt, std::uint32_t btnMask, std::uint32_t keyMask);
+
+        // Which visible row (if any) contains localPt (treeView_'s own local coordinate space,
+        // already scroll-adjusted - the same space onMouseDown/Move/Up's own pt arrives in) -
+        // a plain linear scan of controller().visibleCount()/pathAt()/rectForPath(), all public
+        // TreeView/TreeController API - real trees here are small enough that this needs no
+        // cleverer lookup.
+        std::optional<std::vector<std::size_t>> rowPathAt(const newui::Point& localPt) const;
+
+        static constexpr float kDragThresholdPixels = 3.0f;
+
         DocumentOutlineModel model_;
         newui::TreeView* treeView_ = nullptr;
+        DocumentOutlineController* outlineController_ = nullptr;
         bool applyingExternalSelection_ = false;
+
+        newui::SubView* draggedView_ = nullptr;
+        newui::Point dragStartPt_;
+        bool dragStarted_ = false;
     };
 }

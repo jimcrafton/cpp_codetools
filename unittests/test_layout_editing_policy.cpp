@@ -166,7 +166,7 @@ TEST(FreePositionPolicyDrawCue, PaintsNothing) {
     ASSERT_EQ(surface.create(64, 64, BL_FORMAT_PRGB32), BL_SUCCESS);
     BLContext blContext(surface);
     blContext.clear_all();
-    policyFor(nullptr).drawCue(blContext, ctx, result);
+    policyFor(nullptr).drawCue(blContext, ctx, result, BLRgba32(0xFF, 0x00, 0x00, 0xFF));
     blContext.end();
 
     EXPECT_FALSE(anyPixelPainted(surface, 64, 64));
@@ -298,32 +298,46 @@ TEST(LinearReorderPolicyCommit, DoItAndUndoItReorderToTheRightIndices) {
     delete container;
 }
 
-TEST(LinearReorderPolicyDrawCue, PaintsAHighlightAroundTheDraggedView) {
+TEST(LinearReorderPolicyDrawCue, PaintsAnInsertionLineBetweenTheTargetsRealSiblings) {
+    // ctx.view is deliberately never attached to container here - matches the real
+    // cross-container reparent-target case this cue is now exclusively used for (the drop
+    // hasn't actually happened yet, so ctx.view's own bounds/attachment can't be trusted -
+    // see insertionLinePosition()'s own comment).
     newui::RootView root(nullptr, newui::Rect(0, 0, 64, 64), "root");
     auto* container = new newui::SubView();
     container->setBounds(newui::Rect(0, 0, 64, 64));
     container->setLayout(std::make_unique<newui::FlexLayout>(newui::Orientation::Horizontal));
     root.addChild(container);
 
+    auto* a = new newui::SubView();
+    a->setDesiredSize(newui::Size(20.0f, 20.0f));
+    a->setVisible(true);
+    container->addChild(a);
+    auto* b = new newui::SubView();
+    b->setDesiredSize(newui::Size(20.0f, 20.0f));
+    b->setVisible(true);
+    container->addChild(b);
+
     auto* view = new newui::SubView();
     view->setDesiredSize(newui::Size(20.0f, 20.0f));
-    view->setVisible(true);
-    container->addChild(view);
 
     GeometryDragContext ctx;
     ctx.view = view;
     ctx.parent = container;
     GeometryEditResult result;
     result.kind = GeometryEditKind::LinearReorder;
+    result.targetSiblingIndex = 1;  // land between a and b
 
     BLImage surface;
     ASSERT_EQ(surface.create(64, 64, BL_FORMAT_PRGB32), BL_SUCCESS);
     BLContext blContext(surface);
     blContext.clear_all();
-    policyFor(container->layout()).drawCue(blContext, ctx, result);
+    policyFor(container->layout()).drawCue(blContext, ctx, result, BLRgba32(0x10, 0xB9, 0x81, 0xFF));
     blContext.end();
 
     EXPECT_TRUE(anyPixelPainted(surface, 64, 64));
+
+    delete view;
 }
 
 // ---------------------------------------------------------------------------
@@ -472,7 +486,7 @@ TEST(GridCellPolicyDrawCue, PaintsGridLinesAndTheTargetCellHighlight) {
     ASSERT_EQ(surface.create(64, 64, BL_FORMAT_PRGB32), BL_SUCCESS);
     BLContext blContext(surface);
     blContext.clear_all();
-    policyFor(container->layout()).drawCue(blContext, ctx, result);
+    policyFor(container->layout()).drawCue(blContext, ctx, result, BLRgba32(0xFF, 0x00, 0x00, 0xFF));
     blContext.end();
 
     EXPECT_TRUE(anyPixelPainted(surface, 64, 64));

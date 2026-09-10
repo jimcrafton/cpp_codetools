@@ -47,6 +47,13 @@ namespace CodeToolsVsix
 
     namespace
     {
+        // Same emerald "valid drop target" color as the canvas' own reparent-target highlight
+        // (SelectionOverlay.cpp's kReparentTargetColor) - kept as its own local copy rather than
+        // shared, matching this project's usual "duplicate a small color constant per file"
+        // precedent (e.g. LayoutEditingPolicy.cpp's own grid-tracker gray) over a cross-file
+        // dependency for one RGB value.
+        const BLRgba32 kDropTargetColor(0x10, 0xB9, 0x81, 0xFF);
+
         // Same priority (disabled beats selected beats normal) items.cpp's
         // own file-local itemTextColor() uses - reimplemented here (not
         // exported from there), same as ToolboxItem's/PropertyItem's own
@@ -179,6 +186,14 @@ namespace CodeToolsVsix
     {
         Item::paint(ctx, rect);
 
+        if (auto* outlineController = dynamic_cast<DocumentOutlineController*>(&controller)) {
+            if (outlineController->isPendingDropTarget(path)) {
+                ctx.set_stroke_style(kDropTargetColor);
+                ctx.set_stroke_width(1.0);
+                ctx.stroke_rect(BLRect(rect.left(), rect.top(), rect.size().width, rect.size().height));
+            }
+        }
+
         auto* model = dynamic_cast<DocumentOutlineModel*>(controller.model());
         newui::SubView* view = model != nullptr && model->source() != nullptr ? model->source()->viewAt(path) : nullptr;
 
@@ -252,9 +267,20 @@ namespace CodeToolsVsix
         treeView_ = new newui::TreeView();
         treeView_->setName("documentOutlineTreeView");
         treeView_->setVisible(true);
-        treeView_->setController(std::make_unique<DocumentOutlineController>());
+        auto controller = std::make_unique<DocumentOutlineController>();
+        outlineController_ = controller.get();
+        treeView_->setController(std::move(controller));
         treeView_->setModel(&model_);
         treeView_->onSelectionChanged.add(this, &DocumentOutline::handleTreeSelectionChanged);
+
+        // A second, independent set of listeners alongside TreeView's own private mouse
+        // handling (row selection, expand-glyph clicks) - Delegate<> already supports multiple
+        // listeners on the same event without interference, the same pattern DesignerEditor's
+        // own CanvasWell-resize + canvas Move drag already establishes on root's onMouseMove/
+        // onMouseUp.
+        treeView_->onMouseDown.add(this, &DocumentOutline::handleTreeMouseDown);
+        treeView_->onMouseMove.add(this, &DocumentOutline::handleTreeMouseMove);
+        treeView_->onMouseUp.add(this, &DocumentOutline::handleTreeMouseUp);
 
         // ScrollView::addChild() redirects into its own viewport - not a
         // second, separate wrapping layer, this *is* DocumentOutline's
@@ -318,6 +344,97 @@ namespace CodeToolsVsix
             prefix.push_back(path[i]);
             treeView_->controller().setExpanded(prefix, true);
         }
+    }
+
+    std::optional<std::vector<std::size_t>> DocumentOutline::rowPathAt(const newui::Point& localPt) const
+    {
+        newui::TreeController& controller = treeView_->controller();
+        std::size_t count = controller.visibleCount();
+        for (std::size_t i = 0; i < count; ++i) {
+            const std::vector<std::size_t>& path = controller.pathAt(i);
+            if (auto rect = treeView_->rectForPath(path)) {
+                if (rect->contains(localPt)) {
+                    return path;
+                }
+            }
+        }
+        return std::nullopt;
+    }
+
+    newui::SyncReturn DocumentOutline::handleTreeMouseDown(newui::View& /*sender*/, const newui::Point& pt,
+        std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/)
+    {
+        draggedView_ = nullptr;
+        dragStarted_ = false;
+        if (model_.source() == nullptr) {
+            return newui::SyncReturn::Ignored;
+        }
+        if (auto path = rowPathAt(pt)) {
+            draggedView_ = model_.source()->viewAt(*path);
+            dragStartPt_ = pt;
+        }
+        // Never claims the event - TreeView's own row-selection handling (a separate listener
+        // on this same onMouseDown) still needs to run regardless.
+        return newui::SyncReturn::Ignored;
+    }
+
+    newui::SyncReturn DocumentOutline::handleTreeMouseMove(newui::View& /*sender*/, const newui::Point& pt,
+        std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/)
+    {
+        if (draggedView_ == nullptr) {
+            return newui::SyncReturn::Ignored;
+        }
+        if (!dragStarted_) {
+            newui::Point delta = pt - dragStartPt_;
+            if (delta.x * delta.x + delta.y * delta.y < kDragThresholdPixels * kDragThresholdPixels) {
+                return newui::SyncReturn::Ignored;
+            }
+            dragStarted_ = true;
+        }
+
+        newui::SubView* candidate = nullptr;
+        if (auto path = rowPathAt(pt)) {
+            if (newui::SubView* hit = model_.source() != nullptr ? model_.source()->viewAt(*path) : nullptr) {
+                bool isSelfOrDescendant = false;
+                for (newui::View* v = hit; v != nullptr; v = v->parent()) {
+                    if (v == draggedView_) {
+                        isSelfOrDescendant = true;
+                        break;
+                    }
+                }
+                if (!isSelfOrDescendant && hit != draggedView_->parent() && ToolboxRegistry::isContainer(hit)) {
+                    candidate = hit;
+                }
+            }
+        }
+
+        outlineController_->setPendingDropTargetPath(
+            candidate != nullptr ? model_.source()->pathFor(candidate) : std::nullopt);
+        treeView_->redraw();
+        return newui::SyncReturn::Ignored;
+    }
+
+    newui::SyncReturn DocumentOutline::handleTreeMouseUp(newui::View& /*sender*/, const newui::Point& /*pt*/,
+        std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/)
+    {
+        newui::SubView* dragged = draggedView_;
+        bool started = dragStarted_;
+        draggedView_ = nullptr;
+        dragStarted_ = false;
+
+        std::optional<std::vector<std::size_t>> targetPath = outlineController_->pendingDropTargetPath();
+        outlineController_->setPendingDropTargetPath(std::nullopt);
+        treeView_->redraw();
+
+        if (!started || dragged == nullptr || !targetPath.has_value() || model_.source() == nullptr) {
+            return newui::SyncReturn::Ignored;
+        }
+        newui::SubView* target = model_.source()->viewAt(*targetPath);
+        if (target == nullptr) {
+            return newui::SyncReturn::Ignored;
+        }
+        onReparentRequested(*this, dragged, target);
+        return newui::SyncReturn::Handled;
     }
 
     newui::SyncReturn DocumentOutline::handleTreeSelectionChanged(newui::TreeView& sender)

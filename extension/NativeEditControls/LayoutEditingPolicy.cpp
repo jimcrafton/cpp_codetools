@@ -78,6 +78,50 @@ namespace CodeToolsVsix
             return offsets.empty() ? 0 : offsets.size() - 1;
         }
 
+        // Where LinearReorderPolicy::drawCue() below should draw its insertion line, along
+        // whichever axis is perpendicular to the row's own orientation - computed from
+        // ctx.parent's *real* current children (excluding ctx.view, wherever it happens to
+        // actually be), not ctx.view's own bounds. That distinction matters for the
+        // cross-container reparent-target case this is now exclusively used for: ctx.view isn't
+        // attached to ctx.parent at all yet (reparenting only actually happens on drop), so its
+        // own bounds say nothing about where it'd land inside a container it isn't even in.
+        double insertionLinePosition(const GeometryDragContext& ctx, const GeometryEditResult& result, bool horizontal)
+        {
+            std::vector<newui::SubView*> others;
+            for (newui::SubView* sibling : ctx.parent->childViews()) {
+                if (sibling != ctx.view) {
+                    others.push_back(sibling);
+                }
+            }
+
+            newui::Rect parentBounds = SelectionOverlay::boundsInRootView(ctx.parent);
+            if (others.empty()) {
+                return horizontal
+                    ? (parentBounds.left() + parentBounds.right()) * 0.5
+                    : (parentBounds.top() + parentBounds.bottom()) * 0.5;
+            }
+
+            std::size_t index = result.targetSiblingIndex;
+            if (index > others.size()) {
+                index = others.size();
+            }
+
+            if (index == 0) {
+                newui::Rect firstBounds = SelectionOverlay::boundsInRootView(others.front());
+                return horizontal ? firstBounds.left() : firstBounds.top();
+            }
+            if (index == others.size()) {
+                newui::Rect lastBounds = SelectionOverlay::boundsInRootView(others.back());
+                return horizontal ? lastBounds.right() : lastBounds.bottom();
+            }
+
+            newui::Rect beforeBounds = SelectionOverlay::boundsInRootView(others[index - 1]);
+            newui::Rect afterBounds = SelectionOverlay::boundsInRootView(others[index]);
+            return horizontal
+                ? (beforeBounds.right() + afterBounds.left()) * 0.5
+                : (beforeBounds.bottom() + afterBounds.top()) * 0.5;
+        }
+
         // -------------------------------------------------------------------
         // FreePosition - AnchorLayout, or no Layout at all.
         // -------------------------------------------------------------------
@@ -99,7 +143,7 @@ namespace CodeToolsVsix
                 ctx.view->setBounds(result.proposedBounds);
             }
 
-            void drawCue(BLContext&, const GeometryDragContext&, const GeometryEditResult&) const override
+            void drawCue(BLContext&, const GeometryDragContext&, const GeometryEditResult&, BLRgba32) const override
             {
                 // Nothing beyond the ordinary selection outline/handles - free position needs no
                 // extra cue, the dragged view's own live bounds already show where it's going.
@@ -187,15 +231,44 @@ namespace CodeToolsVsix
                 ctx.parent->reorderChild(ctx.view, result.targetSiblingIndex);
             }
 
-            void drawCue(BLContext& bl, const GeometryDragContext& ctx, const GeometryEditResult&) const override
+            void drawCue(BLContext& bl, const GeometryDragContext& ctx, const GeometryEditResult& result, BLRgba32 color) const override
             {
-                // Highlights the dragged view's own current (already-reordered-live) position,
-                // so it still reads as "being positioned" rather than an ordinary settled child.
-                newui::Rect bounds = SelectionOverlay::boundsInRootView(ctx.view);
-                BLRgba32 accent = newui::UIColorManager::colorFor(newui::UIColorRole::HighlightBackground).toBLRgba32();
-                bl.set_stroke_style(accent);
+                // A real insertion line, perpendicular to the row's own orientation, with
+                // rounded end-caps - matches how most real design tools show a reorder target
+                // (a vertical bar between two items in a horizontal row, or horizontal between
+                // two rows in a vertical stack). DesignerEditor only ever calls this for a
+                // cross-container reparent target now, not for an ordinary same-parent reorder -
+                // there, the real live reflow (applyPreview() actually moving siblings out of
+                // the way) already reads as clear feedback on its own, and a second cue on top
+                // of it was redundant. ctx.view isn't necessarily attached to ctx.parent yet in
+                // the cross-container case, so the line is positioned from result's own resolved
+                // index against ctx.parent's *current* real children instead of ctx.view's own
+                // (not yet meaningful) position there.
+                auto* flex = dynamic_cast<newui::FlexLayout*>(ctx.parent->layout());
+                bool horizontal = flex == nullptr || flex->orientation() == newui::Orientation::Horizontal;
+
+                newui::Rect parentBounds = SelectionOverlay::boundsInRootView(ctx.parent);
+                double linePos = insertionLinePosition(ctx, result, horizontal);
+
+                double x1, y1, x2, y2;
+                if (horizontal) {
+                    x1 = x2 = linePos;
+                    y1 = parentBounds.top();
+                    y2 = parentBounds.bottom();
+                } else {
+                    y1 = y2 = linePos;
+                    x1 = parentBounds.left();
+                    x2 = parentBounds.right();
+                }
+
+                bl.set_stroke_style(color);
                 bl.set_stroke_width(2.0);
-                bl.stroke_rect(BLRect(bounds.left(), bounds.top(), bounds.size().width, bounds.size().height));
+                bl.stroke_line(x1, y1, x2, y2);
+
+                constexpr double kCapRadius = 4.0;
+                bl.set_fill_style(color);
+                bl.fill_circle(x1, y1, kCapRadius);
+                bl.fill_circle(x2, y2, kCapRadius);
             }
 
             newui::UndoableAction commit(const GeometryDragContext& ctx,
@@ -250,14 +323,16 @@ namespace CodeToolsVsix
                 applyGridCell(ctx.parent, ctx.view, result.targetRow, result.targetColumn);
             }
 
-            void drawCue(BLContext& bl, const GeometryDragContext& ctx, const GeometryEditResult& result) const override
+            void drawCue(BLContext& bl, const GeometryDragContext& ctx, const GeometryEditResult& result, BLRgba32 color) const override
             {
                 auto* grid = dynamic_cast<newui::GridLayout*>(ctx.parent->layout());
                 newui::GridLayout::GridGeometry geometry = grid->trackGeometry(*ctx.parent);
                 newui::Rect parentBounds = SelectionOverlay::boundsInRootView(ctx.parent);
 
                 // Faint tracker lines across every real row/column boundary - "this is grid-bound",
-                // same idea as an IDE's own alignment guides.
+                // same idea as an IDE's own alignment guides. Always the same muted gray
+                // regardless of color - these aren't the "target" indicator themselves, the cell
+                // highlight below is.
                 bl.set_stroke_style(BLRgba32(0xC0, 0xC0, 0xC0, 0x44));
                 bl.set_stroke_width(1.0);
                 for (float columnOffset : geometry.columns.offsets) {
@@ -271,15 +346,14 @@ namespace CodeToolsVsix
 
                 // Highlights the target cell itself.
                 if (result.targetColumn < geometry.columns.offsets.size() && result.targetRow < geometry.rows.offsets.size()) {
-                    BLRgba32 accent = newui::UIColorManager::colorFor(newui::UIColorRole::HighlightBackground).toBLRgba32();
                     BLRect cell(
                         parentBounds.left() + geometry.columns.offsets[result.targetColumn],
                         parentBounds.top() + geometry.rows.offsets[result.targetRow],
                         geometry.columns.sizes[result.targetColumn],
                         geometry.rows.sizes[result.targetRow]);
-                    bl.set_fill_style(BLRgba32(accent.r(), accent.g(), accent.b(), 0x33));
+                    bl.set_fill_style(BLRgba32(color.r(), color.g(), color.b(), 0x33));
                     bl.fill_rect(cell);
-                    bl.set_stroke_style(accent);
+                    bl.set_stroke_style(color);
                     bl.set_stroke_width(2.0);
                     bl.stroke_rect(cell);
                 }
@@ -316,7 +390,7 @@ namespace CodeToolsVsix
             GeometryEditKind kind() const override { return GeometryEditKind::None; }
             GeometryEditResult resolve(const GeometryDragContext&) const override { return GeometryEditResult(); }
             void applyPreview(const GeometryDragContext&, const GeometryEditResult&) const override {}
-            void drawCue(BLContext&, const GeometryDragContext&, const GeometryEditResult&) const override {}
+            void drawCue(BLContext&, const GeometryDragContext&, const GeometryEditResult&, BLRgba32) const override {}
             newui::UndoableAction commit(const GeometryDragContext&,
                 const GeometryEditResult&, const GeometryEditResult&) const override
             {

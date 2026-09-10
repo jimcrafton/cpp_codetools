@@ -15,6 +15,7 @@ namespace CodeToolsVsix
         constexpr float kBadgeHeight = 18.0f;
         constexpr float kBadgeGap = 4.0f;  // between the badge's own bottom and the parent box's top
         constexpr float kParentBoxWidth = 1.5f;
+        constexpr float kReparentTargetBoxWidth = 1.0f;
 
         // Amber, deliberately distinct from the blue accent used for the primary selection
         // itself - Chrome DevTools/Figma-style "this is the container" color-coding, so the
@@ -24,6 +25,12 @@ namespace CodeToolsVsix
         // precedent LayoutEditingPolicy.cpp's own grid-tracker lines already set.
         const BLRgba32 kLayoutAdornmentColor(0xD9, 0x77, 0x06, 0xFF);
         const BLRgba32 kLayoutAdornmentTextColor(0x2B, 0x1B, 0x00, 0xFF);
+
+        // Emerald, deliberately distinct from *both* the blue selection accent and the amber
+        // parent adornment - a "valid drop target" color, thinner and un-badged (unlike
+        // paintContainerHighlight() below) since this paints live, every frame, while actively
+        // dragging - a badge here would sit on top of exactly the area you're trying to look at.
+        const BLRgba32 kReparentTargetColor(0x10, 0xB9, 0x81, 0xFF);
 
         // Mirrors Main.dc.html's own ".handle" (7x7 white square, 1.5px
         // accent border) - centered on the given point, matching the
@@ -86,6 +93,28 @@ namespace CodeToolsVsix
             double ty = badgeY + (kBadgeHeight - (fontMetrics.ascent + fontMetrics.descent)) * 0.5 + fontMetrics.ascent;
             ctx.set_fill_style(kLayoutAdornmentTextColor);
             ctx.fill_utf8_text(BLPoint(tx, ty), *blFont, text.c_str(), text.size());
+        }
+
+        // The amber box+badge for the selection-time layout adornment (shows which container/
+        // Layout the current primary selection belongs to) - the badge names the governing
+        // Layout, which is useful context when you're just looking at a selection, not actively
+        // dragging.
+        void paintContainerHighlight(BLContext& ctx, const newui::Rect& containerBounds, const std::string& label)
+        {
+            ctx.set_stroke_style(kLayoutAdornmentColor);
+            ctx.set_stroke_width(kParentBoxWidth);
+            ctx.stroke_box(containerBounds.left(), containerBounds.top(), containerBounds.right(), containerBounds.bottom());
+            paintLayoutBadge(ctx, containerBounds, label);
+        }
+
+        // The thinner, un-badged emerald box for the drag-time reparent-target highlight - see
+        // kReparentTargetColor's own comment for why this is deliberately a separate, simpler
+        // treatment from paintContainerHighlight() above.
+        void paintReparentTargetHighlight(BLContext& ctx, const newui::Rect& containerBounds)
+        {
+            ctx.set_stroke_style(kReparentTargetColor);
+            ctx.set_stroke_width(kReparentTargetBoxWidth);
+            ctx.stroke_box(containerBounds.left(), containerBounds.top(), containerBounds.right(), containerBounds.bottom());
         }
 
         // Recursive step behind SelectionOverlay::boundsInRootView() below -
@@ -160,11 +189,7 @@ namespace CodeToolsVsix
             // conveys nothing useful.
             if (newui::View* parent = primaryView->parent()) {
                 if (parent->parent() != nullptr) {
-                    newui::Rect parentBounds = boundsInRootView(parent);
-                    ctx.set_stroke_style(kLayoutAdornmentColor);
-                    ctx.set_stroke_width(kParentBoxWidth);
-                    ctx.stroke_box(parentBounds.left(), parentBounds.top(), parentBounds.right(), parentBounds.bottom());
-                    paintLayoutBadge(ctx, parentBounds, layoutDisplayName(parent));
+                    paintContainerHighlight(ctx, boundsInRootView(parent), layoutDisplayName(parent));
                 }
             }
         }
@@ -175,7 +200,17 @@ namespace CodeToolsVsix
         if (activeDragCuesProvider_) {
             for (const ActiveGeometryDrag& drag : activeDragCuesProvider_()) {
                 if (drag.policy != nullptr) {
-                    drag.policy->drawCue(ctx, drag.ctx, drag.result);
+                    drag.policy->drawCue(ctx, drag.ctx, drag.result, drag.isReparentTargetCue ? kReparentTargetColor : accent);
+                }
+            }
+        }
+
+        // Container the current drag is poised to reparent its dragged view into, if any - see
+        // DesignerEditor::reparentTargets()'s own comment.
+        if (reparentTargetProvider_) {
+            for (newui::SubView* target : reparentTargetProvider_()) {
+                if (target != nullptr) {
+                    paintReparentTargetHighlight(ctx, boundsInRootView(target));
                 }
             }
         }

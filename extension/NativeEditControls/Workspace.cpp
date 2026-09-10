@@ -5,6 +5,7 @@
 #include <newui/uicolormanager.h>
 #include <newui/viewbuilder.h>
 
+#include <algorithm>
 #include <memory>
 #include <string>
 
@@ -24,6 +25,34 @@ namespace CodeToolsVsix
                 style.setBackgroundColor(newui::UIColorManager::colorFor(role));
             });
         }
+
+        // A freshly-created Toolbox control is a bare default-construct (reflection's
+        // createInstance()) - no bounds, no LayoutParams, and no self-sizing precedent exists
+        // anywhere in newui to fall back on (ViewBuilder's own desiredSize() setter exists
+        // specifically because nothing measures itself - see examples/controls1.cpp's own
+        // always-explicit setDesiredSize() calls). Without this, a new control lands at
+        // Rect() = (0,0,0,0) and, since rootViewProxy_'s own AnchorLayout leaves an
+        // unconfigured child exactly where it is forever (AnchorLayout::arrange()'s own
+        // documented behavior), stays pinned there through every future resize too - a real,
+        // reported bug. Real per-class natural sizing would need an actual measurement pass,
+        // which doesn't exist in this toolkit at all - a fixed default is the honest v1 answer.
+        constexpr float kNewControlDefaultWidth = 120.0f;
+        constexpr float kNewControlDefaultHeight = 32.0f;
+        constexpr float kNewControlDefaultMargin = 20.0f;
+
+        void applyDefaultDesignTimeGeometry(newui::SubView* view)
+        {
+            view->setVisible(true);
+            view->setBounds(newui::Rect(kNewControlDefaultMargin, kNewControlDefaultMargin,
+                kNewControlDefaultWidth, kNewControlDefaultHeight));
+            auto params = std::make_unique<newui::AnchorLayoutParams>(newui::Anchor::Left | newui::Anchor::Top);
+            params->leftMargin = kNewControlDefaultMargin;
+            params->topMargin = kNewControlDefaultMargin;
+            params->width = kNewControlDefaultWidth;
+            params->height = kNewControlDefaultHeight;
+            view->setLayoutParams(std::move(params));
+        }
+
     }
 
     // Built bottom-up as flat, independent ViewBuilder locals - each one
@@ -268,11 +297,13 @@ namespace CodeToolsVsix
         centerAndRightBuilder.child(canvasWell_).child(rightDock);
         newui::Splitter* centerAndRight = centerAndRightBuilder.build();
 
-        // Double-click an entry creates it and attaches it directly onto
-        // rootViewProxy_ - the design surface's own root - real drag-and-
-        // drop being out of scope for v1 (see Toolbox's own class
-        // comment). rootViewProxy_ is already built above, safe to
-        // capture/use here.
+        // Double-click an entry creates it and attaches it onto the current primary
+        // selection when one exists and is a real design-time container (ToolboxRegistry::
+        // isContainer() - has a real Layout attached), otherwise rootViewProxy_ - the design
+        // surface's own root, and the only target before setPrimarySelectionProvider() existed.
+        // Dragging an *already-placed* control to a different parent is a separate feature
+        // (DesignerEditor's own canvas drag-to-reparent) - this only decides where a
+        // brand-new control's very first placement lands.
         newui::ViewBuilder<Toolbox> toolboxBuilder;
         toolboxBuilder.name("workspaceToolboxPane")
             .configure([this](Toolbox& toolbox) {
@@ -283,9 +314,13 @@ namespace CodeToolsVsix
                     // explicitly, right here, same as rootViewProxy_/
                     // frameProxy_ are above.
                     created->setDesignTime(true);
+                    applyDefaultDesignTimeGeometry(created);
+
+                    newui::SubView* selectedContainer = primarySelectionProvider_ ? primarySelectionProvider_() : nullptr;
+                    newui::SubView* targetParent = ToolboxRegistry::isContainer(selectedContainer) ? selectedContainer : rootViewProxy_;
 
                     if (undoStack_ == nullptr) {
-                        rootViewProxy_->addChild(created);
+                        targetParent->addChild(created);
                         onDesignSurfaceChanged(*this);
                         return newui::SyncReturn::Handled;
                     }
@@ -293,12 +328,12 @@ namespace CodeToolsVsix
                     const newui::reflection::Class* clazz = newui::reflection::classinfo(typeid(*created));
                     newui::UndoableAction action;
                     action.description = "Add " + (clazz != nullptr ? clazz->name() : std::string("Control"));
-                    action.doIt = [this, created]() {
-                        rootViewProxy_->addChild(created);
+                    action.doIt = [this, created, targetParent]() {
+                        targetParent->addChild(created);
                         onDesignSurfaceChanged(*this);
                     };
-                    action.undoIt = [this, created]() {
-                        rootViewProxy_->removeChild(created);
+                    action.undoIt = [this, created, targetParent]() {
+                        targetParent->removeChild(created);
                         onDesignSurfaceChanged(*this);
                     };
                     undoStack_->push(action);

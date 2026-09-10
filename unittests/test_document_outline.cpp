@@ -2,6 +2,8 @@
 #include "../extension/NativeEditControls/ToolboxRegistry.h"
 
 #include <newui/controls.h>
+#include <newui/layout.h>
+#include <newui/mouse_constants.h>
 #include <newui/subview.h>
 
 #include <gtest/gtest.h>
@@ -281,4 +283,187 @@ TEST(DocumentOutlineItem, PaintARealIconBearingRowDoesNotCrash)
         std::vector<std::size_t>{0, 0}, controller);
 
     controller.releaseItem(item);
+}
+
+TEST(DocumentOutline, DraggingARowOntoARealContainerRowFiresOnReparentRequested)
+{
+    auto* outline = new DocumentOutline();
+    newui::SubView root;
+    auto* a = new newui::SubView();
+    a->setName("a");
+    root.addChild(a);
+    auto* container = new newui::SubView();
+    container->setName("container");
+    container->setLayout(std::make_unique<newui::AnchorLayout>());
+    root.addChild(container);
+
+    ViewDesignerModel source;
+    source.setRoot(&root);
+    outline->setViewDesignerModel(&source);
+    outline->treeView()->setBounds(newui::Rect(0, 0, 200, 400));
+
+    std::optional<newui::Rect> aRect = outline->treeView()->rectForPath(std::vector<std::size_t>{0, 0});
+    std::optional<newui::Rect> containerRect = outline->treeView()->rectForPath(std::vector<std::size_t>{0, 1});
+    ASSERT_TRUE(aRect.has_value());
+    ASSERT_TRUE(containerRect.has_value());
+
+    newui::Point aPt(aRect->left() + 5.0f, aRect->top() + aRect->size().height / 2.0f);
+    newui::Point containerPt(containerRect->left() + 5.0f, containerRect->top() + containerRect->size().height / 2.0f);
+
+    newui::SubView* reparentedDragged = nullptr;
+    newui::SubView* reparentedTarget = nullptr;
+    int firedCount = 0;
+    outline->onReparentRequested.add([&](DocumentOutline&, newui::SubView* dragged, newui::SubView* target) {
+        reparentedDragged = dragged;
+        reparentedTarget = target;
+        ++firedCount;
+        return newui::SyncReturn::Handled;
+    });
+
+    outline->treeView()->onMouseDown(*outline->treeView(), aPt, newui::mbmLeftButton, newui::kmUndefined);
+    outline->treeView()->onMouseMove(*outline->treeView(), containerPt, newui::mbmLeftButton, 0);
+
+    auto& controller = static_cast<DocumentOutlineController&>(outline->treeView()->controller());
+    EXPECT_TRUE(controller.isPendingDropTarget(std::vector<std::size_t>{0, 1}));
+
+    outline->treeView()->onMouseUp(*outline->treeView(), containerPt, newui::mbmLeftButton, 0);
+
+    EXPECT_EQ(firedCount, 1);
+    EXPECT_EQ(reparentedDragged, a);
+    EXPECT_EQ(reparentedTarget, container);
+    EXPECT_FALSE(controller.pendingDropTargetPath().has_value());
+
+    delete outline;
+}
+
+TEST(DocumentOutline, DraggingWithinTheSameParentDoesNotFireOnReparentRequested)
+{
+    // Ordinary same-parent reordering isn't a reparent gesture at all (the canvas' own drag has
+    // the identical rule - see DesignerEditor's own "no insertion line during ordinary same-row
+    // reorder" fix) - b and c below share container as their real parent, so dragging one onto
+    // the other must never fire onReparentRequested.
+    auto* outline = new DocumentOutline();
+    newui::SubView root;
+    auto* container = new newui::SubView();
+    container->setName("container");
+    container->setLayout(std::make_unique<newui::FlexLayout>(newui::Orientation::Vertical));
+    root.addChild(container);
+    auto* b = new newui::SubView();
+    b->setName("b");
+    container->addChild(b);
+    auto* c = new newui::SubView();
+    c->setName("c");
+    container->addChild(c);
+
+    ViewDesignerModel source;
+    source.setRoot(&root);
+    outline->setViewDesignerModel(&source);
+    outline->treeView()->controller().setExpanded(std::vector<std::size_t>{0, 0}, true);
+    outline->treeView()->setBounds(newui::Rect(0, 0, 200, 400));
+
+    std::optional<newui::Rect> bRect = outline->treeView()->rectForPath(std::vector<std::size_t>{0, 0, 0});
+    std::optional<newui::Rect> cRect = outline->treeView()->rectForPath(std::vector<std::size_t>{0, 0, 1});
+    ASSERT_TRUE(bRect.has_value());
+    ASSERT_TRUE(cRect.has_value());
+
+    newui::Point bPt(bRect->left() + 5.0f, bRect->top() + bRect->size().height / 2.0f);
+    newui::Point cPt(cRect->left() + 5.0f, cRect->top() + cRect->size().height / 2.0f);
+
+    int firedCount = 0;
+    outline->onReparentRequested.add([&](DocumentOutline&, newui::SubView*, newui::SubView*) {
+        ++firedCount;
+        return newui::SyncReturn::Handled;
+    });
+
+    outline->treeView()->onMouseDown(*outline->treeView(), bPt, newui::mbmLeftButton, newui::kmUndefined);
+    outline->treeView()->onMouseMove(*outline->treeView(), cPt, newui::mbmLeftButton, 0);
+    outline->treeView()->onMouseUp(*outline->treeView(), cPt, newui::mbmLeftButton, 0);
+
+    EXPECT_EQ(firedCount, 0);
+    EXPECT_EQ(b->parent(), container);
+
+    delete outline;
+}
+
+TEST(DocumentOutline, DraggingARowOntoItsOwnDescendantDoesNotFireOnReparentRequested)
+{
+    auto* outline = new DocumentOutline();
+    newui::SubView root;
+    auto* container = new newui::SubView();
+    container->setName("container");
+    container->setLayout(std::make_unique<newui::AnchorLayout>());
+    root.addChild(container);
+    auto* nested = new newui::SubView();
+    nested->setName("nested");
+    nested->setLayout(std::make_unique<newui::AnchorLayout>());
+    container->addChild(nested);
+
+    ViewDesignerModel source;
+    source.setRoot(&root);
+    outline->setViewDesignerModel(&source);
+    outline->treeView()->controller().setExpanded(std::vector<std::size_t>{0, 0}, true);
+    outline->treeView()->setBounds(newui::Rect(0, 0, 200, 400));
+
+    std::optional<newui::Rect> containerRect = outline->treeView()->rectForPath(std::vector<std::size_t>{0, 0});
+    std::optional<newui::Rect> nestedRect = outline->treeView()->rectForPath(std::vector<std::size_t>{0, 0, 0});
+    ASSERT_TRUE(containerRect.has_value());
+    ASSERT_TRUE(nestedRect.has_value());
+
+    newui::Point containerPt(containerRect->left() + 5.0f, containerRect->top() + containerRect->size().height / 2.0f);
+    newui::Point nestedPt(nestedRect->left() + 5.0f, nestedRect->top() + nestedRect->size().height / 2.0f);
+
+    int firedCount = 0;
+    outline->onReparentRequested.add([&](DocumentOutline&, newui::SubView*, newui::SubView*) {
+        ++firedCount;
+        return newui::SyncReturn::Handled;
+    });
+
+    outline->treeView()->onMouseDown(*outline->treeView(), containerPt, newui::mbmLeftButton, newui::kmUndefined);
+    outline->treeView()->onMouseMove(*outline->treeView(), nestedPt, newui::mbmLeftButton, 0);
+    outline->treeView()->onMouseUp(*outline->treeView(), nestedPt, newui::mbmLeftButton, 0);
+
+    EXPECT_EQ(firedCount, 0);
+    EXPECT_EQ(nested->parent(), container);
+
+    delete outline;
+}
+
+TEST(DocumentOutline, DraggingARowOntoANonContainerRowDoesNotFireOnReparentRequested)
+{
+    auto* outline = new DocumentOutline();
+    newui::SubView root;
+    auto* a = new newui::SubView();
+    a->setName("a");
+    root.addChild(a);
+    auto* bareView = new newui::SubView();
+    bareView->setName("bareView");
+    root.addChild(bareView);
+
+    ViewDesignerModel source;
+    source.setRoot(&root);
+    outline->setViewDesignerModel(&source);
+    outline->treeView()->setBounds(newui::Rect(0, 0, 200, 400));
+
+    std::optional<newui::Rect> aRect = outline->treeView()->rectForPath(std::vector<std::size_t>{0, 0});
+    std::optional<newui::Rect> bareRect = outline->treeView()->rectForPath(std::vector<std::size_t>{0, 1});
+    ASSERT_TRUE(aRect.has_value());
+    ASSERT_TRUE(bareRect.has_value());
+
+    newui::Point aPt(aRect->left() + 5.0f, aRect->top() + aRect->size().height / 2.0f);
+    newui::Point barePt(bareRect->left() + 5.0f, bareRect->top() + bareRect->size().height / 2.0f);
+
+    int firedCount = 0;
+    outline->onReparentRequested.add([&](DocumentOutline&, newui::SubView*, newui::SubView*) {
+        ++firedCount;
+        return newui::SyncReturn::Handled;
+    });
+
+    outline->treeView()->onMouseDown(*outline->treeView(), aPt, newui::mbmLeftButton, newui::kmUndefined);
+    outline->treeView()->onMouseMove(*outline->treeView(), barePt, newui::mbmLeftButton, 0);
+    outline->treeView()->onMouseUp(*outline->treeView(), barePt, newui::mbmLeftButton, 0);
+
+    EXPECT_EQ(firedCount, 0);
+    EXPECT_EQ(a->parent(), &root);
+
+    delete outline;
 }

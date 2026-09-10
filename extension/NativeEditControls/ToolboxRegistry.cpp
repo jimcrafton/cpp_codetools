@@ -153,4 +153,9 @@ namespace CodeToolsVsix
     {
         return toolboxIconFor(className);
     }
+
+    bool ToolboxRegistry::isContainer(newui::SubView* view)
+    {
+        return view != nullptr && view->layout() != nullptr;
+    }
 }
