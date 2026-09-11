@@ -16,6 +16,7 @@
 
 using CodeToolsVsix::DocumentOutline;
 using CodeToolsVsix::DocumentOutlineController;
+using CodeToolsVsix::DocumentOutlineDropDisposition;
 using CodeToolsVsix::DocumentOutlineItem;
 using CodeToolsVsix::DocumentOutlineModel;
 using CodeToolsVsix::ToolboxRegistry;
@@ -312,10 +313,13 @@ TEST(DocumentOutline, DraggingARowOntoARealContainerRowFiresOnReparentRequested)
 
     newui::SubView* reparentedDragged = nullptr;
     newui::SubView* reparentedTarget = nullptr;
+    DocumentOutlineDropDisposition reparentedDisposition = DocumentOutlineDropDisposition::Before;
     int firedCount = 0;
-    outline->onReparentRequested.add([&](DocumentOutline&, newui::SubView* dragged, newui::SubView* target) {
+    outline->onDropRequested.add([&](DocumentOutline&, newui::SubView* dragged, newui::SubView* target,
+        DocumentOutlineDropDisposition disposition) {
         reparentedDragged = dragged;
         reparentedTarget = target;
+        reparentedDisposition = disposition;
         ++firedCount;
         return newui::SyncReturn::Handled;
     });
@@ -324,24 +328,25 @@ TEST(DocumentOutline, DraggingARowOntoARealContainerRowFiresOnReparentRequested)
     outline->treeView()->onMouseMove(*outline->treeView(), containerPt, newui::mbmLeftButton, 0);
 
     auto& controller = static_cast<DocumentOutlineController&>(outline->treeView()->controller());
-    EXPECT_TRUE(controller.isPendingDropTarget(std::vector<std::size_t>{0, 1}));
+    EXPECT_EQ(controller.dispositionFor(std::vector<std::size_t>{0, 1}), DocumentOutlineDropDisposition::Into);
 
     outline->treeView()->onMouseUp(*outline->treeView(), containerPt, newui::mbmLeftButton, 0);
 
     EXPECT_EQ(firedCount, 1);
     EXPECT_EQ(reparentedDragged, a);
     EXPECT_EQ(reparentedTarget, container);
-    EXPECT_FALSE(controller.pendingDropTargetPath().has_value());
+    EXPECT_EQ(reparentedDisposition, DocumentOutlineDropDisposition::Into);
+    EXPECT_FALSE(controller.pendingDropTarget().has_value());
 
     delete outline;
 }
 
-TEST(DocumentOutline, DraggingWithinTheSameParentDoesNotFireOnReparentRequested)
+TEST(DocumentOutline, DraggingWithinTheSameParentFiresOnDropRequestedWithABeforeOrAfterDisposition)
 {
-    // Ordinary same-parent reordering isn't a reparent gesture at all (the canvas' own drag has
-    // the identical rule - see DesignerEditor's own "no insertion line during ordinary same-row
-    // reorder" fix) - b and c below share container as their real parent, so dragging one onto
-    // the other must never fire onReparentRequested.
+    // Dropping at a sibling's vertical center (row midpoint) with same-parent siblings that
+    // aren't themselves containers is a reorder gesture now, not silently ignored - b and c
+    // below share container as their real parent, and neither is a container itself, so the
+    // resolved disposition is always Before/After, never Into.
     auto* outline = new DocumentOutline();
     newui::SubView root;
     auto* container = new newui::SubView();
@@ -370,7 +375,14 @@ TEST(DocumentOutline, DraggingWithinTheSameParentDoesNotFireOnReparentRequested)
     newui::Point cPt(cRect->left() + 5.0f, cRect->top() + cRect->size().height / 2.0f);
 
     int firedCount = 0;
-    outline->onReparentRequested.add([&](DocumentOutline&, newui::SubView*, newui::SubView*) {
+    newui::SubView* droppedDragged = nullptr;
+    newui::SubView* droppedReferenceRow = nullptr;
+    DocumentOutlineDropDisposition droppedDisposition = DocumentOutlineDropDisposition::Into;
+    outline->onDropRequested.add([&](DocumentOutline&, newui::SubView* dragged, newui::SubView* referenceRow,
+        DocumentOutlineDropDisposition disposition) {
+        droppedDragged = dragged;
+        droppedReferenceRow = referenceRow;
+        droppedDisposition = disposition;
         ++firedCount;
         return newui::SyncReturn::Handled;
     });
@@ -379,7 +391,13 @@ TEST(DocumentOutline, DraggingWithinTheSameParentDoesNotFireOnReparentRequested)
     outline->treeView()->onMouseMove(*outline->treeView(), cPt, newui::mbmLeftButton, 0);
     outline->treeView()->onMouseUp(*outline->treeView(), cPt, newui::mbmLeftButton, 0);
 
-    EXPECT_EQ(firedCount, 0);
+    EXPECT_EQ(firedCount, 1);
+    EXPECT_EQ(droppedDragged, b);
+    EXPECT_EQ(droppedReferenceRow, c);
+    EXPECT_NE(droppedDisposition, DocumentOutlineDropDisposition::Into);
+    // The mutation itself is DesignerEditor::handleOutlineDropRequested()'s own job (see
+    // test_designer_editor.cpp) - this class only ever detects/reports the gesture, so b's
+    // parent is unaffected by this delegate firing alone.
     EXPECT_EQ(b->parent(), container);
 
     delete outline;
@@ -413,7 +431,8 @@ TEST(DocumentOutline, DraggingARowOntoItsOwnDescendantDoesNotFireOnReparentReque
     newui::Point nestedPt(nestedRect->left() + 5.0f, nestedRect->top() + nestedRect->size().height / 2.0f);
 
     int firedCount = 0;
-    outline->onReparentRequested.add([&](DocumentOutline&, newui::SubView*, newui::SubView*) {
+    outline->onDropRequested.add([&](DocumentOutline&, newui::SubView*, newui::SubView*,
+        DocumentOutlineDropDisposition) {
         ++firedCount;
         return newui::SyncReturn::Handled;
     });
@@ -428,24 +447,41 @@ TEST(DocumentOutline, DraggingARowOntoItsOwnDescendantDoesNotFireOnReparentReque
     delete outline;
 }
 
-TEST(DocumentOutline, DraggingARowOntoANonContainerRowDoesNotFireOnReparentRequested)
+TEST(DocumentOutline, DraggingOntoANonContainerRowInADifferentParentFiresOnDropRequestedBeforeOrAfter)
 {
+    // A row with no layout of its own can never be an Into target, but it can still be a real
+    // Before/After reference point - even across a real parent boundary (containerA vs.
+    // containerB below), a cross-container position-precise insert that only makes sense once
+    // reordering exists at all (DesignerEditor::handleOutlineDropRequested() resolves the actual
+    // new parent as referenceRow->parent(), see test_designer_editor.cpp's own coverage of that
+    // mutation).
     auto* outline = new DocumentOutline();
     newui::SubView root;
+    auto* containerA = new newui::SubView();
+    containerA->setName("containerA");
+    containerA->setLayout(std::make_unique<newui::AnchorLayout>());
+    root.addChild(containerA);
     auto* a = new newui::SubView();
     a->setName("a");
-    root.addChild(a);
+    containerA->addChild(a);
+
+    auto* containerB = new newui::SubView();
+    containerB->setName("containerB");
+    containerB->setLayout(std::make_unique<newui::AnchorLayout>());
+    root.addChild(containerB);
     auto* bareView = new newui::SubView();
     bareView->setName("bareView");
-    root.addChild(bareView);
+    containerB->addChild(bareView);
 
     ViewDesignerModel source;
     source.setRoot(&root);
     outline->setViewDesignerModel(&source);
+    outline->treeView()->controller().setExpanded(std::vector<std::size_t>{0, 0}, true);
+    outline->treeView()->controller().setExpanded(std::vector<std::size_t>{0, 1}, true);
     outline->treeView()->setBounds(newui::Rect(0, 0, 200, 400));
 
-    std::optional<newui::Rect> aRect = outline->treeView()->rectForPath(std::vector<std::size_t>{0, 0});
-    std::optional<newui::Rect> bareRect = outline->treeView()->rectForPath(std::vector<std::size_t>{0, 1});
+    std::optional<newui::Rect> aRect = outline->treeView()->rectForPath(std::vector<std::size_t>{0, 0, 0});
+    std::optional<newui::Rect> bareRect = outline->treeView()->rectForPath(std::vector<std::size_t>{0, 1, 0});
     ASSERT_TRUE(aRect.has_value());
     ASSERT_TRUE(bareRect.has_value());
 
@@ -453,7 +489,12 @@ TEST(DocumentOutline, DraggingARowOntoANonContainerRowDoesNotFireOnReparentReque
     newui::Point barePt(bareRect->left() + 5.0f, bareRect->top() + bareRect->size().height / 2.0f);
 
     int firedCount = 0;
-    outline->onReparentRequested.add([&](DocumentOutline&, newui::SubView*, newui::SubView*) {
+    newui::SubView* droppedReferenceRow = nullptr;
+    DocumentOutlineDropDisposition droppedDisposition = DocumentOutlineDropDisposition::Into;
+    outline->onDropRequested.add([&](DocumentOutline&, newui::SubView*, newui::SubView* referenceRow,
+        DocumentOutlineDropDisposition disposition) {
+        droppedReferenceRow = referenceRow;
+        droppedDisposition = disposition;
         ++firedCount;
         return newui::SyncReturn::Handled;
     });
@@ -462,8 +503,10 @@ TEST(DocumentOutline, DraggingARowOntoANonContainerRowDoesNotFireOnReparentReque
     outline->treeView()->onMouseMove(*outline->treeView(), barePt, newui::mbmLeftButton, 0);
     outline->treeView()->onMouseUp(*outline->treeView(), barePt, newui::mbmLeftButton, 0);
 
-    EXPECT_EQ(firedCount, 0);
-    EXPECT_EQ(a->parent(), &root);
+    EXPECT_EQ(firedCount, 1);
+    EXPECT_EQ(droppedReferenceRow, bareView);
+    EXPECT_NE(droppedDisposition, DocumentOutlineDropDisposition::Into);
+    EXPECT_EQ(a->parent(), containerA);
 
     delete outline;
 }

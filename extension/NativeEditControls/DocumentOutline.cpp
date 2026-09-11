@@ -1,6 +1,7 @@
 #include "DocumentOutline.h"
 #include "ToolboxRegistry.h"
 
+#include <newui/cursor.h>
 #include <newui/fontmanager.h>
 #include <newui/layout.h>
 #include <newui/reflection.h>
@@ -187,10 +188,30 @@ namespace CodeToolsVsix
         Item::paint(ctx, rect);
 
         if (auto* outlineController = dynamic_cast<DocumentOutlineController*>(&controller)) {
-            if (outlineController->isPendingDropTarget(path)) {
-                ctx.set_stroke_style(kDropTargetColor);
-                ctx.set_stroke_width(1.0);
-                ctx.stroke_rect(BLRect(rect.left(), rect.top(), rect.size().width, rect.size().height));
+            if (auto disposition = outlineController->dispositionFor(path)) {
+                switch (*disposition) {
+                case DocumentOutlineDropDisposition::Into:
+                    ctx.set_stroke_style(kDropTargetColor);
+                    ctx.set_stroke_width(1.0);
+                    ctx.stroke_rect(BLRect(rect.left(), rect.top(), rect.size().width, rect.size().height));
+                    break;
+                case DocumentOutlineDropDisposition::Before:
+                case DocumentOutlineDropDisposition::After: {
+                    // A real insertion line, matching the canvas' own LinearReorderPolicy::
+                    // drawCue() styling (2px stroke, rounded end-caps) - drawn at the row's own
+                    // top/bottom edge rather than perpendicular to an orientation, since Outline
+                    // rows are always stacked vertically regardless of the target Layout's own.
+                    double y = *disposition == DocumentOutlineDropDisposition::Before ? rect.top() : rect.bottom();
+                    ctx.set_stroke_style(kDropTargetColor);
+                    ctx.set_stroke_width(2.0);
+                    ctx.stroke_line(rect.left(), y, rect.right(), y);
+                    constexpr double kCapRadius = 3.0;
+                    ctx.set_fill_style(kDropTargetColor);
+                    ctx.fill_circle(rect.left(), y, kCapRadius);
+                    ctx.fill_circle(rect.right(), y, kCapRadius);
+                    break;
+                }
+                }
             }
         }
 
@@ -378,6 +399,58 @@ namespace CodeToolsVsix
         return newui::SyncReturn::Ignored;
     }
 
+    std::optional<DocumentOutlineDropTarget> DocumentOutline::dropTargetAt(const newui::Point& localPt) const
+    {
+        if (draggedView_ == nullptr || model_.source() == nullptr) {
+            return std::nullopt;
+        }
+        auto path = rowPathAt(localPt);
+        if (!path) {
+            return std::nullopt;
+        }
+        newui::SubView* hit = model_.source()->viewAt(*path);
+        if (hit == nullptr) {
+            return std::nullopt;
+        }
+
+        // Excludes dropping onto the dragged view itself or into its own subtree - a real
+        // structural cycle otherwise (View::setParent() already refuses this too, but this class
+        // shouldn't even offer/highlight a gesture it knows is illegal).
+        for (newui::View* v = hit; v != nullptr; v = v->parent()) {
+            if (v == draggedView_) {
+                return std::nullopt;
+            }
+        }
+
+        auto rect = treeView_->rectForPath(*path);
+        if (!rect) {
+            return std::nullopt;
+        }
+        float frac = rect->size().height > 0.0f
+            ? float((localPt.y - rect->top()) / rect->size().height) : 0.5f;
+        bool hitIsContainer = ToolboxRegistry::isContainer(hit);
+
+        // The design root (path {0}) has no siblings inside this tree at all - Before/After
+        // would have nowhere real to land, so it only ever offers Into.
+        if (*path == std::vector<std::size_t>{0}) {
+            return hitIsContainer
+                ? std::optional<DocumentOutlineDropTarget>({*path, DocumentOutlineDropDisposition::Into})
+                : std::nullopt;
+        }
+
+        if (!hitIsContainer) {
+            return DocumentOutlineDropTarget{*path,
+                frac < 0.5f ? DocumentOutlineDropDisposition::Before : DocumentOutlineDropDisposition::After};
+        }
+        if (frac < kEdgeZoneFraction) {
+            return DocumentOutlineDropTarget{*path, DocumentOutlineDropDisposition::Before};
+        }
+        if (frac > 1.0f - kEdgeZoneFraction) {
+            return DocumentOutlineDropTarget{*path, DocumentOutlineDropDisposition::After};
+        }
+        return DocumentOutlineDropTarget{*path, DocumentOutlineDropDisposition::Into};
+    }
+
     newui::SyncReturn DocumentOutline::handleTreeMouseMove(newui::View& /*sender*/, const newui::Point& pt,
         std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/)
     {
@@ -392,24 +465,30 @@ namespace CodeToolsVsix
             dragStarted_ = true;
         }
 
-        newui::SubView* candidate = nullptr;
-        if (auto path = rowPathAt(pt)) {
-            if (newui::SubView* hit = model_.source() != nullptr ? model_.source()->viewAt(*path) : nullptr) {
-                bool isSelfOrDescendant = false;
-                for (newui::View* v = hit; v != nullptr; v = v->parent()) {
-                    if (v == draggedView_) {
-                        isSelfOrDescendant = true;
-                        break;
-                    }
-                }
-                if (!isSelfOrDescendant && hit != draggedView_->parent() && ToolboxRegistry::isContainer(hit)) {
-                    candidate = hit;
-                }
-            }
+        std::optional<DocumentOutlineDropTarget> target = dropTargetAt(pt);
+        outlineController_->setPendingDropTarget(target);
+
+        // Real per-drag cursor feedback - a plain arrow gives no sense a drag is even happening.
+        // No (a crossed-out circle) wherever dropTargetAt() found nothing legal to land on (dead
+        // space, the dragged view's own subtree), a hand over a container row poised to nest
+        // into, up/down resize arrows - the closest stock Win32 shape to "insert vertically" -
+        // over a Before/After insertion-line target.
+        newui::CursorKind cursorKind = newui::CursorKind::No;
+        if (target.has_value()) {
+            cursorKind = target->disposition == DocumentOutlineDropDisposition::Into
+                ? newui::CursorKind::Hand : newui::CursorKind::SizeNS;
+        }
+        treeView_->setCursor(newui::Cursor(cursorKind));
+
+        // TEMPORARY diagnostic - remove once the cursor-during-drag investigation is done.
+        {
+            char buf[256];
+            ::wsprintfA(buf, "[outline] handleTreeMouseMove wantKind=%d readBackKind=%d treeView=%p\n",
+                static_cast<int>(cursorKind), static_cast<int>(treeView_->cursorKind()),
+                static_cast<void*>(treeView_));
+            ::OutputDebugStringA(buf);
         }
 
-        outlineController_->setPendingDropTargetPath(
-            candidate != nullptr ? model_.source()->pathFor(candidate) : std::nullopt);
         treeView_->redraw();
         return newui::SyncReturn::Ignored;
     }
@@ -422,18 +501,19 @@ namespace CodeToolsVsix
         draggedView_ = nullptr;
         dragStarted_ = false;
 
-        std::optional<std::vector<std::size_t>> targetPath = outlineController_->pendingDropTargetPath();
-        outlineController_->setPendingDropTargetPath(std::nullopt);
+        std::optional<DocumentOutlineDropTarget> target = outlineController_->pendingDropTarget();
+        outlineController_->setPendingDropTarget(std::nullopt);
+        treeView_->setCursor(newui::Cursor(newui::CursorKind::Arrow));
         treeView_->redraw();
 
-        if (!started || dragged == nullptr || !targetPath.has_value() || model_.source() == nullptr) {
+        if (!started || dragged == nullptr || !target.has_value() || model_.source() == nullptr) {
             return newui::SyncReturn::Ignored;
         }
-        newui::SubView* target = model_.source()->viewAt(*targetPath);
-        if (target == nullptr) {
+        newui::SubView* referenceRow = model_.source()->viewAt(target->path);
+        if (referenceRow == nullptr) {
             return newui::SyncReturn::Ignored;
         }
-        onReparentRequested(*this, dragged, target);
+        onDropRequested(*this, dragged, referenceRow, target->disposition);
         return newui::SyncReturn::Handled;
     }
 

@@ -4,6 +4,7 @@
 
 #include <newui/rootview.h>
 #include <newui/rootviewproxy.h>
+#include <newui/cursor.h>
 #include <newui/layout.h>
 #include <newui/uicolormanager.h>
 #include <newui/bundle.h>
@@ -210,10 +211,8 @@ namespace CodeToolsVsix
         selectionOverlay_->setReparentTargetProvider([this]() { return reparentTargets(); });
         root->setOverlay(std::move(selectionOverlay));
         root->onMouseDown.add(this, &DesignerEditor::handleMouseDownForSelection);
-        root->onMouseMove.add(this, &DesignerEditor::handleMouseMoveForResize);
-        root->onMouseUp.add(this, &DesignerEditor::handleMouseUpForResize);
-        root->onMouseMove.add(this, &DesignerEditor::handleMouseMoveForMove);
-        root->onMouseUp.add(this, &DesignerEditor::handleMouseUpForMove);
+        root->onMouseMove.add(this, &DesignerEditor::handleMouseMove);
+        root->onMouseUp.add(this, &DesignerEditor::handleMouseUp);
 
         // root's own onKeyDown only fires when nothing else has focus
         // (RootView::keyEvent(), rootview.cpp - it dispatches to
@@ -240,7 +239,7 @@ namespace CodeToolsVsix
         viewDesignerController_.setModel(&viewDesignerModel_);
         workspace_->documentOutlinePane()->setViewDesignerModel(&viewDesignerModel_);
         workspace_->documentOutlinePane()->onSelectionActivated.add(this, &DesignerEditor::handleOutlineSelectionActivated);
-        workspace_->documentOutlinePane()->onReparentRequested.add(this, &DesignerEditor::handleOutlineReparentRequested);
+        workspace_->documentOutlinePane()->onDropRequested.add(this, &DesignerEditor::handleOutlineDropRequested);
         workspace_->onDesignSurfaceChanged.add(this, &DesignerEditor::handleDesignSurfaceChanged);
 
         // undoStack_ backs PropertiesGrid's own undo-aware property
@@ -353,7 +352,7 @@ namespace CodeToolsVsix
 
         // Arms a potential move-drag for whatever's selected now (empty if target was null and
         // nothing else was already selected, or if a Ctrl+click just toggled the only selected
-        // view off) - handleMouseMoveForMove()/handleMouseUpForMove() do nothing at all while
+        // view off) - handleMouseMove()/handleMouseUp() do nothing with a move-drag at all while
         // moveDragEntries_ is empty. A view with no real parent() (shouldn't happen for anything
         // actually attached to the tree, but real - a freshly-toolbox-created, not-yet-attached
         // instance could theoretically reach here) is skipped rather than captured with a null
@@ -367,17 +366,21 @@ namespace CodeToolsVsix
         // LayoutEditingPolicy.h's own FreePosition/LinearReorder/GridCell policies.
         moveDragEntries_.clear();
         moveDragStarted_ = false;
+        // TEMPORARY diagnostic - remove once the "no move-drag entry armed" investigation is done.
+        
         if (target != nullptr) {
             moveDragStartPt_ = pt;
             for (newui::SubView* view : viewDesignerController_.selected()) {
                 newui::View* parent = view->parent();
-                if (parent == nullptr) {
+                if (parent == nullptr) {                    
                     continue;
                 }
                 const LayoutEditingPolicy& policy = policyFor(parent->layout());
                 if (policy.kind() == GeometryEditKind::None) {
+                    
                     continue;
                 }
+                
                 newui::Rect startBounds = view->bounds();
                 GeometryDragContext ctx;
                 ctx.view = view;
@@ -639,18 +642,16 @@ namespace CodeToolsVsix
         return newui::SyncReturn::Handled;
     }
 
-    newui::SyncReturn DesignerEditor::handleMouseMoveForResize(newui::View& /*sender*/, const newui::Point& pt,
+    newui::SyncReturn DesignerEditor::handleMouseMove(newui::View& /*sender*/, const newui::Point& pt,
         std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/)
     {
+        // CanvasWell's own resize-guide drag takes priority - handleMouseDownForSelection() never
+        // arms a move-drag at all once beginResizeDrag() has already claimed the click, so the two
+        // gestures are mutually exclusive by construction; check first regardless.
         CanvasWell* canvasWell = workspace_ ? workspace_->canvasWell() : nullptr;
-        if (canvasWell == nullptr) {
-            return newui::SyncReturn::Ignored;
-        }
-
-        newui::Rect canvasWellBounds = SelectionOverlay::boundsInRootView(canvasWell);
-        newui::Point canvasLocalPt(pt.x - canvasWellBounds.left(), pt.y - canvasWellBounds.top());
-
-        if (canvasWell->isResizingDrag()) {
+        if (canvasWell != nullptr && canvasWell->isResizingDrag()) {
+            newui::Rect canvasWellBounds = SelectionOverlay::boundsInRootView(canvasWell);
+            newui::Point canvasLocalPt(pt.x - canvasWellBounds.left(), pt.y - canvasWellBounds.top());
             canvasWell->continueResizeDrag(canvasLocalPt);
             // Same reasoning as setupUI()'s/load()'s own markDirty() calls -
             // nothing else asks Windows to repaint just because
@@ -659,77 +660,92 @@ namespace CodeToolsVsix
             return newui::SyncReturn::Handled;
         }
 
-        // Not dragging - still gives hover feedback (a resize cursor) when
-        // the mouse is over a grabbable guide line.
-        canvasWell->updateHoverCursor(canvasLocalPt);
+        if (!moveDragEntries_.empty()) {
+            if (!moveDragStarted_) {
+                // Squared-distance compare - same threshold test, no sqrt needed.
+                newui::Point delta = pt - moveDragStartPt_;
+                float distSq = delta.x * delta.x + delta.y * delta.y;
+                if (distSq < kMoveDragThresholdPixels * kMoveDragThresholdPixels) {
+                    return newui::SyncReturn::Ignored;
+                }
+                moveDragStarted_ = true;
+            }
+
+            for (MoveDragEntry& entry : moveDragEntries_) {
+                GeometryDragContext ctx = dragContextFor(entry, pt);
+                entry.lastResult = entry.policy->resolve(ctx);
+                entry.lastPt = pt;
+                entry.policy->applyPreview(ctx, entry.lastResult);
+
+                // Cross-container reparenting - works for any source policy kind (FreePosition,
+                // LinearReorder, GridCell), not just FreePosition: the within-parent
+                // resolve()/applyPreview() above keeps running exactly as it always did (harmless
+                // to keep computing a FlexLayout reorder/grid-cell placement even once the cursor
+                // hovers over a different container - it just settles at whichever end/cell that
+                // math lands on until a real drop happens). Always hit-tests (no "only once outside
+                // parent's own bounds" gate - a real, caught bug: once parent is rootViewProxy()
+                // itself, every nested sibling container is *within* its bounds, so that gate could
+                // never fire for the "move a top-level child into a nested container" direction at
+                // all) - findReparentTargetAt() already excludes entry.view's own subtree from the
+                // hit-test, so this is cheap and correct even while hovering directly over the
+                // dragged view's own live position. On drop, buildReparentAction() doesn't care what
+                // the source policy was - only entry.startResult (already tracked regardless of
+                // kind) and target's own policy matter.
+                entry.pendingReparentTarget = nullptr;
+                newui::SubView* candidate = findReparentTargetAt(pt, entry.view);
+                if (candidate != nullptr && candidate != entry.parent) {
+                    entry.pendingReparentTarget = candidate;
+                }
+
+                // Real per-drag cursor feedback, same "a plain arrow gives no sense a drag is even
+                // happening" reasoning as Document Outline's own drag cursor - a hand once this
+                // entry has found a real cross-container reparent target, an ordinary move
+                // (four-way arrow) otherwise. Set directly on entry.view, the actual dragged
+                // control - NOT root/sender: RootView::cursorTargetAt() (rootview.cpp) resolves
+                // whichever View WM_SETCURSOR reads via a live hit-test whenever nothing is
+                // captured (always true here, since a dragged canvas control is design-time
+                // content, which capturedSubView_ never holds - see resolveInteractiveHit()), and
+                // that hit-test always lands on the dragged view itself while its drag is live
+                // (hitTestExcluding()'s own comment: the cursor never leaves its own bounds mid-
+                // drag) - setting the cursor anywhere else is invisible, a real bug this
+                // consolidation also fixes.
+                entry.view->cursor().setCursorKind(
+                    entry.pendingReparentTarget != nullptr ? newui::CursorKind::Hand : newui::CursorKind::SizeAll);
+            }
+
+            // Same reasoning as this method's own CanvasWell-drag branch above - nothing else asks
+            // Windows to repaint just because applyPreview() moved/reordered/re-celled these views
+            // (or just because a drag cue now needs painting where it didn't before).
+            getRootView()->markDirty();
+            return newui::SyncReturn::Handled;
+        }
+
+        // Neither gesture is active - root->onMouseMove fires for every mouse move anywhere in the
+        // whole window, not just while actually hovering canvasWell, so only give it hover
+        // feedback while pt is genuinely within its own real bounds (a real, found bug: this used
+        // to call updateHoverCursor() unconditionally regardless of pt, so canvasWell's own
+        // resize-guide hover/cursor logic ran - and kept resetting its cursor to Arrow - on every
+        // single move, even while the cursor was over some other pane entirely that happens to sit
+        // in front of/around its own screen area).
+        if (canvasWell != nullptr) {
+            newui::Rect canvasWellBounds = SelectionOverlay::boundsInRootView(canvasWell);
+            if (canvasWellBounds.contains(pt)) {
+                newui::Point canvasLocalPt(pt.x - canvasWellBounds.left(), pt.y - canvasWellBounds.top());
+                canvasWell->updateHoverCursor(canvasLocalPt);
+            }
+        }
         return newui::SyncReturn::Ignored;
     }
 
-    newui::SyncReturn DesignerEditor::handleMouseUpForResize(newui::View& /*sender*/, const newui::Point& /*pt*/,
+    newui::SyncReturn DesignerEditor::handleMouseUp(newui::View& /*sender*/, const newui::Point& pt,
         std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/)
     {
         CanvasWell* canvasWell = workspace_ ? workspace_->canvasWell() : nullptr;
-        if (canvasWell == nullptr || !canvasWell->isResizingDrag()) {
-            return newui::SyncReturn::Ignored;
-        }
-        canvasWell->endResizeDrag();
-        return newui::SyncReturn::Handled;
-    }
-
-    newui::SyncReturn DesignerEditor::handleMouseMoveForMove(newui::View& /*sender*/, const newui::Point& pt,
-        std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/)
-    {
-        if (moveDragEntries_.empty()) {
-            return newui::SyncReturn::Ignored;
+        if (canvasWell != nullptr && canvasWell->isResizingDrag()) {
+            canvasWell->endResizeDrag();
+            return newui::SyncReturn::Handled;
         }
 
-        if (!moveDragStarted_) {
-            // Squared-distance compare - same threshold test, no sqrt needed.
-            newui::Point delta = pt - moveDragStartPt_;
-            float distSq = delta.x * delta.x + delta.y * delta.y;
-            if (distSq < kMoveDragThresholdPixels * kMoveDragThresholdPixels) {
-                return newui::SyncReturn::Ignored;
-            }
-            moveDragStarted_ = true;
-        }
-
-        for (MoveDragEntry& entry : moveDragEntries_) {
-            GeometryDragContext ctx = dragContextFor(entry, pt);
-            entry.lastResult = entry.policy->resolve(ctx);
-            entry.lastPt = pt;
-            entry.policy->applyPreview(ctx, entry.lastResult);
-
-            // Cross-container reparenting - works for any source policy kind (FreePosition,
-            // LinearReorder, GridCell), not just FreePosition: the within-parent
-            // resolve()/applyPreview() above keeps running exactly as it always did (harmless
-            // to keep computing a FlexLayout reorder/grid-cell placement even once the cursor
-            // hovers over a different container - it just settles at whichever end/cell that
-            // math lands on until a real drop happens). Always hit-tests (no "only once outside
-            // parent's own bounds" gate - a real, caught bug: once parent is rootViewProxy()
-            // itself, every nested sibling container is *within* its bounds, so that gate could
-            // never fire for the "move a top-level child into a nested container" direction at
-            // all) - findReparentTargetAt() already excludes entry.view's own subtree from the
-            // hit-test, so this is cheap and correct even while hovering directly over the
-            // dragged view's own live position. On drop, buildReparentAction() doesn't care what
-            // the source policy was - only entry.startResult (already tracked regardless of
-            // kind) and target's own policy matter.
-            entry.pendingReparentTarget = nullptr;
-            newui::SubView* candidate = findReparentTargetAt(pt, entry.view);
-            if (candidate != nullptr && candidate != entry.parent) {
-                entry.pendingReparentTarget = candidate;
-            }
-        }
-
-        // Same reasoning as handleMouseMoveForResize()'s own markDirty() call - nothing else asks
-        // Windows to repaint just because applyPreview() moved/reordered/re-celled these views (or
-        // just because a drag cue now needs painting where it didn't before).
-        getRootView()->markDirty();
-        return newui::SyncReturn::Handled;
-    }
-
-    newui::SyncReturn DesignerEditor::handleMouseUpForMove(newui::View& /*sender*/, const newui::Point& pt,
-        std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/)
-    {
         if (moveDragEntries_.empty()) {
             return newui::SyncReturn::Ignored;
         }
@@ -738,6 +754,11 @@ namespace CodeToolsVsix
         moveDragEntries_.clear();
         bool started = moveDragStarted_;
         moveDragStarted_ = false;
+        // Restores each dragged view's own cursor - see handleMouseMove()'s own comment on why
+        // this has to be set on the actual dragged view, never root/sender.
+        for (MoveDragEntry& entry : entries) {
+            entry.view->cursor().setCursorKind(newui::CursorKind::Arrow);
+        }
 
         // A plain click, or a real mouse-down/up pair that never crossed
         // kMoveDragThresholdPixels, leaves every view exactly where applyPreview() never touched -
@@ -803,20 +824,93 @@ namespace CodeToolsVsix
         return newui::SyncReturn::Ignored;
     }
 
-    newui::SyncReturn DesignerEditor::handleOutlineReparentRequested(DocumentOutline& /*sender*/,
-        newui::SubView* dragged, newui::SubView* target)
+    newui::SyncReturn DesignerEditor::handleOutlineDropRequested(DocumentOutline& /*sender*/,
+        newui::SubView* dragged, newui::SubView* referenceRow, DocumentOutlineDropDisposition disposition)
     {
-        if (dragged == nullptr || target == nullptr) {
+        if (dragged == nullptr || referenceRow == nullptr) {
             return newui::SyncReturn::Ignored;
         }
         newui::View* oldParent = dragged->parent();
-        if (oldParent == nullptr || oldParent == target) {
+        if (oldParent == nullptr) {
             return newui::SyncReturn::Ignored;
         }
 
+        // Into means "become a child of referenceRow itself"; Before/After mean "become a
+        // sibling of referenceRow, in referenceRow's own real parent" - referenceRow can never be
+        // dragged itself or one of its own descendants (DocumentOutline::dropTargetAt() already
+        // refuses that gesture outright), so newParent can never be dragged or a descendant of it
+        // either.
+        newui::View* newParent = disposition == DocumentOutlineDropDisposition::Into
+            ? static_cast<newui::View*>(referenceRow) : referenceRow->parent();
+        if (newParent == nullptr) {
+            return newui::SyncReturn::Ignored;
+        }
+
+        // Desired index within newParent's real children once dragged is (or would be) taken out
+        // of it - the same "list after the dragged view is removed" convention View::
+        // reorderChild()/LinearReorderPolicy already use. Into always means "append at the end"
+        // (the loop never breaks early, so targetIndex ends up counting every other real child);
+        // Before/After mean "adjacent to referenceRow", computed identically whether newParent is
+        // dragged's current parent (a pure reorder) or a different one (a position-precise
+        // reparent).
+        std::size_t targetIndex = 0;
+        for (newui::SubView* sibling : newParent->childViews()) {
+            if (sibling == dragged) {
+                continue;
+            }
+            if (disposition != DocumentOutlineDropDisposition::Into && sibling == referenceRow) {
+                break;
+            }
+            ++targetIndex;
+        }
+        if (disposition == DocumentOutlineDropDisposition::After) {
+            ++targetIndex;
+        }
+
+        std::size_t startIndex = 0;
+        for (newui::SubView* sibling : oldParent->childViews()) {
+            if (sibling == dragged) {
+                break;
+            }
+            ++startIndex;
+        }
+
+        if (newParent == oldParent && targetIndex == startIndex) {
+            // A genuine no-op (already exactly there) - matches this file's own established
+            // "don't push a no-op undo entry" restraint elsewhere (handleMouseUp, Delete).
+            return newui::SyncReturn::Ignored;
+        }
+
+        if (newParent == oldParent) {
+            // A pure reorder - no placement to preserve, the governing Layout already repaints
+            // every sibling in its new position via updateLayout(), same as the canvas' own
+            // LinearReorderPolicy.
+            newui::UndoableAction action;
+            action.description = "Reorder Control";
+            action.doIt = [this, dragged, newParent, targetIndex]() {
+                newParent->reorderChild(dragged, targetIndex);
+                viewDesignerModel_.refresh();
+                markDirty();
+                getRootView()->markDirty();
+            };
+            action.undoIt = [this, dragged, oldParent, startIndex]() {
+                oldParent->reorderChild(dragged, startIndex);
+                viewDesignerModel_.refresh();
+                markDirty();
+                getRootView()->markDirty();
+            };
+            undoStack_.push(action);
+            return newui::SyncReturn::Handled;
+        }
+
+        // Crosses a real parent boundary - same on-screen-position-preserving reparent this
+        // handler always did for Into, now followed by an explicit reorderChild() to land at the
+        // requested index (a no-op for Into, which already wants the end) instead of wherever
+        // commit() would otherwise resolve/append it.
+        //
         // No live drag here (see this method's own header comment) - dragged->bounds() right now
-        // is both the undo target (oldCtx.startBounds below) and, converted into target's local
-        // space, the "on-screen position preserved" placement buildReparentAction() itself
+        // is both the undo target (oldCtx.startBounds below) and, converted into newParent's
+        // local space, the "on-screen position preserved" placement buildReparentAction() itself
         // computes from a real drag's current point instead.
         newui::Rect startBounds = dragged->bounds();
         const LayoutEditingPolicy& oldPolicy = policyFor(oldParent->layout());
@@ -827,32 +921,34 @@ namespace CodeToolsVsix
         GeometryEditResult startResult = oldPolicy.resolve(oldCtx);
 
         newui::Rect viewRootLocalBounds = SelectionOverlay::boundsInRootView(dragged);
-        newui::Point targetRootLocalOrigin = SelectionOverlay::boundsInRootView(target).pos();
+        newui::Point targetRootLocalOrigin = SelectionOverlay::boundsInRootView(newParent).pos();
         newui::Rect targetLocalBounds(
             viewRootLocalBounds.left() - targetRootLocalOrigin.x, viewRootLocalBounds.top() - targetRootLocalOrigin.y,
             viewRootLocalBounds.size().width, viewRootLocalBounds.size().height);
 
         GeometryDragContext newCtx;
         newCtx.view = dragged;
-        newCtx.parent = target;
+        newCtx.parent = newParent;
         newCtx.startBounds = targetLocalBounds;
-        const LayoutEditingPolicy& newPolicy = policyFor(target->layout());
+        const LayoutEditingPolicy& newPolicy = policyFor(newParent->layout());
         GeometryEditResult newResult = newPolicy.resolve(newCtx);
         newui::UndoableAction newPlacement = newPolicy.commit(newCtx, newResult, newResult);
         newui::UndoableAction oldPlacement = oldPolicy.commit(oldCtx, startResult, startResult);
 
         newui::UndoableAction action;
         action.description = "Reparent Control";
-        action.doIt = [this, dragged, target, doIt = newPlacement.doIt]() {
-            dragged->setParent(target);
+        action.doIt = [this, dragged, newParent, targetIndex, doIt = newPlacement.doIt]() {
+            dragged->setParent(newParent);
             doIt();
+            newParent->reorderChild(dragged, targetIndex);
             viewDesignerModel_.refresh();
             markDirty();
             getRootView()->markDirty();
         };
-        action.undoIt = [this, dragged, oldParent, doIt = oldPlacement.doIt]() {
+        action.undoIt = [this, dragged, oldParent, startIndex, doIt = oldPlacement.doIt]() {
             dragged->setParent(oldParent);
             doIt();
+            oldParent->reorderChild(dragged, startIndex);
             viewDesignerModel_.refresh();
             markDirty();
             getRootView()->markDirty();

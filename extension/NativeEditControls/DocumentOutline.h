@@ -15,6 +15,30 @@
 
 namespace CodeToolsVsix
 {
+    // What a drag-and-drop drop onto a given row actually means, resolved from which third of
+    // the row's own rect the cursor is over (DocumentOutline::dropTargetAt()) - the same
+    // "insertion line vs. drop-into box" split most real tree UIs use. Into is only ever offered
+    // for a row that's a real container (ToolboxRegistry::isContainer()); a non-container row can
+    // only ever be Before/After (there's nothing to nest into).
+    enum class DocumentOutlineDropDisposition
+    {
+        Before,
+        Into,
+        After,
+    };
+
+    // One resolved drop target - the row path plus what dropping there right now would mean.
+    struct DocumentOutlineDropTarget
+    {
+        std::vector<std::size_t> path;
+        DocumentOutlineDropDisposition disposition = DocumentOutlineDropDisposition::Into;
+
+        bool operator==(const DocumentOutlineDropTarget& other) const
+        {
+            return path == other.path && disposition == other.disposition;
+        }
+    };
+
     // The TreeView-shaped adapter Document Outline's newui::TreeView
     // actually binds to (TreeController::setModel() requires a real
     // TreeModel*, which ViewDesignerModel deliberately isn't - it's a
@@ -83,15 +107,20 @@ namespace CodeToolsVsix
         float iconSize() const override { return kIconSize; }
         float iconGap() const override { return kIconGap; }
 
-        // The row a drag-and-drop reparent is currently poised to drop onto, if any - set by
-        // DocumentOutline's own mouse handling, read by DocumentOutlineItem::paint() to draw a
-        // highlight. nullopt (the default) draws nothing extra.
-        void setPendingDropTargetPath(std::optional<std::vector<std::size_t>> path) { pendingDropTargetPath_ = std::move(path); }
-        const std::optional<std::vector<std::size_t>>& pendingDropTargetPath() const { return pendingDropTargetPath_; }
-        bool isPendingDropTarget(const std::vector<std::size_t>& path) const { return pendingDropTargetPath_ == path; }
+        // The drag-and-drop drop this row is currently poised to receive, if any - set by
+        // DocumentOutline's own mouse handling, read by DocumentOutlineItem::paint() to draw
+        // either the Into highlight box or a Before/After insertion line. nullopt (the default)
+        // draws nothing extra.
+        void setPendingDropTarget(std::optional<DocumentOutlineDropTarget> target) { pendingDropTarget_ = std::move(target); }
+        const std::optional<DocumentOutlineDropTarget>& pendingDropTarget() const { return pendingDropTarget_; }
+        std::optional<DocumentOutlineDropDisposition> dispositionFor(const std::vector<std::size_t>& path) const
+        {
+            return pendingDropTarget_.has_value() && pendingDropTarget_->path == path
+                ? std::optional<DocumentOutlineDropDisposition>(pendingDropTarget_->disposition) : std::nullopt;
+        }
 
     private:
-        std::optional<std::vector<std::size_t>> pendingDropTargetPath_;
+        std::optional<DocumentOutlineDropTarget> pendingDropTarget_;
     };
 
     // The Document Outline pane (designer-plan.md 6.1 item 4) - a real
@@ -149,17 +178,20 @@ namespace CodeToolsVsix
         typedef newui::Delegate<DocumentOutline, const std::vector<newui::SubView*>&> SelectionActivatedDelegate;
         SelectionActivatedDelegate onSelectionActivated;
 
-        // Real drag-and-drop reparenting - mouse-down on a row arms a potential drag (a
-        // kDragThresholdPixels dead zone before it counts as one, same ordinary click-vs-drag
-        // distinction the canvas' own Move drag already uses), mouse-move hit-tests which
-        // *other* row is under the cursor and highlights it via the controller's own
-        // setPendingDropTargetPath(), mouse-up fires this if a real, different, legitimate
-        // container (ToolboxRegistry::isContainer()) was found there. This class only ever
-        // detects/reports the gesture - DesignerEditor wires it to the real, undo-aware
-        // View::setParent() call, same "expose a hook, don't reach into the owner" shape
-        // onSelectionActivated above already established.
-        typedef newui::Delegate<DocumentOutline, newui::SubView*, newui::SubView*> ReparentRequestedDelegate;
-        ReparentRequestedDelegate onReparentRequested;
+        // Real drag-and-drop reparenting AND same/cross-parent reordering, unified - mouse-down
+        // on a row arms a potential drag (a kDragThresholdPixels dead zone before it counts as
+        // one, same ordinary click-vs-drag distinction the canvas' own Move drag already uses),
+        // mouse-move hit-tests which row is under the cursor and resolves what dropping there
+        // right now would mean via dropTargetAt() (highlighted through the controller's own
+        // setPendingDropTarget()), mouse-up fires this with whatever that last resolved to. This
+        // class only ever detects/reports the gesture - DesignerEditor wires it to the real,
+        // undo-aware View::setParent()/reorderChild() calls, same "expose a hook, don't reach
+        // into the owner" shape onSelectionActivated above already established. referenceRow is
+        // the row the cursor was actually over (a container to nest into for Into, or the
+        // sibling to land next to for Before/After) - DesignerEditor resolves the real target
+        // parent from it (referenceRow itself for Into, referenceRow->parent() otherwise).
+        typedef newui::Delegate<DocumentOutline, newui::SubView*, newui::SubView*, DocumentOutlineDropDisposition> DropRequestedDelegate;
+        DropRequestedDelegate onDropRequested;
 
         // Exposed for testability - same convention Toolbox::treeView()
         // already uses.
@@ -185,7 +217,21 @@ namespace CodeToolsVsix
         // cleverer lookup.
         std::optional<std::vector<std::size_t>> rowPathAt(const newui::Point& localPt) const;
 
+        // Resolves the full drop gesture at localPt - hit-tests the row, excludes draggedView_
+        // itself and its own descendants (would create a structural cycle), then reads which
+        // third of the hit row's rect localPt falls in to decide Before/Into/After (a
+        // non-container row only ever offers Before/After - see DocumentOutlineDropDisposition's
+        // own comment; the design root, path {0}, has no siblings inside this tree so it only
+        // ever offers Into). nullopt whenever there's nothing draggable to report.
+        std::optional<DocumentOutlineDropTarget> dropTargetAt(const newui::Point& localPt) const;
+
         static constexpr float kDragThresholdPixels = 3.0f;
+
+        // How much of a container row's own height, at its top/bottom edge, still means
+        // Before/After rather than Into - matches the visual "insertion line" zone most real
+        // tree UIs use (a plain non-container row has no middle Into zone at all - see
+        // dropTargetAt()).
+        static constexpr float kEdgeZoneFraction = 0.25f;
 
         DocumentOutlineModel model_;
         newui::TreeView* treeView_ = nullptr;

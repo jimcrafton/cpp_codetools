@@ -119,28 +119,24 @@ namespace CodeToolsVsix
         newui::SyncReturn handleMouseDownForSelection(newui::View& sender, const newui::Point& pt,
             std::uint32_t btnMask, std::uint32_t keyMask);
 
-        // Continues/ends a CanvasWell resize drag started above, or (when
-        // not dragging) just updates its hover cursor - hooked onto root's
-        // own onMouseMove/onMouseUp for the same "fires unconditionally,
-        // before hit-testing" reason handleMouseDownForSelection() is.
-        newui::SyncReturn handleMouseMoveForResize(newui::View& sender, const newui::Point& pt,
+        // One authoritative onMouseMove/onMouseUp pair for root, covering both CanvasWell's
+        // resize-guide drag and the canvas selection's own Move drag - deliberately NOT two
+        // independent listeners on the same delegate (a real, found bug: Delegate<> calls every
+        // listener unconditionally on every event, so two unrelated handlers each mutating shared
+        // state - the cursor, especially - with no awareness of each other risks them fighting
+        // over it). The two gestures are mutually exclusive by construction (handleMouseDownFor
+        // Selection() never arms a move-drag when beginResizeDrag() already claimed the click), so
+        // checking "is CanvasWell mid-resize" first, then "is a move-drag active", then falling
+        // back to plain CanvasWell hover feedback, is an unambiguous priority order, not a guess.
+        // Cursor feedback during either gesture is set directly on whatever View is actually being
+        // dragged (entry.view/canvasWell), never on root/sender - RootView::cursorTargetAt()
+        // (rootview.cpp) resolves whichever View WM_SETCURSOR actually reads from a *live
+        // hit-test* at the current point whenever nothing is captured (true for any design-time
+        // view, which a dragged canvas control always is), so setting the cursor anywhere else has
+        // no visible effect at all - a real bug this consolidation also fixes.
+        newui::SyncReturn handleMouseMove(newui::View& sender, const newui::Point& pt,
             std::uint32_t btnMask, std::uint32_t keyMask);
-        newui::SyncReturn handleMouseUpForResize(newui::View& sender, const newui::Point& pt,
-            std::uint32_t btnMask, std::uint32_t keyMask);
-
-        // Moving the current canvas selection (designer-plan.md's deferred "Move" piece, built
-        // after Add/Delete) - a separate onMouseMove/onMouseUp pair rather than folded into the
-        // CanvasWell-resize handlers above (those are about dragging the artboard's own guide
-        // lines, an unrelated gesture; Delegate<> already supports more than one listener on the
-        // same root->onMouseMove/onMouseUp). Live feedback during the drag is a plain setBounds()
-        // per dragged view (works the same regardless of whether that view's real parent has a
-        // Layout of its own - a view nested in a layout-managed container just snaps back to
-        // wherever that Layout puts it next, an accepted, honest gap rather than special-cased
-        // away); only mouseUp commits one real UndoableAction, and only for a real, nonzero total
-        // drag - a plain click that never actually moved the mouse pushes nothing.
-        newui::SyncReturn handleMouseMoveForMove(newui::View& sender, const newui::Point& pt,
-            std::uint32_t btnMask, std::uint32_t keyMask);
-        newui::SyncReturn handleMouseUpForMove(newui::View& sender, const newui::Point& pt,
+        newui::SyncReturn handleMouseUp(newui::View& sender, const newui::Point& pt,
             std::uint32_t btnMask, std::uint32_t keyMask);
 
         // Deletes the current canvas selection (viewDesignerController_.
@@ -166,16 +162,20 @@ namespace CodeToolsVsix
         // since it's already showing exactly this selection).
         newui::SyncReturn handleOutlineSelectionActivated(DocumentOutline& sender, const std::vector<newui::SubView*>& views);
 
-        // Document Outline's own drag-and-drop reparent gesture (DocumentOutline::
-        // onReparentRequested) - unlike buildReparentAction() above, there's no live drag/
-        // drop-point to speak of here (the outline's own mouse handling only detects the
-        // gesture, see DocumentOutline.h's own comment), so dragged's real, current bounds()
-        // stand in for both "where it starts" (undo target) and "where it visually is right
-        // now" (converted into target's local space, the same on-screen-position-preserving
-        // placement buildReparentAction() itself does) - pushes one real UndoableAction onto
-        // undoStack_ directly, since there's no larger multi-entry gesture to compose into
-        // like handleMouseUpForMove() has.
-        newui::SyncReturn handleOutlineReparentRequested(DocumentOutline& sender, newui::SubView* dragged, newui::SubView* target);
+        // Document Outline's own drag-and-drop gesture (DocumentOutline::onDropRequested) -
+        // covers both reparenting (disposition Into) and same/cross-parent reordering
+        // (Before/After), unified into one handler since the real mutation is the same shape
+        // either way: resolve the real target parent + index, then setParent()/reorderChild().
+        // Unlike buildReparentAction() above, there's no live drag/drop-point to speak of here
+        // (the outline's own mouse handling only detects the gesture, see DocumentOutline.h's
+        // own comment), so dragged's real, current bounds() stand in for both "where it starts"
+        // (undo target) and "where it visually is right now" (converted into the new parent's
+        // local space, the same on-screen-position-preserving placement buildReparentAction()
+        // itself does) whenever the parent actually changes - pushes one real UndoableAction onto
+        // undoStack_ directly, since there's no larger multi-entry gesture to compose into like
+        // handleMouseUp() has.
+        newui::SyncReturn handleOutlineDropRequested(DocumentOutline& sender, newui::SubView* dragged,
+            newui::SubView* referenceRow, DocumentOutlineDropDisposition disposition);
 
         // Refreshes viewDesignerModel_ after Workspace's own Toolbox-add
         // wiring mutates rootViewProxy()'s children directly (see
@@ -204,13 +204,13 @@ namespace CodeToolsVsix
         // setBounds() itself takes). policy is resolved once, at mouseDown, from parent->layout()
         // (see handleMouseDownForSelection()) - startResult is what policy->resolve() returned at
         // that same moment (zero delta), the undo target; lastResult is updated on every
-        // handleMouseMoveForMove() call, the redo/doIt target and what drawCue() paints against.
+        // handleMouseMove() call, the redo/doIt target and what drawCue() paints against.
         // pendingReparentTarget is non-null only while the drag point sits outside parent's own
         // bounds AND a different real container was found under the cursor there (see
         // findReparentTargetAt()) - tracked regardless of the source policy kind
         // (FreePosition/LinearReorder/GridCell); the within-parent resolve()/applyPreview() keeps
         // running unchanged the whole time (harmless even once the cursor is outside the
-        // container - see handleMouseMoveForMove()'s own comment), buildReparentAction() takes
+        // container - see handleMouseMove()'s own comment), buildReparentAction() takes
         // over on drop if this ends up set.
         struct MoveDragEntry {
             newui::SubView* view;
@@ -268,7 +268,7 @@ namespace CodeToolsVsix
         // selectionOverlay_->setReparentTargetProvider() in setupUI().
         std::vector<newui::SubView*> reparentTargets() const;
 
-        // Below this many pixels of total mouse movement since mouseDown, handleMouseMoveForMove()
+        // Below this many pixels of total mouse movement since mouseDown, handleMouseMove()
         // doesn't touch bounds() at all - a real, caught bug otherwise: with no threshold at all,
         // an ordinary click-to-select (armed the same as any potential drag, see
         // handleMouseDownForSelection()'s own comment) still generates at least one WM_MOUSEMOVE

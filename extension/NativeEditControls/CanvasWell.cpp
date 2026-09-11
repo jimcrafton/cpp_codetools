@@ -238,13 +238,13 @@ namespace CodeToolsVsix
         ResizeEdge edge = (resizing_ != ResizeEdge::None) ? resizing_ : resizeEdgeAt(localPt);
         switch (edge) {
             case ResizeEdge::Vertical:
-                setCursor(newui::Cursor(newui::CursorKind::SizeWE));
+                cursor().setCursorKind(newui::CursorKind::SizeWE);
                 break;
             case ResizeEdge::Horizontal:
-                setCursor(newui::Cursor(newui::CursorKind::SizeNS));
+                cursor().setCursorKind(newui::CursorKind::SizeNS);
                 break;
             default:
-                setCursor(newui::Cursor(newui::CursorKind::Arrow));
+                cursor().setCursorKind(newui::CursorKind::Arrow);
                 break;
         }
     }

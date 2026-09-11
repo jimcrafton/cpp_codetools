@@ -732,7 +732,7 @@ TEST_F(DesignerEditorFileFixture, DraggingOutsideAnyContainerFallsBackToRootView
 TEST(DesignerEditor, OutlineReparentRequestedMovesTheDraggedViewAndIsUndoAware)
 {
     // Document Outline's own drag gesture only detects/reports (DocumentOutline::
-    // onReparentRequested) - DesignerEditor::handleOutlineReparentRequested() is what actually
+    // onDropRequested) - DesignerEditor::handleOutlineDropRequested() is what actually
     // performs the real, undo-aware View::setParent() mutation. Fire the delegate directly, same
     // "real public Delegate calls are an approved exception" convention the canvas' own
     // root.onMouseDown()/onMouseMove()/onMouseUp() drag tests already use.
@@ -759,7 +759,7 @@ TEST(DesignerEditor, OutlineReparentRequestedMovesTheDraggedViewAndIsUndoAware)
 
     CodeToolsVsix::DocumentOutline* outline = editor.workspace()->documentOutlinePane();
     ASSERT_NE(outline, nullptr);
-    outline->onReparentRequested(*outline, control, target);
+    outline->onDropRequested(*outline, control, target, CodeToolsVsix::DocumentOutlineDropDisposition::Into);
 
     ASSERT_EQ(target->childViews().size(), 1u);
     EXPECT_EQ(target->childViews()[0], control);
@@ -791,10 +791,194 @@ TEST(DesignerEditor, OutlineReparentRequestedIgnoresADropOntoTheDraggedViewsOwnC
 
     CodeToolsVsix::DocumentOutline* outline = editor.workspace()->documentOutlinePane();
     ASSERT_NE(outline, nullptr);
-    outline->onReparentRequested(*outline, control, surface);
+    outline->onDropRequested(*outline, control, surface, CodeToolsVsix::DocumentOutlineDropDisposition::Into);
 
     EXPECT_FALSE(editor.undoStack().canUndo());
     EXPECT_EQ(control->parent(), surface);
+}
+
+TEST(DesignerEditor, OutlineDropRequestedReordersWithinTheSameParent)
+{
+    // Same-parent Before/After is a pure reorder, not a reparent - a, b, c share container as
+    // their real parent throughout; dropping a After b must land the list as [b, a, c] and be
+    // undo-aware, with no parent change at all.
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&root);
+    ASSERT_NE(editor.workspace(), nullptr);
+    root.setBounds(newui::Rect(0, 0, 1400, 700));
+
+    newui::RootViewProxy* surface = editor.workspace()->rootViewProxy();
+    ASSERT_NE(surface, nullptr);
+
+    auto* container = new newui::SubView();
+    container->setName("container");
+    container->setLayout(std::make_unique<newui::FlexLayout>(newui::Orientation::Vertical));
+    surface->addChild(container);
+
+    auto* a = new newui::SubView();
+    a->setName("a");
+    container->addChild(a);
+    auto* b = new newui::SubView();
+    b->setName("b");
+    container->addChild(b);
+    auto* c = new newui::SubView();
+    c->setName("c");
+    container->addChild(c);
+
+    CodeToolsVsix::DocumentOutline* outline = editor.workspace()->documentOutlinePane();
+    ASSERT_NE(outline, nullptr);
+    outline->onDropRequested(*outline, a, b, CodeToolsVsix::DocumentOutlineDropDisposition::After);
+
+    ASSERT_EQ(container->childViews().size(), 3u);
+    EXPECT_EQ(container->childViews()[0], b);
+    EXPECT_EQ(container->childViews()[1], a);
+    EXPECT_EQ(container->childViews()[2], c);
+    EXPECT_EQ(a->parent(), container);
+
+    ASSERT_TRUE(editor.undoStack().canUndo());
+    editor.undoStack().undo();
+
+    ASSERT_EQ(container->childViews().size(), 3u);
+    EXPECT_EQ(container->childViews()[0], a);
+    EXPECT_EQ(container->childViews()[1], b);
+    EXPECT_EQ(container->childViews()[2], c);
+}
+
+TEST(DesignerEditor, OutlineDropRequestedBeforeASiblingLandsAtThatSiblingsRealIndex)
+{
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&root);
+    ASSERT_NE(editor.workspace(), nullptr);
+    root.setBounds(newui::Rect(0, 0, 1400, 700));
+
+    newui::RootViewProxy* surface = editor.workspace()->rootViewProxy();
+    ASSERT_NE(surface, nullptr);
+
+    auto* container = new newui::SubView();
+    container->setName("container");
+    container->setLayout(std::make_unique<newui::FlexLayout>(newui::Orientation::Vertical));
+    surface->addChild(container);
+
+    auto* a = new newui::SubView();
+    a->setName("a");
+    container->addChild(a);
+    auto* b = new newui::SubView();
+    b->setName("b");
+    container->addChild(b);
+    auto* c = new newui::SubView();
+    c->setName("c");
+    container->addChild(c);
+
+    CodeToolsVsix::DocumentOutline* outline = editor.workspace()->documentOutlinePane();
+    ASSERT_NE(outline, nullptr);
+    // c dropped Before a - moves to the very front.
+    outline->onDropRequested(*outline, c, a, CodeToolsVsix::DocumentOutlineDropDisposition::Before);
+
+    ASSERT_EQ(container->childViews().size(), 3u);
+    EXPECT_EQ(container->childViews()[0], c);
+    EXPECT_EQ(container->childViews()[1], a);
+    EXPECT_EQ(container->childViews()[2], b);
+}
+
+TEST(DesignerEditor, OutlineDropRequestedIntoOwnParentMovesToTheEndAndIsUndoAware)
+{
+    // Dropping directly on the parent's own row is now a real gesture (Into, referenceRow ==
+    // the dragged view's current parent) rather than a silent no-op - it means "move to the end
+    // of this same list", exercised here with a already at the front.
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&root);
+    ASSERT_NE(editor.workspace(), nullptr);
+    root.setBounds(newui::Rect(0, 0, 1400, 700));
+
+    newui::RootViewProxy* surface = editor.workspace()->rootViewProxy();
+    ASSERT_NE(surface, nullptr);
+
+    auto* container = new newui::SubView();
+    container->setName("container");
+    container->setLayout(std::make_unique<newui::FlexLayout>(newui::Orientation::Vertical));
+    surface->addChild(container);
+
+    auto* a = new newui::SubView();
+    a->setName("a");
+    container->addChild(a);
+    auto* b = new newui::SubView();
+    b->setName("b");
+    container->addChild(b);
+
+    CodeToolsVsix::DocumentOutline* outline = editor.workspace()->documentOutlinePane();
+    ASSERT_NE(outline, nullptr);
+    outline->onDropRequested(*outline, a, container, CodeToolsVsix::DocumentOutlineDropDisposition::Into);
+
+    ASSERT_EQ(container->childViews().size(), 2u);
+    EXPECT_EQ(container->childViews()[0], b);
+    EXPECT_EQ(container->childViews()[1], a);
+
+    ASSERT_TRUE(editor.undoStack().canUndo());
+    editor.undoStack().undo();
+
+    ASSERT_EQ(container->childViews().size(), 2u);
+    EXPECT_EQ(container->childViews()[0], a);
+    EXPECT_EQ(container->childViews()[1], b);
+}
+
+TEST(DesignerEditor, OutlineDropRequestedBeforeASiblingInADifferentContainerReparentsAtThatIndex)
+{
+    // Position-precise cross-container insert - dropping Before a specific row in a *different*
+    // container reparents into that row's own real parent, landing exactly at its index, not
+    // just appended at the end (the pre-existing Into behavior).
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&root);
+    ASSERT_NE(editor.workspace(), nullptr);
+    root.setBounds(newui::Rect(0, 0, 1400, 700));
+
+    newui::RootViewProxy* surface = editor.workspace()->rootViewProxy();
+    ASSERT_NE(surface, nullptr);
+
+    auto* source = new newui::SubView();
+    source->setName("source");
+    source->setLayout(std::make_unique<newui::AnchorLayout>());
+    surface->addChild(source);
+
+    auto* control = new newui::SubView();
+    control->setName("control");
+    control->setVisible(true);
+    control->setBounds(newui::Rect(5, 5, 20, 20));
+    source->addChild(control);
+
+    auto* target = new newui::SubView();
+    target->setName("target");
+    target->setBounds(newui::Rect(200, 10, 100, 100));
+    target->setLayout(std::make_unique<newui::FlexLayout>(newui::Orientation::Vertical));
+    surface->addChild(target);
+
+    auto* x = new newui::SubView();
+    x->setName("x");
+    target->addChild(x);
+    auto* y = new newui::SubView();
+    y->setName("y");
+    target->addChild(y);
+
+    CodeToolsVsix::DocumentOutline* outline = editor.workspace()->documentOutlinePane();
+    ASSERT_NE(outline, nullptr);
+    // control dropped Before y (inside target, a different container than source).
+    outline->onDropRequested(*outline, control, y, CodeToolsVsix::DocumentOutlineDropDisposition::Before);
+
+    EXPECT_EQ(control->parent(), target);
+    ASSERT_EQ(target->childViews().size(), 3u);
+    EXPECT_EQ(target->childViews()[0], x);
+    EXPECT_EQ(target->childViews()[1], control);
+    EXPECT_EQ(target->childViews()[2], y);
+    EXPECT_TRUE(source->childViews().empty());
+
+    ASSERT_TRUE(editor.undoStack().canUndo());
+    editor.undoStack().undo();
+
+    EXPECT_EQ(control->parent(), source);
+    ASSERT_EQ(source->childViews().size(), 1u);
+    EXPECT_EQ(source->childViews()[0], control);
+    ASSERT_EQ(target->childViews().size(), 2u);
+    EXPECT_EQ(target->childViews()[0], x);
+    EXPECT_EQ(target->childViews()[1], y);
 }
 
 TEST_F(DesignerEditorFileFixture, LoadFailsForAMissingFile)
