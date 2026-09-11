@@ -1,0 +1,36 @@
+﻿cmd : 'vswhere.exe' is not recognized as an internal or external command,
+At line:1 char:302
++ ... tch {} } }; cmd /c '"C:\Program Files\Microsoft Visual Studio\18\Comm ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ('vswhere.exe' i...ternal command,:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+operable program or batch file.
+**********************************************************************
+** Visual Studio 2026 Developer Command Prompt v18.0
+** Copyright (c) 2026 Microsoft Corporation
+**********************************************************************
+[vcvarsall.bat] Environment initialized for: 'x64'
+MSBuild version 18.8.2+ce25c0108 for .NET Framework
+
+  Checking File Globs
+  blend2d.vcxproj -> D:\code\cpp_codetools\build\_deps\newui-build\3rdparty\blend2d\Debug\blend2d.lib
+  Generating cpptools/version.h (incrementing build number)
+  cpptools.vcxproj -> D:\code\cpp_codetools\build\Debug\cpptools.lib
+  gtest.vcxproj -> D:\code\cpp_codetools\build\lib\Debug\gtest.lib
+  gtest_main.vcxproj -> D:\code\cpp_codetools\build\lib\Debug\gtest_main.lib
+  Generating newui/version.h (incrementing build number)
+  reflectgen_sizeof_probe.vcxproj -> D:\code\cpp_codetools\build\_deps\newui-build\tools\reflectgen\src\Debug\reflectgen_sizeof_probe.exe
+  newui.cpp
+  newui.vcxproj -> D:\code\cpp_codetools\build\_deps\newui-build\Debug\newui.lib
+  DesignerEditor.cpp
+  DocumentOutline.cpp
+  NativeEditor.cpp
+  Workspace.cpp
+  test_canvas_well.cpp
+  test_designer_editor.cpp
+  test_document_outline.cpp
+  test_workspace.cpp
+  Generating Code...
+  nativeeditcontrols_tests.vcxproj -> D:\code\cpp_codetools\build\unittests\Debug\nativeeditcontrols_tests.exe
+  Copying libclang.dll for nativeeditcontrols_tests	Copying resources for nativeeditcontrols_tests
