@@ -1,4 +1,5 @@
 #include "PropertiesGrid.h"
+#include "LayoutEditingPolicy.h"
 #include "TextEncoding.h"
 
 #include <newui/rootview.h>
@@ -81,6 +82,13 @@ namespace CodeToolsVsix
         parentPickerCandidates_.clear();
     }
 
+    void PropertiesGrid::markSelectedViewDirty()
+    {
+        if (newui::SubView* view = model_.selected()) {
+            view->style().markDirty();
+        }
+    }
+
     void PropertiesGrid::rebuildLiveEditor()
     {
         destroyLiveEditor();
@@ -124,6 +132,26 @@ namespace CodeToolsVsix
         }
         liveEditor_->setUndoStack(undoStack_);
         liveEditorSubIndex_ = isSubProperty ? std::optional<std::size_t>(node.subPropertyIndex) : std::nullopt;
+
+        // "bounds" specifically (see Node::readOnly's own comment, PropertiesModel.h - this row
+        // is only ever reachable here at all once that gating has already confirmed the owning
+        // View's real parent affords free positioning) - keeps AnchorLayoutParams in sync with
+        // whatever bounds() ends up being after this commit (or after an undo/redo of it), the
+        // same real trap FreePositionPolicy::commit() already guards against for a canvas drag.
+        // model_.selected() is used here rather than node.ownerInstance precisely because this
+        // class already knows it's a real newui::SubView* - PropertyEditor/RectPropertyEditor
+        // themselves deliberately don't assume that (see setPostCommitSync()'s own comment).
+        if (node.property != nullptr && node.property->name() == "bounds") {
+            newui::SubView* view = model_.selected();
+            liveEditor_->setPostCommitSync([view]() {
+                newui::View* parent = view != nullptr ? view->parent() : nullptr;
+                auto* anchorLayout = parent != nullptr ? dynamic_cast<newui::AnchorLayout*>(parent->layout()) : nullptr;
+                if (anchorLayout != nullptr) {
+                    applyFreePositionAnchorParams(view, view->bounds());
+                    parent->updateLayout();
+                }
+            });
+        }
 
         std::string initialText = isSubProperty
             ? liveEditor_->subPropertyValueAsString(node.subPropertyIndex) : liveEditor_->valueAsString();
@@ -259,9 +287,9 @@ namespace CodeToolsVsix
         }
 
         PropertiesModel::Node node = model_.nodeAt(*path);
-        bool isEditable = node.kind == PropertiesModel::Kind::PropertyLeaf
+        bool isEditable = (node.kind == PropertiesModel::Kind::PropertyLeaf
             || node.kind == PropertiesModel::Kind::SubPropertyEntry
-            || node.kind == PropertiesModel::Kind::ParentPicker;
+            || node.kind == PropertiesModel::Kind::ParentPicker) && !node.readOnly;
         if (!isEditable) {
             return;
         }
@@ -339,6 +367,7 @@ namespace CodeToolsVsix
             } else {
                 liveEditor_->setValueFromString(text);
             }
+            markSelectedViewDirty();
             treeView_->style().markDirty();
         }
         return newui::SyncReturn::Ignored;
@@ -395,6 +424,8 @@ namespace CodeToolsVsix
         // property, so liveEditorSubIndex_ is never set here.
         if (liveEditor_ != nullptr) {
             liveEditor_->setValueFromString(sender.isChecked() ? "true" : "false");
+            markSelectedViewDirty();
+            treeView_->style().markDirty();
         }
         return newui::SyncReturn::Handled;
     }
@@ -427,6 +458,8 @@ namespace CodeToolsVsix
         std::any value = sender.model()->value(*sender.selectedIndex());
         if (const std::string* text = std::any_cast<std::string>(&value)) {
             liveEditor_->setValueFromString(*text);
+            markSelectedViewDirty();
+            treeView_->style().markDirty();
         }
         return newui::SyncReturn::Handled;
     }

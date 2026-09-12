@@ -6,6 +6,8 @@
 
 #include <gtest/gtest.h>
 
+#include <memory>
+
 using newui::reflection::Class;
 using newui::reflection::classinfo;
 using newui::reflection::Delegate;
@@ -251,6 +253,123 @@ TEST_F(PropertiesModelTest, BoundsExpandsIntoFourSyntheticSubPropertyRows)
         ASSERT_NE(editor, nullptr) << kNames[i];
         EXPECT_FLOAT_EQ(std::stof(editor->subPropertyValueAsString(child.subPropertyIndex)), kValues[i]) << kNames[i];
     }
+}
+
+// ---------------------------------------------------------------------------
+// Node::readOnly - the BOUNDS-editing-vs-governing-Layout gap this whole
+// LayoutEditingPolicy capability model was eventually meant to close (see
+// bluesky's own long-standing note): "bounds" must not present as freely
+// editable once its owning View's real parent Layout affords something other
+// than free pixel positioning (LinearReorder/GridCell/None), since a directly
+// typed edit there would be silently lost/reverted on the very next relayout.
+// ---------------------------------------------------------------------------
+
+TEST_F(PropertiesModelTest, BoundsIsReadOnlyWhenTheParentHasAFlexLayout)
+{
+    newui::SubView container;
+    container.setName("container");
+    container.setLayout(std::make_unique<newui::FlexLayout>());
+    container.addChild(&button_);
+    model_.setSelection(&button_);
+
+    std::size_t boundsIndex = properties_.size();
+    for (std::size_t i = 0; i < properties_.size(); ++i) {
+        if (properties_[i]->name() == "bounds") {
+            boundsIndex = i;
+            break;
+        }
+    }
+    ASSERT_LT(boundsIndex, properties_.size());
+    boundsIndex += 1;  // the synthetic ParentPicker row (button_ now has a real parent) shifts
+                        // every real property index by one - see showsParentPicker()'s own comment.
+
+    PropertiesModel::Node boundsNode = model_.nodeAt({boundsIndex});
+    ASSERT_EQ(boundsNode.kind, PropertiesModel::Kind::PropertySubGroup);
+    EXPECT_TRUE(boundsNode.readOnly);
+    EXPECT_NE(boundsNode.readOnlyReason.find("FlexLayout"), std::string::npos) << boundsNode.readOnlyReason;
+
+    // Every synthetic x/y/width/height child inherits the same readOnly/reason from its own
+    // PropertySubGroup parent - PropertiesGrid never builds a live editor for any of them either
+    // way, but PropertyItem's own paint() dims each one individually.
+    for (std::size_t i = 0; i < 4; ++i) {
+        PropertiesModel::Node child = model_.nodeAt({boundsIndex, i});
+        EXPECT_TRUE(child.readOnly) << i;
+        EXPECT_EQ(child.readOnlyReason, boundsNode.readOnlyReason) << i;
+    }
+
+    container.removeChild(&button_);
+}
+
+TEST_F(PropertiesModelTest, BoundsStaysEditableWhenTheParentHasAnAnchorLayoutOrNoLayoutAtAll)
+{
+    newui::SubView anchoredContainer;
+    anchoredContainer.setName("anchoredContainer");
+    anchoredContainer.setLayout(std::make_unique<newui::AnchorLayout>());
+    anchoredContainer.addChild(&button_);
+    model_.setSelection(&button_);
+
+    std::size_t boundsIndex = properties_.size();
+    for (std::size_t i = 0; i < properties_.size(); ++i) {
+        if (properties_[i]->name() == "bounds") {
+            boundsIndex = i;
+            break;
+        }
+    }
+    ASSERT_LT(boundsIndex, properties_.size());
+    boundsIndex += 1;
+
+    PropertiesModel::Node boundsNode = model_.nodeAt({boundsIndex});
+    EXPECT_FALSE(boundsNode.readOnly);
+    EXPECT_TRUE(boundsNode.readOnlyReason.empty());
+
+    anchoredContainer.removeChild(&button_);
+
+    // No layout at all (button_'s own real parent for every other test in this file) is the same
+    // "freely editable" case - already exercised by BoundsExpandsIntoFourSyntheticSubPropertyRows
+    // above, which never sets a parent at all (readOnly defaults to false, untouched).
+}
+
+// A real, live-caught bug: newui::ViewStyle::backgroundFill() used to be const-only
+// (`const gfx::Fill&`), which reflection.h's own property() addressability rule explicitly
+// excludes (requires a non-const lvalue reference) - so despite gfx::Fill being a real,
+// reflectable Class, this fell all the way through classifyProperty() to Kind::PropertyUnsupported
+// in the actual running app, invisible to every other test in this file (none of which ever
+// walked into "style" -> "backgroundFill" specifically) and to newui's own reflection tests
+// (which only ever checked gfx::Fill's own data, or ViewStyle's class hierarchy, never
+// backgroundFill's own addressability). Fixed in newui by giving backgroundFill() a non-const
+// overload too (same pair-shape as View::style() itself) - this test exists so a future regression
+// here fails immediately, at the same layer (PropertiesModel) the real bug actually showed up in.
+TEST_F(PropertiesModelTest, BackgroundFillUnderStyleIsARealPropertyGroupNotUnsupported)
+{
+    std::size_t styleIndex = properties_.size();
+    for (std::size_t i = 0; i < properties_.size(); ++i) {
+        if (properties_[i]->name() == "style") {
+            styleIndex = i;
+            break;
+        }
+    }
+    ASSERT_LT(styleIndex, properties_.size()) << "expected newui::Button to have a real \"style\" property";
+    ASSERT_EQ(model_.nodeAt({styleIndex}).kind, PropertiesModel::Kind::PropertyGroup);
+
+    const Class* styleClass = properties_[styleIndex]->getClass(&button_);
+    ASSERT_NE(styleClass, nullptr);
+    std::vector<const Property*> styleProperties;
+    styleClass->allProperties(styleProperties);
+
+    std::size_t backgroundFillIndex = styleProperties.size();
+    for (std::size_t i = 0; i < styleProperties.size(); ++i) {
+        if (styleProperties[i]->name() == "backgroundFill") {
+            backgroundFillIndex = i;
+            break;
+        }
+    }
+    ASSERT_LT(backgroundFillIndex, styleProperties.size())
+        << "expected the real style class to have a real \"backgroundFill\" property";
+
+    PropertiesModel::Node backgroundFillNode = model_.nodeAt({styleIndex, backgroundFillIndex});
+    EXPECT_EQ(backgroundFillNode.kind, PropertiesModel::Kind::PropertyGroup)
+        << "backgroundFill must be a real, addressable PropertyGroup (newui::gfx::Fill), not (unsupported)";
+    EXPECT_NE(backgroundFillNode.kind, PropertiesModel::Kind::PropertyUnsupported);
 }
 
 TEST_F(PropertiesModelTest, OutOfRangeRootIndexIsInvalid)

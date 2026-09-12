@@ -8,6 +8,7 @@
 #include <newui/view.h>
 
 #include <any>
+#include <string>
 #include <vector>
 
 namespace CodeToolsVsix
@@ -91,6 +92,19 @@ namespace CodeToolsVsix
             // PropertySubGroup node; this is the synthetic child's own
             // index into PropertyEditor::subPropertyNames().
             std::size_t subPropertyIndex = 0;
+            // Kind::PropertySubGroup/SubPropertyEntry only, set for "bounds" specifically once its
+            // owning View's real parent Layout affords something other than free pixel
+            // positioning (see boundsReadOnlyReason(), PropertiesModel.cpp) - LinearReorder/
+            // GridCell/None all mean some or all of bounds is actually computed by that Layout, so
+            // committing a directly-typed edit here would either be silently reverted on the next
+            // relayout or (LinearReorder/GridCell) never even land where typed. PropertiesGrid
+            // refuses to build a live editor at all once this is true; PropertyItem shows
+            // readOnlyReason instead of pretending the field is freely editable. Deliberately
+            // whole-Rect, not per-axis (e.g. a FlexLayout row still leaves the cross-axis size
+            // free in principle) - GeometryEditKind itself has no per-axis granularity today, so
+            // this matches that same resolution rather than inventing a finer one.
+            bool readOnly = false;
+            std::string readOnlyReason;
         };
 
         // Re-points at a newly-selected object (nullptr clears to an empty

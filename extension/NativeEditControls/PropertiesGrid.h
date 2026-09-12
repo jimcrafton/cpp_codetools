@@ -134,6 +134,17 @@ namespace CodeToolsVsix
         void buildParentPickerLiveEditor(const PropertiesModel::Node& node, const newui::Rect& valueRect);
         void destroyLiveEditor();
 
+        // Real, live-caught bug this exists to close: every live-editor commit path already marks
+        // treeView_'s own style dirty (so the row's own text/swatch/checkbox updates), but nothing
+        // ever asked the *selected View itself* to repaint - for a property that actually changes
+        // how the selected View looks (a style field, not just its own row in this grid), the
+        // canvas kept showing stale pixels until some unrelated event (a resize, forcing a full
+        // buffer clear) happened to repaint it. Called from every live-editor commit handler
+        // (text/toggle/dropdown) after the value is actually committed - a no-op if nothing is
+        // selected (matches this project's own "guard the corresponding real state, don't assume"
+        // convention, e.g. ViewStyle::markDirty()'s own null checks).
+        void markSelectedViewDirty();
+
         // Explicitly claims real keyboard focus for liveEditorView_ - a
         // real, reported bug otherwise: this View is created *during* the
         // very RootView::mouseDown() dispatch that activated it (this

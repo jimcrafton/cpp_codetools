@@ -257,6 +257,93 @@ namespace CodeToolsVsix
         commitValue(std::any(updated));
     }
 
+    std::string FontPropertyEditor::valueAsString() const
+    {
+        newui::Font f = std::any_cast<newui::Font>(rawValue());
+        return f.name() + ", " + formatFloat(f.size());
+    }
+
+    std::optional<std::any> FontPropertyEditor::parseValue(const std::string& text) const
+    {
+        std::size_t comma = text.find(',');
+        if (comma == std::string::npos) {
+            return std::nullopt;
+        }
+        std::string name = text.substr(0, comma);
+        std::size_t nameLast = name.find_last_not_of(" \t");
+        name = nameLast == std::string::npos ? std::string() : name.substr(0, nameLast + 1);
+
+        std::string sizeToken = text.substr(comma + 1);
+        std::size_t first = sizeToken.find_first_not_of(" \t");
+        std::size_t last = sizeToken.find_last_not_of(" \t");
+        if (first == std::string::npos) {
+            return std::nullopt;
+        }
+        sizeToken = sizeToken.substr(first, last - first + 1);
+
+        try {
+            std::size_t consumed = 0;
+            float size = std::stof(sizeToken, &consumed);
+            if (consumed != sizeToken.size()) {
+                return std::nullopt;
+            }
+            newui::Font f = std::any_cast<newui::Font>(rawValue());
+            f.setName(name);
+            f.setSize(size);
+            return std::any(f);
+        } catch (const std::exception&) {
+            return std::nullopt;
+        }
+    }
+
+    std::string FontPropertyEditor::subPropertyValueAsString(std::size_t index) const
+    {
+        newui::Font f = std::any_cast<newui::Font>(rawValue());
+        switch (index) {
+        case 0: return f.name();
+        case 1: return formatFloat(f.size());
+        case 2: return f.bold() ? "true" : "false";
+        case 3: return f.italic() ? "true" : "false";
+        case 4: return f.underlined() ? "true" : "false";
+        default: return f.strikeThrough() ? "true" : "false";
+        }
+    }
+
+    void FontPropertyEditor::setSubPropertyValueFromString(std::size_t index, const std::string& text)
+    {
+        newui::Font f = std::any_cast<newui::Font>(rawValue());
+        switch (index) {
+        case 0:
+            f.setName(text);
+            break;
+        case 1: {
+            try {
+                std::size_t consumed = 0;
+                float size = std::stof(text, &consumed);
+                if (consumed != text.size()) {
+                    return;
+                }
+                f.setSize(size);
+            } catch (const std::exception&) {
+                return;
+            }
+            break;
+        }
+        default: {
+            std::string lower = toLower(text);
+            bool checked = lower == "true" || lower == "1" || lower == "yes";
+            switch (index) {
+            case 2: f.setBold(checked); break;
+            case 3: f.setItalic(checked); break;
+            case 4: f.setUnderlined(checked); break;
+            default: f.setStrikeThrough(checked); break;
+            }
+            break;
+        }
+        }
+        commitValue(std::any(f));
+    }
+
     std::string EnumPropertyEditor::valueAsString() const
     {
         std::uint64_t value = enum_->toUInt64(rawValue());
@@ -289,21 +376,127 @@ namespace CodeToolsVsix
         return names;
     }
 
+    std::string FlagsEnumPropertyEditor::valueAsString() const
+    {
+        std::uint64_t value = enum_->toUInt64(rawValue());
+        std::vector<std::string> names = enum_->decompose(value);
+        std::string joined;
+        for (std::size_t i = 0; i < names.size(); ++i) {
+            if (i > 0) {
+                joined += " | ";
+            }
+            joined += names[i];
+        }
+        return joined;
+    }
+
+    std::optional<std::any> FlagsEnumPropertyEditor::parseValue(const std::string& text) const
+    {
+        // Mirrors valueAsString()'s own " | "-joined format - not reachable from the grid itself
+        // (a flags row is always edited one checkbox at a time, via setSubPropertyValueFromString()
+        // below), but kept real/correct rather than a stub, matching every other PropertyEditor's
+        // own parseValue() contract.
+        std::uint64_t combined = 0;
+        std::size_t start = 0;
+        while (start <= text.size()) {
+            std::size_t bar = text.find('|', start);
+            std::string token = text.substr(start, bar == std::string::npos ? std::string::npos : bar - start);
+            std::size_t first = token.find_first_not_of(" \t");
+            std::size_t last = token.find_last_not_of(" \t");
+            if (first != std::string::npos) {
+                std::uint64_t bit = 0;
+                if (!enum_->tryParse(token.substr(first, last - first + 1), bit)) {
+                    return std::nullopt;
+                }
+                combined |= bit;
+            }
+            if (bar == std::string::npos) {
+                break;
+            }
+            start = bar + 1;
+        }
+        std::any result = enum_->fromUInt64(combined);
+        if (!result.has_value()) {
+            return std::nullopt;
+        }
+        return result;
+    }
+
+    std::vector<std::string> FlagsEnumPropertyEditor::subPropertyNames() const
+    {
+        std::vector<std::string> names;
+        for (const auto& v : enum_->values()) {
+            // A zero-value entry (e.g. "None") isn't a real bit to toggle - Enum::decompose()
+            // itself skips these the same way (reflection.h) when picking candidate flag names.
+            if (v.value != 0) {
+                names.push_back(v.name);
+            }
+        }
+        return names;
+    }
+
+    std::string FlagsEnumPropertyEditor::subPropertyValueAsString(std::size_t index) const
+    {
+        std::vector<std::string> names = subPropertyNames();
+        if (index >= names.size()) {
+            return "false";
+        }
+        std::uint64_t flagValue = 0;
+        enum_->tryParse(names[index], flagValue);
+        std::uint64_t current = enum_->toUInt64(rawValue());
+        return (flagValue != 0 && (current & flagValue) == flagValue) ? "true" : "false";
+    }
+
+    void FlagsEnumPropertyEditor::setSubPropertyValueFromString(std::size_t index, const std::string& text)
+    {
+        std::vector<std::string> names = subPropertyNames();
+        if (index >= names.size()) {
+            return;
+        }
+        std::uint64_t flagValue = 0;
+        if (!enum_->tryParse(names[index], flagValue) || flagValue == 0) {
+            return;
+        }
+
+        std::string lower = toLower(text);
+        bool checked = lower == "true" || lower == "1" || lower == "yes";
+
+        std::uint64_t current = enum_->toUInt64(rawValue());
+        std::uint64_t updated = checked ? (current | flagValue) : (current & ~flagValue);
+        std::any newValue = enum_->fromUInt64(updated);
+        if (newValue.has_value()) {
+            commitValue(newValue);
+        }
+    }
+
     void PropertyEditor::commitValue(const std::any& newValue) const
     {
         if (undoStack_ == nullptr) {
             setRawValue(newValue);
+            if (postCommitSync_) {
+                postCommitSync_();
+            }
             return;
         }
 
         const newui::reflection::Property* property = property_;
         void* instance = instance_;
         std::any oldValue = rawValue();
+        PostCommitSync sync = postCommitSync_;
 
         newui::UndoableAction action;
         action.description = "Change " + property_->name();
-        action.doIt = [property, instance, newValue] { property->set(instance, newValue); };
-        action.undoIt = [property, instance, oldValue] { property->set(instance, oldValue); };
+        // sync() (if any) runs after property->set() in *both* directions, reading whatever the
+        // property's own value now is - see setPostCommitSync()'s own comment for why this lives
+        // here rather than in a per-instance side call outside the undo system.
+        action.doIt = [property, instance, newValue, sync] {
+            property->set(instance, newValue);
+            if (sync) { sync(); }
+        };
+        action.undoIt = [property, instance, oldValue, sync] {
+            property->set(instance, oldValue);
+            if (sync) { sync(); }
+        };
         undoStack_->push(std::move(action));  // push() calls doIt() immediately
     }
 
@@ -374,6 +567,9 @@ namespace CodeToolsVsix
             // why this can't just be another registerEditor() entry).
             if (const newui::reflection::Enum* enumInfo =
                     newui::reflection::ReflectionRegistry::getEnum(property->type())) {
+                if (enumInfo->isFlags()) {
+                    return std::make_unique<FlagsEnumPropertyEditor>(property, instance, enumInfo);
+                }
                 return std::make_unique<EnumPropertyEditor>(property, instance, enumInfo);
             }
             return nullptr;
@@ -404,5 +600,7 @@ namespace CodeToolsVsix
             [](const newui::reflection::Property* p, void* instance) { return std::make_unique<SizePropertyEditor>(p, instance); });
         registerEditor(std::type_index(typeid(newui::Rect)),
             [](const newui::reflection::Property* p, void* instance) { return std::make_unique<RectPropertyEditor>(p, instance); });
+        registerEditor(std::type_index(typeid(newui::Font)),
+            [](const newui::reflection::Property* p, void* instance) { return std::make_unique<FontPropertyEditor>(p, instance); });
     }
 }

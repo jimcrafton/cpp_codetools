@@ -295,6 +295,15 @@ namespace CodeToolsVsix
                     const newui::reflection::Class* nested = node.property->getClass(node.ownerInstance);
                     typeSuffix = " (" + (nested != nullptr ? nested->name() : std::string("?")) + ")";
                 }
+
+                // "bounds" specifically, once PropertiesModel has determined its owning View's
+                // real parent Layout doesn't afford free positioning (see Node::readOnly's own
+                // comment) - shown right on this group header line since that's the one place with
+                // room for a full sentence; the individual x/y/width/height rows below just dim
+                // their value text instead (see the SubPropertyEntry paint below).
+                if (node.readOnly && !node.readOnlyReason.empty()) {
+                    typeSuffix += " - " + node.readOnlyReason;
+                }
             }
             for (char& c : name) {
                 c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
@@ -390,7 +399,21 @@ namespace CodeToolsVsix
             std::vector<std::string> subNames = editor->subPropertyNames();
             std::string subName = node.subPropertyIndex < subNames.size() ? subNames[node.subPropertyIndex] : std::string();
             paintText(ctx, keyRect, subName, dimTextColor(*this));
-            paintText(ctx, valueRect, editor->subPropertyValueAsString(node.subPropertyIndex), rowTextColor(*this));
+            // Read-only (governed by a Layout other than FreePosition, see Node::readOnly's own
+            // comment) shows dimmed, same visual language as a disabled control elsewhere in this
+            // codebase - the group header line above already spells out why.
+            BLRgba32 valueColor = node.readOnly ? dimTextColor(*this) : rowTextColor(*this);
+            // A flags-enum sub-property (FlagsEnumPropertyEditor - one checkbox per named bit,
+            // e.g. AnchorLayoutParams::anchors) paints the same checkbox glyph a whole-value bool
+            // leaf already does below, rather than the literal "true"/"false" text every other
+            // SubPropertyEntry (Rect/Point/Size's own float components) uses.
+            if (editor->subPropertyIsBool(node.subPropertyIndex)) {
+                newui::Rect box(valueRect.left(), valueRect.top() + (valueRect.size().height - kCheckboxSize) * 0.5f,
+                    kCheckboxSize, kCheckboxSize);
+                paintCheckbox(ctx, box, editor->subPropertyValueAsString(node.subPropertyIndex) == "true", valueColor);
+                return;
+            }
+            paintText(ctx, valueRect, editor->subPropertyValueAsString(node.subPropertyIndex), valueColor);
             return;
         }
 

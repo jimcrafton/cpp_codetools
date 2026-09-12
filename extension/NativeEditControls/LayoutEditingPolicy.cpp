@@ -10,32 +10,34 @@
 
 namespace CodeToolsVsix
 {
+    // Keeps a view's AnchorLayoutParams in sync with its real bounds so a *future* relayout (e.g.
+    // a window resize) doesn't silently snap it back to stale margins from an earlier edit (the
+    // same trap named in PropertiesGrid's own still-open BOUNDS-editing gap) - shared by
+    // FreePositionPolicy's own doIt()/undoIt() below AND, non-static/exposed here specifically for
+    // this, RectPropertyEditor::commitValue() (PropertyEditor.cpp), which needs the identical
+    // sync after a direct Properties-panel bounds edit. Applies to any real AnchorLayout parent,
+    // not just rootViewProxy() specifically - the original, narrower "only if parent is
+    // rootViewProxy()" restriction only ever mattered because rootViewProxy() was the sole
+    // AnchorLayout parent that could reach this code at all; the underlying reasoning (must
+    // refresh AnchorLayoutParams, or arrange() reverts the position later) applies identically to
+    // any AnchorLayout-governed container.
+    void applyFreePositionAnchorParams(newui::SubView* view, const newui::Rect& bounds)
+    {
+        auto* params = dynamic_cast<newui::AnchorLayoutParams*>(view->layoutParams());
+        if (params == nullptr) {
+            auto owned = std::make_unique<newui::AnchorLayoutParams>(newui::Anchor::Left | newui::Anchor::Top);
+            params = owned.get();
+            view->setLayoutParams(std::move(owned));
+        }
+        params->anchors = newui::Anchor::Left | newui::Anchor::Top;
+        params->leftMargin = bounds.left();
+        params->topMargin = bounds.top();
+        params->width = bounds.size().width;
+        params->height = bounds.size().height;
+    }
+
     namespace
     {
-        // Shared by FreePositionPolicy's doIt()/undoIt() below - keeps a dragged view's
-        // AnchorLayoutParams in sync with its real bounds so a *future* relayout (e.g. a window
-        // resize) doesn't silently snap it back to stale margins from an earlier drag (the same
-        // trap named in PropertiesGrid's own still-open BOUNDS-editing gap). Applies to any real
-        // AnchorLayout parent, not just rootViewProxy() specifically - the original, narrower
-        // "only if parent is rootViewProxy()" restriction only ever mattered because rootViewProxy()
-        // was the sole AnchorLayout parent that could reach this code at all; the underlying
-        // reasoning (must refresh AnchorLayoutParams, or arrange() reverts the position later)
-        // applies identically to any AnchorLayout-governed container.
-        void applyFreePositionAnchorParams(newui::SubView* view, const newui::Rect& bounds)
-        {
-            auto* params = dynamic_cast<newui::AnchorLayoutParams*>(view->layoutParams());
-            if (params == nullptr) {
-                auto owned = std::make_unique<newui::AnchorLayoutParams>(newui::Anchor::Left | newui::Anchor::Top);
-                params = owned.get();
-                view->setLayoutParams(std::move(owned));
-            }
-            params->anchors = newui::Anchor::Left | newui::Anchor::Top;
-            params->leftMargin = bounds.left();
-            params->topMargin = bounds.top();
-            params->width = bounds.size().width;
-            params->height = bounds.size().height;
-        }
-
         // Shared by GridCellPolicy's applyPreview()/commit() below.
         void applyGridCell(newui::View* parent, newui::SubView* view, std::size_t row, std::size_t column)
         {

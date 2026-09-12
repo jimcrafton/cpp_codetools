@@ -10,6 +10,7 @@
 #include <vector>
 
 #include <newui/color.h>
+#include <newui/font.h>
 #include <newui/geometry.h>
 #include <newui/reflection.h>
 #include <newui/undostack.h>
@@ -64,6 +65,13 @@ namespace CodeToolsVsix
         virtual std::string subPropertyValueAsString(std::size_t index) const { return {}; }
         virtual void setSubPropertyValueFromString(std::size_t index, const std::string& text) {}
 
+        // Whether the sub-property at index is boolean-shaped (a single named flag bit -
+        // FlagsEnumPropertyEditor, below) rather than free text (Rect/Point/Size's own float
+        // components) - lets PropertiesGrid/PropertyItem paint a real checkbox glyph instead of
+        // literal "true"/"false" text, without either of them needing to know FlagsEnumPropertyEditor
+        // exists as a concrete type. False for every existing SubProperties editor (Rect/Point/Size).
+        virtual bool subPropertyIsBool(std::size_t /*index*/) const { return false; }
+
         const newui::reflection::Property* property() const { return property_; }
 
         // Attaches the UndoStack setValueFromString() pushes through -
@@ -72,6 +80,20 @@ namespace CodeToolsVsix
         // (testharness.exe, tests).
         void setUndoStack(newui::UndoStack* undoStack) { undoStack_ = undoStack; }
         newui::UndoStack* undoStack() const { return undoStack_; }
+
+        // An extra side effect folded into commitValue()'s own pushed UndoableAction (run right
+        // after property_->set(), in *both* doIt and undoIt, so it stays in lockstep with
+        // undo/redo instead of drifting out of sync the way a bare post-commit call would) - or
+        // run inline, once, when there's no undoStack() at all. nullptr (the default) adds
+        // nothing; PropertyEditor/instance_ stay fully type-erased either way (this editor never
+        // interprets the callback, just invokes it). The one real caller today is PropertiesGrid,
+        // for "bounds" specifically - it already knows node.ownerInstance is a real
+        // newui::SubView* (PropertiesModel's own gating), which this class itself has no safe way
+        // to assume (PropertyEditorTest's own isolated fixtures construct a RectPropertyEditor
+        // against a plain, non-View struct on purpose - a View-specific assumption in here would
+        // be undefined behavior for them).
+        using PostCommitSync = std::function<void()>;
+        void setPostCommitSync(PostCommitSync sync) { postCommitSync_ = std::move(sync); }
 
     protected:
         std::any rawValue() const { return property_->get(instance_); }
@@ -87,6 +109,7 @@ namespace CodeToolsVsix
 
         const newui::reflection::Property* property_;
         void* instance_;
+        PostCommitSync postCommitSync_;
         newui::UndoStack* undoStack_ = nullptr;
     };
 
@@ -187,7 +210,29 @@ namespace CodeToolsVsix
         void setSubPropertyValueFromString(std::size_t index, const std::string& text) override;
     };
 
-    // A generic dropdown for *any* registered newui::reflection::Enum -
+    // Same "decompose/recompose the whole value" shape as RectPropertyEditor above -
+    // newui::Font isn't a reflected Class (no @reflect on it, see font.h), and even if it were,
+    // ViewStyle::font()/LabelStyle's own font access has both a getter and a setter, which
+    // ClassBuilder::property()'s addressability rule (reflection.h) always excludes from becoming
+    // a real, live Kind::PropertyGroup - so this is the only way a Font-typed property becomes
+    // editable instead of "(unsupported)". bold/italic/underlined/strikeThrough are exposed as
+    // checkbox rows (subPropertyIsBool()) alongside name/size.
+    class FontPropertyEditor : public PropertyEditor
+    {
+    public:
+        using PropertyEditor::PropertyEditor;
+        EditStyle editStyle() const override { return EditStyle::SubProperties; }
+        std::string valueAsString() const override;
+        std::optional<std::any> parseValue(const std::string& text) const override;
+        std::vector<std::string> subPropertyNames() const override {
+            return { "name", "size", "bold", "italic", "underlined", "strikeThrough" };
+        }
+        std::string subPropertyValueAsString(std::size_t index) const override;
+        void setSubPropertyValueFromString(std::size_t index, const std::string& text) override;
+        bool subPropertyIsBool(std::size_t index) const override { return index >= 2; }
+    };
+
+    // A generic dropdown for *any* non-flags registered newui::reflection::Enum -
     // unlike every editor above (each keyed to one fixed C++ type),
     // PropertyEditorRegistry can't key this one by std::type_index the
     // same way (every distinct enum is its own type_index) - instead
@@ -197,10 +242,9 @@ namespace CodeToolsVsix
     // through Enum's own type-erased toUInt64()/fromUInt64()/tryParse()/
     // tryToString() (reflection.h) - never needs to know the enum's real
     // C++ type here, so one editor covers every enum newui ever
-    // registers. Flags-style decompose() (multi-value) editing is out of
-    // scope for v1 - tryToString()/tryParse() already degrade gracefully
-    // for a flags enum (falls back to a raw numeric string), just without
-    // the "Ctrl+Shift"-style combined display decompose() could give.
+    // registers. A flags-shaped enum (Enum::isFlags()) never reaches this
+    // class at all - createEditor() routes it to FlagsEnumPropertyEditor
+    // (below) instead, a real checkbox-per-bit editor.
     class EnumPropertyEditor : public PropertyEditor
     {
     public:
@@ -212,6 +256,37 @@ namespace CodeToolsVsix
         std::string valueAsString() const override;
         std::optional<std::any> parseValue(const std::string& text) const override;
         std::vector<std::string> dropdownValues() const override;
+
+    private:
+        const newui::reflection::Enum* enum_;
+    };
+
+    // The flags counterpart to EnumPropertyEditor above - selected instead of it by
+    // PropertyEditorRegistry::createEditor()'s own enum fallback once ReflectionRegistry::
+    // getEnum(property->type())->isFlags() is true (e.g. newui::Anchor, tagged "@reflect flags" -
+    // see EnumBuilder<T>::flags()'s own comment, reflection.h, which names Anchor directly as a
+    // real example needing this explicit opt-in). One synthetic SubProperties row per named,
+    // nonzero flag value (a zero-value entry like "None" isn't a real bit to toggle, so it's
+    // excluded the same way Enum::decompose() itself skips zero candidates) - each one a
+    // checkbox (subPropertyIsBool() override below) read/written by testing/setting that one bit
+    // against the enum's whole current combined value, same "decompose/recompose the *whole*
+    // value through this editor's own rawValue()/commitValue()" shape RectPropertyEditor's own
+    // x/y/width/height rows already use for a different reason (no real per-component Property to
+    // address either way).
+    class FlagsEnumPropertyEditor : public PropertyEditor
+    {
+    public:
+        FlagsEnumPropertyEditor(const newui::reflection::Property* property, void* instance,
+            const newui::reflection::Enum* enumInfo)
+            : PropertyEditor(property, instance), enum_(enumInfo) {}
+
+        EditStyle editStyle() const override { return EditStyle::SubProperties; }
+        std::string valueAsString() const override;
+        std::optional<std::any> parseValue(const std::string& text) const override;
+        std::vector<std::string> subPropertyNames() const override;
+        std::string subPropertyValueAsString(std::size_t index) const override;
+        void setSubPropertyValueFromString(std::size_t index, const std::string& text) override;
+        bool subPropertyIsBool(std::size_t /*index*/) const override { return true; }
 
     private:
         const newui::reflection::Enum* enum_;

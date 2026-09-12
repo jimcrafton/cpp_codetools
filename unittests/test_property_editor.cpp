@@ -22,6 +22,24 @@ namespace
         (void)registered;
     }
 
+    // A hand-registered flags enum (real bitmask combos, not just sequential small values - see
+    // Enum::isFlags()'s own comment, reflection.h, for why that distinction has to be explicit)
+    // - see FlagsEnumPropertyEditor's own tests. Mirrors newui::Anchor's own real shape (a
+    // dedicated None=0 that isn't itself a real bit to toggle, then independent power-of-two
+    // flags) without depending on newui's own reflection data being registered for this binary.
+    enum class Modifiers { None = 0, Ctrl = 1, Shift = 2, Alt = 4 };
+
+    void registerModifiersEnumOnce()
+    {
+        static bool registered = [] {
+            EnumBuilder<Modifiers> builder("Modifiers");
+            builder.addValue("None", 0).addValue("Ctrl", 1).addValue("Shift", 2).addValue("Alt", 4).flags(true);
+            ReflectionRegistry::registerEnum(builder.build());
+            return true;
+        }();
+        (void)registered;
+    }
+
     // Hand-registered per-test, not a real newui/cpptools class - same
     // "small example class, registered by hand" pattern as newui's own
     // examples/reflection2.cpp. Isolated so this test doesn't depend on
@@ -39,6 +57,8 @@ namespace
         newui::Size extent;
         newui::Rect bounds;
         Direction facing = Direction::North;
+        Modifiers modifiers = Modifiers::None;
+        newui::Font font;
 
         bool isEnabled() const { return enabled; }
         void setEnabled(bool v) { enabled = v; }
@@ -62,11 +82,16 @@ namespace
         void setBounds(newui::Rect v) { bounds = v; }
         Direction getFacing() const { return facing; }
         void setFacing(Direction v) { facing = v; }
+        Modifiers getModifiers() const { return modifiers; }
+        void setModifiers(Modifiers v) { modifiers = v; }
+        newui::Font getFont() const { return font; }
+        void setFont(newui::Font v) { font = v; }
     };
 
     const Class* registerWidgetOnce()
     {
         registerDirectionEnumOnce();
+        registerModifiersEnumOnce();
         static const Class* registered = [] {
             ClassBuilder<Widget> builder;
             builder.clazz()
@@ -80,7 +105,9 @@ namespace
                 .property("origin", Scope::Public, &Widget::getOrigin, &Widget::setOrigin)
                 .property("extent", Scope::Public, &Widget::getExtent, &Widget::setExtent)
                 .property("bounds", Scope::Public, &Widget::getBounds, &Widget::setBounds)
-                .property("facing", Scope::Public, &Widget::getFacing, &Widget::setFacing);
+                .property("facing", Scope::Public, &Widget::getFacing, &Widget::setFacing)
+                .property("modifiers", Scope::Public, &Widget::getModifiers, &Widget::setModifiers)
+                .property("font", Scope::Public, &Widget::getFont, &Widget::setFont);
             ReflectionRegistry::registerClass(builder);
             return classinfo(typeid(Widget));
         }();
@@ -322,6 +349,91 @@ TEST_F(PropertyEditorTest, RectEditorSubPropertyEditIsUndoableAsTheWholeValue)
     EXPECT_FLOAT_EQ(widget_.bounds.width(), 3.0f);
 }
 
+TEST_F(PropertyEditorTest, FontEditorRoundTripsThroughTheRealProperty)
+{
+    const Property* prop = findProperty(widgetClass_, "font");
+    auto editor = CodeToolsVsix::PropertyEditorRegistry::instance().createEditor(prop, widgetClass_, &widget_);
+    ASSERT_NE(editor, nullptr);
+
+    editor->setValueFromString("Arial, 14");
+    EXPECT_EQ(widget_.font.name(), "Arial");
+    EXPECT_FLOAT_EQ(widget_.font.size(), 14.0f);
+    EXPECT_EQ(editor->valueAsString(), "Arial, 14");
+}
+
+TEST_F(PropertyEditorTest, FontEditorInvalidTextIsANoOp)
+{
+    const Property* prop = findProperty(widgetClass_, "font");
+    auto editor = CodeToolsVsix::PropertyEditorRegistry::instance().createEditor(prop, widgetClass_, &widget_);
+
+    widget_.font.setName("Segoe UI");
+    widget_.font.setSize(12.0f);
+    editor->setValueFromString("no size here");
+    EXPECT_EQ(widget_.font.name(), "Segoe UI");
+    EXPECT_FLOAT_EQ(widget_.font.size(), 12.0f);
+}
+
+TEST_F(PropertyEditorTest, FontEditorReportsSubPropertiesEditStyleAndNames)
+{
+    const Property* prop = findProperty(widgetClass_, "font");
+    auto editor = CodeToolsVsix::PropertyEditorRegistry::instance().createEditor(prop, widgetClass_, &widget_);
+    ASSERT_NE(editor, nullptr);
+
+    EXPECT_EQ(editor->editStyle(), CodeToolsVsix::PropertyEditor::EditStyle::SubProperties);
+    EXPECT_EQ(editor->subPropertyNames(),
+        (std::vector<std::string>{"name", "size", "bold", "italic", "underlined", "strikeThrough"}));
+    EXPECT_FALSE(editor->subPropertyIsBool(0));
+    EXPECT_FALSE(editor->subPropertyIsBool(1));
+    EXPECT_TRUE(editor->subPropertyIsBool(2));
+    EXPECT_TRUE(editor->subPropertyIsBool(5));
+}
+
+TEST_F(PropertyEditorTest, FontEditorSubPropertyRoundTripsOnlyThatOneComponent)
+{
+    const Property* prop = findProperty(widgetClass_, "font");
+    auto editor = CodeToolsVsix::PropertyEditorRegistry::instance().createEditor(prop, widgetClass_, &widget_);
+
+    widget_.font.setName("Segoe UI");
+    widget_.font.setSize(12.0f);
+    EXPECT_EQ(editor->subPropertyValueAsString(0), "Segoe UI");
+    EXPECT_EQ(editor->subPropertyValueAsString(1), "12");
+    EXPECT_EQ(editor->subPropertyValueAsString(2), "false");
+
+    editor->setSubPropertyValueFromString(2, "true");
+    EXPECT_EQ(widget_.font.name(), "Segoe UI");   // untouched
+    EXPECT_FLOAT_EQ(widget_.font.size(), 12.0f);  // untouched
+    EXPECT_TRUE(widget_.font.bold());             // the one edited
+    EXPECT_EQ(editor->subPropertyValueAsString(2), "true");
+}
+
+TEST_F(PropertyEditorTest, FontEditorSubPropertyInvalidTextIsANoOp)
+{
+    const Property* prop = findProperty(widgetClass_, "font");
+    auto editor = CodeToolsVsix::PropertyEditorRegistry::instance().createEditor(prop, widgetClass_, &widget_);
+
+    widget_.font.setSize(12.0f);
+    editor->setSubPropertyValueFromString(1, "not a number");
+    EXPECT_FLOAT_EQ(widget_.font.size(), 12.0f);
+}
+
+TEST_F(PropertyEditorTest, FontEditorSubPropertyEditIsUndoableAsTheWholeValue)
+{
+    const Property* prop = findProperty(widgetClass_, "font");
+    auto editor = CodeToolsVsix::PropertyEditorRegistry::instance().createEditor(prop, widgetClass_, &widget_);
+
+    newui::UndoStack undoStack;
+    editor->setUndoStack(&undoStack);
+
+    widget_.font.setName("Segoe UI");
+    widget_.font.setSize(12.0f);
+    editor->setSubPropertyValueFromString(1, "20");
+    EXPECT_FLOAT_EQ(widget_.font.size(), 20.0f);
+
+    undoStack.undo();
+    EXPECT_EQ(widget_.font.name(), "Segoe UI");
+    EXPECT_FLOAT_EQ(widget_.font.size(), 12.0f);
+}
+
 TEST_F(PropertyEditorTest, EnumEditorRoundTripsThroughTheRealProperty)
 {
     // No registerEditor() call anywhere registers Direction specifically -
@@ -349,6 +461,77 @@ TEST_F(PropertyEditorTest, EnumEditorInvalidTextIsANoOp)
     widget_.facing = Direction::East;
     editor->setValueFromString("not a direction");
     EXPECT_EQ(widget_.facing, Direction::East);
+}
+
+// ---------------------------------------------------------------------------
+// FlagsEnumPropertyEditor - PropertyEditorRegistry::createEditor()'s enum fallback routes here
+// instead of EnumPropertyEditor once ReflectionRegistry::getEnum(property->type())->isFlags() is
+// true (Modifiers, registered above with .flags(true) - mirrors newui::Anchor's own real shape).
+// ---------------------------------------------------------------------------
+
+TEST_F(PropertyEditorTest, FlagsEnumEditorIsSelectedInsteadOfThePlainEnumEditor)
+{
+    const Property* prop = findProperty(widgetClass_, "modifiers");
+    ASSERT_NE(prop, nullptr);
+    auto editor = CodeToolsVsix::PropertyEditorRegistry::instance().createEditor(prop, widgetClass_, &widget_);
+    ASSERT_NE(editor, nullptr);
+
+    EXPECT_EQ(editor->editStyle(), CodeToolsVsix::PropertyEditor::EditStyle::SubProperties);
+    // None (value 0) is excluded - it isn't a real bit to toggle, same as Enum::decompose()'s own
+    // zero-candidate skip (reflection.h).
+    EXPECT_EQ(editor->subPropertyNames(), (std::vector<std::string>{"Ctrl", "Shift", "Alt"}));
+    EXPECT_TRUE(editor->subPropertyIsBool(0));
+}
+
+TEST_F(PropertyEditorTest, FlagsEnumEditorReadsEachBitIndependently)
+{
+    const Property* prop = findProperty(widgetClass_, "modifiers");
+    auto editor = CodeToolsVsix::PropertyEditorRegistry::instance().createEditor(prop, widgetClass_, &widget_);
+
+    widget_.modifiers = static_cast<Modifiers>(static_cast<int>(Modifiers::Ctrl) | static_cast<int>(Modifiers::Alt));
+    EXPECT_EQ(editor->subPropertyValueAsString(0), "true");   // Ctrl
+    EXPECT_EQ(editor->subPropertyValueAsString(1), "false");  // Shift
+    EXPECT_EQ(editor->subPropertyValueAsString(2), "true");   // Alt
+    EXPECT_EQ(editor->valueAsString(), "Ctrl | Alt");
+}
+
+TEST_F(PropertyEditorTest, FlagsEnumEditorSetsOneBitWithoutDisturbingTheOthers)
+{
+    const Property* prop = findProperty(widgetClass_, "modifiers");
+    auto editor = CodeToolsVsix::PropertyEditorRegistry::instance().createEditor(prop, widgetClass_, &widget_);
+
+    widget_.modifiers = Modifiers::Ctrl;
+    editor->setSubPropertyValueFromString(1, "true");  // check Shift too
+    EXPECT_EQ(widget_.modifiers, static_cast<Modifiers>(static_cast<int>(Modifiers::Ctrl) | static_cast<int>(Modifiers::Shift)));
+
+    editor->setSubPropertyValueFromString(0, "false");  // uncheck Ctrl
+    EXPECT_EQ(widget_.modifiers, Modifiers::Shift);
+}
+
+TEST_F(PropertyEditorTest, FlagsEnumEditorSubPropertyEditIsUndoableAsTheWholeValue)
+{
+    const Property* prop = findProperty(widgetClass_, "modifiers");
+    auto editor = CodeToolsVsix::PropertyEditorRegistry::instance().createEditor(prop, widgetClass_, &widget_);
+
+    newui::UndoStack undoStack;
+    editor->setUndoStack(&undoStack);
+
+    widget_.modifiers = Modifiers::Ctrl;
+    editor->setSubPropertyValueFromString(1, "true");  // check Shift
+    EXPECT_EQ(widget_.modifiers, static_cast<Modifiers>(static_cast<int>(Modifiers::Ctrl) | static_cast<int>(Modifiers::Shift)));
+
+    undoStack.undo();
+    EXPECT_EQ(widget_.modifiers, Modifiers::Ctrl);
+}
+
+TEST_F(PropertyEditorTest, FlagsEnumEditorValueAsStringRoundTripsThroughParseValue)
+{
+    const Property* prop = findProperty(widgetClass_, "modifiers");
+    auto editor = CodeToolsVsix::PropertyEditorRegistry::instance().createEditor(prop, widgetClass_, &widget_);
+
+    editor->setValueFromString("Ctrl | Shift");
+    EXPECT_EQ(widget_.modifiers, static_cast<Modifiers>(static_cast<int>(Modifiers::Ctrl) | static_cast<int>(Modifiers::Shift)));
+    EXPECT_EQ(editor->valueAsString(), "Ctrl | Shift");
 }
 
 namespace

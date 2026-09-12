@@ -1,4 +1,5 @@
 #include "PropertiesModel.h"
+#include "LayoutEditingPolicy.h"
 
 namespace CodeToolsVsix
 {
@@ -6,6 +7,40 @@ namespace CodeToolsVsix
     using newui::reflection::classinfo;
     using newui::reflection::Delegate;
     using newui::reflection::Property;
+
+    namespace
+    {
+        // Gates PropertiesModel::Node::readOnly for "bounds" specifically - the only Rect-typed
+        // registered property (see RectPropertyEditor's own commitValue() override comment,
+        // PropertyEditor.h), so ownerInstance here is always a real View* at runtime once
+        // property->name() == "bounds" is confirmed. Only ever called from childOf()'s Root case
+        // (below), never from the generic classifyProperty() a nested PropertyGroup also uses -
+        // that keeps this safe without needing its own type check: a nested class's own instance
+        // address (e.g. a ViewStyle) is never what's passed in here, only the selected View
+        // itself. Mirrors DesignerEditor's own Move-drag arming check exactly (consult
+        // policyFor(parent's real Layout), not a name/type guess) - FreePosition means bounds is
+        // genuinely free to edit; anything else means the parent Layout itself computes some or
+        // all of it, so a direct edit here would be silently lost (LinearReorder/GridCell) or
+        // reverted (a stale AnchorLayoutParams case aside, which RectPropertyEditor's own commit
+        // override handles separately) on the very next relayout.
+        bool boundsReadOnlyReason(void* ownerInstance, const Property* property, std::string& reason)
+        {
+            if (property == nullptr || property->name() != "bounds") {
+                return false;
+            }
+            auto* view = static_cast<newui::View*>(ownerInstance);
+            newui::View* parent = view != nullptr ? view->parent() : nullptr;
+            if (parent == nullptr) {
+                return false;
+            }
+            if (policyFor(parent->layout()).kind() == GeometryEditKind::FreePosition) {
+                return false;
+            }
+            const Class* layoutClass = parent->layout() != nullptr ? classinfo(typeid(*parent->layout())) : nullptr;
+            reason = "Controlled by " + (layoutClass != nullptr ? layoutClass->name() : std::string("the parent's layout"));
+            return true;
+        }
+    }
 
     void PropertiesModel::setSelection(newui::SubView* selected)
     {
@@ -63,7 +98,13 @@ namespace CodeToolsVsix
             std::vector<const Property*> properties;
             container.ownerClass->allProperties(properties);
             if (propertyIndex < properties.size()) {
-                return classifyProperty(properties[propertyIndex], container.ownerClass, container.ownerInstance);
+                Node node = classifyProperty(properties[propertyIndex], container.ownerClass, container.ownerInstance);
+                std::string reason;
+                if (boundsReadOnlyReason(container.ownerInstance, node.property, reason)) {
+                    node.readOnly = true;
+                    node.readOnlyReason = reason;
+                }
+                return node;
             }
             std::vector<const Delegate*> delegates;
             container.ownerClass->allDelegates(delegates);
@@ -105,6 +146,8 @@ namespace CodeToolsVsix
             node.ownerClass = container.ownerClass;
             node.ownerInstance = container.ownerInstance;
             node.subPropertyIndex = index;
+            node.readOnly = container.readOnly;
+            node.readOnlyReason = container.readOnlyReason;
             return node;
         }
         case Kind::DelegatesHeader: {

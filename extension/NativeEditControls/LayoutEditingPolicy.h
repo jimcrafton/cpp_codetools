@@ -59,6 +59,13 @@ namespace CodeToolsVsix
         std::size_t targetColumn = 0;           // GridCell
     };
 
+    // Keeps view's AnchorLayoutParams in sync with a real bounds value - see this function's own
+    // definition comment (LayoutEditingPolicy.cpp) for why it's exposed here rather than staying
+    // file-local to FreePositionPolicy. Only meaningful when view's real parent has an actual
+    // AnchorLayout - callers (FreePositionPolicy::commit(), RectPropertyEditor::commitValue())
+    // are each responsible for checking that themselves before calling this.
+    void applyFreePositionAnchorParams(newui::SubView* view, const newui::Rect& bounds);
+
     class LayoutEditingPolicy;
 
     // One active drag's worth of state for SelectionOverlay to paint a cue for - bundles a

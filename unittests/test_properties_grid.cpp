@@ -1,11 +1,14 @@
 #include "../extension/NativeEditControls/PropertiesGrid.h"
 
 #include <newui/controls.h>
+#include <newui/layout.h>
 #include <newui/reflection.h>
 #include <newui/rootview.h>
+#include <newui/undostack.h>
 
 #include <gtest/gtest.h>
 
+#include <memory>
 #include <typeindex>
 
 using newui::reflection::classinfo;
@@ -290,6 +293,90 @@ TEST_F(PropertiesGridTest, DraggingTheDividerRepositionsTheLiveEditorWithoutLosi
         << "same widget instance - a rebuild would have replaced it";
     EXPECT_EQ(textField->text(), L"uncommitted typed text") << "typed-but-uncommitted text must survive a divider drag";
     EXPECT_NE(textField->bounds().left(), leftBefore) << "the widget should have actually moved with the new column split";
+}
+
+// ---------------------------------------------------------------------------
+// The BOUNDS-editing-vs-governing-Layout gap (Node::readOnly, PropertiesModel.h) - "bounds" must
+// refuse to build a live editor at all once its owning View's real parent Layout affords something
+// other than free pixel positioning, and must keep the parent's AnchorLayoutParams in sync (via
+// PropertyEditor::setPostCommitSync(), wired in PropertiesGrid::rebuildLiveEditor()) when it does.
+// ---------------------------------------------------------------------------
+
+TEST_F(PropertiesGridTest, ClickingBoundsValueColumnCreatesNoLiveEditorWhenTheParentHasAFlexLayout)
+{
+    newui::SubView container;
+    container.setName("container");
+    container.setLayout(std::make_unique<newui::FlexLayout>());
+    container.addChild(&button_);
+
+    grid_->setSelection(&button_);
+
+    std::size_t boundsIndex = properties_.size();
+    for (std::size_t i = 0; i < properties_.size(); ++i) {
+        if (properties_[i]->name() == "bounds") {
+            boundsIndex = i;
+            break;
+        }
+    }
+    ASSERT_LT(boundsIndex, properties_.size());
+    boundsIndex += 1;  // ParentPicker row shift - button_ now has a real parent.
+
+    // The x/y/width/height rows aren't visible (so rectForPath() below has nothing to find) until
+    // their own PropertySubGroup row is expanded - same convention test_document_outline.cpp's own
+    // nested-row tests already use.
+    grid_->treeView()->controller().setExpanded(std::vector<std::size_t>{boundsIndex}, true);
+    selectAndClickValueColumn(std::vector<std::size_t>{boundsIndex, 2});  // "width"
+
+    EXPECT_EQ(grid_->treeView()->childViews().size(), 0u)
+        << "a read-only row must never spawn a live editor, even on a real click";
+
+    container.removeChild(&button_);
+}
+
+TEST_F(PropertiesGridTest, EditingBoundsUnderAnAnchorLayoutParentSyncsAnchorLayoutParamsAndUndoRestoresBoth)
+{
+    newui::SubView container;
+    container.setName("container");
+    container.setLayout(std::make_unique<newui::AnchorLayout>());
+    container.setBounds(newui::Rect(0.0f, 0.0f, 500.0f, 500.0f));
+    container.addChild(&button_);
+    button_.setBounds(newui::Rect(10.0f, 20.0f, 100.0f, 30.0f));
+
+    newui::UndoStack undoStack;
+    grid_->setUndoStack(&undoStack);
+    grid_->setSelection(&button_);
+
+    std::size_t boundsIndex = properties_.size();
+    for (std::size_t i = 0; i < properties_.size(); ++i) {
+        if (properties_[i]->name() == "bounds") {
+            boundsIndex = i;
+            break;
+        }
+    }
+    ASSERT_LT(boundsIndex, properties_.size());
+    boundsIndex += 1;
+
+    grid_->treeView()->controller().setExpanded(std::vector<std::size_t>{boundsIndex}, true);
+    selectAndClickValueColumn(std::vector<std::size_t>{boundsIndex, 2});  // "width"
+    auto* textField = dynamic_cast<newui::TextField*>(grid_->treeView()->childViews()[0]);
+    ASSERT_NE(textField, nullptr);
+    textField->setText(L"250");
+    textField->onLostFocus(*textField);  // real public Delegate call - same commit path a real
+                                          // focus-loss/Enter takes (handleLiveTextCommit()).
+
+    EXPECT_FLOAT_EQ(button_.bounds().width(), 250.0f);
+    auto* params = dynamic_cast<newui::AnchorLayoutParams*>(button_.layoutParams());
+    ASSERT_NE(params, nullptr) << "a directly-typed bounds edit must create real AnchorLayoutParams so a later relayout doesn't revert it";
+    EXPECT_FLOAT_EQ(params->width, 250.0f);
+
+    ASSERT_TRUE(undoStack.canUndo());
+    undoStack.undo();
+    EXPECT_FLOAT_EQ(button_.bounds().width(), 100.0f);
+    params = dynamic_cast<newui::AnchorLayoutParams*>(button_.layoutParams());
+    ASSERT_NE(params, nullptr);
+    EXPECT_FLOAT_EQ(params->width, 100.0f) << "undo must restore the old AnchorLayoutParams too, not just bounds()";
+
+    container.removeChild(&button_);
 }
 
 // ---------------------------------------------------------------------------
