@@ -206,6 +206,18 @@ namespace CodeToolsVsix
         newui::SyncReturn handleTreeMouseUp(newui::View& sender, const newui::Point& pt,
             std::uint32_t btnMask, std::uint32_t keyMask);
 
+        // Real, live-reported bug: vBar()/hBar() (inherited from ScrollView) are siblings of
+        // treeView_, not part of it, so a click on either one never reaches handleTreeMouseDown()/
+        // handleSelectionChanged() at all - the live editor widget (still positioned against the
+        // *old* scroll offset) neither closes nor moves once the scrollbar drag actually scrolls
+        // the tree, leaving it visibly stuck in the wrong place. Simplest, safest fix (per user
+        // direction): treat starting to use the scrollbar the same as clicking elsewhere in the
+        // grid - close whatever's being edited, same as handleSelectionChanged() already does for
+        // an ordinary row click elsewhere. Returns Ignored so ScrollBar's own drag handling still
+        // proceeds unaffected.
+        newui::SyncReturn handleScrollBarMouseDown(newui::View& sender, const newui::Point& pt,
+            std::uint32_t btnMask, std::uint32_t keyMask);
+
         PropertiesModel model_;
         newui::TreeView* treeView_ = nullptr;
         newui::UndoStack* undoStack_ = nullptr;

@@ -72,6 +72,12 @@ namespace CodeToolsVsix
         // exists as a concrete type. False for every existing SubProperties editor (Rect/Point/Size).
         virtual bool subPropertyIsBool(std::size_t /*index*/) const { return false; }
 
+        // Non-empty for a sub-property row that should edit through a dropdown of fixed choices
+        // instead of free text (FontPropertyEditor's "name" row, below) - mirrors dropdownValues()
+        // above, just per-sub-index rather than for the whole value. Empty (the default) for every
+        // other SubProperties editor/index.
+        virtual std::vector<std::string> subPropertyDropdownValues(std::size_t /*index*/) const { return {}; }
+
         const newui::reflection::Property* property() const { return property_; }
 
         // Attaches the UndoStack setValueFromString() pushes through -
@@ -230,6 +236,7 @@ namespace CodeToolsVsix
         std::string subPropertyValueAsString(std::size_t index) const override;
         void setSubPropertyValueFromString(std::size_t index, const std::string& text) override;
         bool subPropertyIsBool(std::size_t index) const override { return index >= 2; }
+        std::vector<std::string> subPropertyDropdownValues(std::size_t index) const override;
     };
 
     // A generic dropdown for *any* non-flags registered newui::reflection::Enum -

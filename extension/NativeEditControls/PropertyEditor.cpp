@@ -29,6 +29,21 @@ namespace CodeToolsVsix
             return text;
         }
 
+        // Whether a candidate Font would actually resolve to a real, loadable BLFont -
+        // FontManager::getFont() (called by Font::blFont()) matches name/bold/italic's combined
+        // lookup name case-insensitively against FontManager::listFonts() and caches nothing on a
+        // failed lookup, so this is a cheap, side-effect-free way to reject an edit *before*
+        // committing it, rather than only discovering the failure later at paint time (a real,
+        // live-reported crash: picking an already-suffixed face name like "Trebuchet MS Bold" as
+        // the font *name* and also ticking "bold" composes "Trebuchet MS Bold Bold", which isn't a
+        // real installed face). Only name/size/bold/italic feed into that lookup at all -
+        // underlined/strikeThrough are plain storage Font::blFont() never consults (see Font's own
+        // class comment, font.h), so those two are never gated by this.
+        bool fontResolves(const newui::Font& font)
+        {
+            return font.blFont() != nullptr;
+        }
+
         // Parses exactly `count` comma-separated floats - std::nullopt if
         // the count doesn't match or any token fails to parse (including
         // trailing garbage after a valid number), same "no partial
@@ -290,10 +305,25 @@ namespace CodeToolsVsix
             newui::Font f = std::any_cast<newui::Font>(rawValue());
             f.setName(name);
             f.setSize(size);
+            if (!fontResolves(f)) {
+                return std::nullopt;
+            }
             return std::any(f);
         } catch (const std::exception&) {
             return std::nullopt;
         }
+    }
+
+    std::vector<std::string> FontPropertyEditor::subPropertyDropdownValues(std::size_t index) const
+    {
+        if (index != 0) {
+            return {};
+        }
+        std::vector<std::string> names;
+        for (const newui::SystemFontInfo& info : newui::FontManager::listFonts()) {
+            names.push_back(info.name);
+        }
+        return names;
     }
 
     std::string FontPropertyEditor::subPropertyValueAsString(std::size_t index) const
@@ -340,6 +370,14 @@ namespace CodeToolsVsix
             }
             break;
         }
+        }
+        // Only name/size/bold/italic (indices 0-3) feed into Font::blFont()'s own lookup at all -
+        // see fontResolves()'s own comment above for why this rejects, rather than accepts, an
+        // edit that would leave the font unable to resolve (e.g. ticking "bold" on a face already
+        // named "... Bold"). underlined/strikeThrough (4/5) always commit - blFont() never
+        // consults them, so they can never be the reason a font fails to resolve.
+        if (index <= 3 && !fontResolves(f)) {
+            return;
         }
         commitValue(std::any(f));
     }

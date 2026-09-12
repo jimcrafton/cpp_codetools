@@ -4,6 +4,8 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+
 using namespace newui::reflection;
 
 namespace
@@ -432,6 +434,62 @@ TEST_F(PropertyEditorTest, FontEditorSubPropertyEditIsUndoableAsTheWholeValue)
     undoStack.undo();
     EXPECT_EQ(widget_.font.name(), "Segoe UI");
     EXPECT_FLOAT_EQ(widget_.font.size(), 12.0f);
+}
+
+// Real, live-reported crash: picking an already-suffixed face name like "Trebuchet MS Bold" as
+// the font *name* and separately ticking "bold" composes "Trebuchet MS Bold Bold" - not a real
+// installed face. FontPropertyEditor must reject that combination as a no-op (same "invalid
+// input is a no-op" contract every other editor already has) rather than let it commit and only
+// fail later at paint time (newui's Button::paint()/ToolbarButton::paint(), which used to throw
+// there and crash the whole app).
+TEST_F(PropertyEditorTest, FontEditorRejectsABoldEditThatWouldNotResolve)
+{
+    const std::vector<newui::SystemFontInfo>& fonts = newui::FontManager::listFonts();
+    std::string alreadyBoldFace;
+    for (const auto& info : fonts) {
+        static const std::string kSuffix = " Bold";
+        if (info.name.size() > kSuffix.size()
+            && info.name.compare(info.name.size() - kSuffix.size(), kSuffix.size(), kSuffix) == 0) {
+            alreadyBoldFace = info.name;
+            break;
+        }
+    }
+    if (alreadyBoldFace.empty()) {
+        GTEST_SKIP() << "no installed font face ending in ' Bold' found on this machine";
+    }
+
+    const Property* prop = findProperty(widgetClass_, "font");
+    auto editor = CodeToolsVsix::PropertyEditorRegistry::instance().createEditor(prop, widgetClass_, &widget_);
+    ASSERT_NE(editor, nullptr);
+
+    widget_.font.setName(alreadyBoldFace);
+    widget_.font.setBold(false);
+    ASSERT_NE(widget_.font.blFont(), nullptr) << "test assumption: the face name alone must resolve";
+
+    editor->setSubPropertyValueFromString(2, "true");  // "bold"
+
+    EXPECT_FALSE(widget_.font.bold()) << "expected the edit to be rejected as a no-op";
+}
+
+TEST_F(PropertyEditorTest, FontEditorCommitsABoldEditThatDoesResolve)
+{
+    const std::vector<newui::SystemFontInfo>& fonts = newui::FontManager::listFonts();
+    bool hasArialBold = std::any_of(fonts.begin(), fonts.end(),
+        [](const newui::SystemFontInfo& info) { return info.name == "Arial Bold"; });
+    if (!hasArialBold) {
+        GTEST_SKIP() << "this machine has no 'Arial Bold' font face installed";
+    }
+
+    const Property* prop = findProperty(widgetClass_, "font");
+    auto editor = CodeToolsVsix::PropertyEditorRegistry::instance().createEditor(prop, widgetClass_, &widget_);
+    ASSERT_NE(editor, nullptr);
+
+    widget_.font.setName("Arial");
+    widget_.font.setBold(false);
+
+    editor->setSubPropertyValueFromString(2, "true");  // "bold"
+
+    EXPECT_TRUE(widget_.font.bold());
 }
 
 TEST_F(PropertyEditorTest, EnumEditorRoundTripsThroughTheRealProperty)

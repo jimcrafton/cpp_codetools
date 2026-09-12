@@ -62,6 +62,23 @@ protected:
         return properties_.size();
     }
 
+    // Index of basePath's child whose own Property is named `name` - childCount(basePath) itself
+    // (i.e. "not found") if none matches. Used to walk down into a real nested PropertyGroup/
+    // PropertySubGroup (e.g. "style" -> "font") without hardcoding reflectgen's own property
+    // order.
+    std::size_t indexOfChildNamed(const std::vector<std::size_t>& basePath, const std::string& name) const {
+        std::size_t count = grid_->model().childCount(basePath);
+        for (std::size_t i = 0; i < count; ++i) {
+            std::vector<std::size_t> path = basePath;
+            path.push_back(i);
+            const Property* property = grid_->model().nodeAt(path).property;
+            if (property != nullptr && property->name() == name) {
+                return i;
+            }
+        }
+        return count;
+    }
+
     // Selecting a row no longer activates its live editor by itself - only
     // a real click landing in the *value* column does (see
     // PropertiesGrid::activateLiveEditorIfClickedOnValueColumn()'s own
@@ -155,6 +172,101 @@ TEST_F(PropertiesGridTest, ClickingTheValueColumnCreatesALiveToggle)
 
     ASSERT_EQ(grid_->treeView()->childViews().size(), 1u);
     EXPECT_NE(dynamic_cast<newui::Toggle*>(grid_->treeView()->childViews()[0]), nullptr);
+}
+
+// Real, live-reported bug: a boolean-shaped sub-property row (FontPropertyEditor's
+// bold/italic/underlined/strikeThrough, painted as a checkbox glyph via subPropertyIsBool() -
+// PropertyItem::paint()) used to fall through rebuildLiveEditor()'s "a SubPropertyEntry is
+// always plain text" branch, so clicking the checkbox silently swapped it for a text field
+// showing "true"/"false" instead of actually toggling.
+TEST_F(PropertiesGridTest, ClickingABoolSubPropertyValueCreatesALiveToggleNotATextField)
+{
+    grid_->setSelection(&button_);
+    std::size_t styleIdx = indexOfChildNamed({}, "style");
+    ASSERT_LT(styleIdx, properties_.size()) << "expected newui::Button to have a real 'style' property";
+    std::size_t fontIdx = indexOfChildNamed({styleIdx}, "font");
+    ASSERT_LT(fontIdx, grid_->model().childCount({styleIdx})) << "expected style to have a real 'font' property";
+
+    // The font's own sub-property rows aren't visible (so rectForPath() below has nothing to
+    // find) until both the "style" group and the "font" sub-group are expanded - same convention
+    // EditingBoundsUnder...'s own nested-row tests already use.
+    grid_->treeView()->controller().setExpanded(std::vector<std::size_t>{styleIdx}, true);
+    grid_->treeView()->controller().setExpanded(std::vector<std::size_t>{styleIdx, fontIdx}, true);
+
+    // FontPropertyEditor::subPropertyNames() == {name, size, bold, italic, underlined,
+    // strikeThrough} - index 2 is "bold".
+    selectAndClickValueColumn(std::vector<std::size_t>{styleIdx, fontIdx, 2});
+
+    ASSERT_EQ(grid_->treeView()->childViews().size(), 1u);
+    EXPECT_NE(dynamic_cast<newui::Toggle*>(grid_->treeView()->childViews()[0]), nullptr);
+}
+
+TEST_F(PropertiesGridTest, TogglingABoolSubPropertyCommitsThroughTheRealFont)
+{
+    grid_->setSelection(&button_);
+    std::size_t styleIdx = indexOfChildNamed({}, "style");
+    std::size_t fontIdx = indexOfChildNamed({styleIdx}, "font");
+    grid_->treeView()->controller().setExpanded(std::vector<std::size_t>{styleIdx}, true);
+    grid_->treeView()->controller().setExpanded(std::vector<std::size_t>{styleIdx, fontIdx}, true);
+    selectAndClickValueColumn(std::vector<std::size_t>{styleIdx, fontIdx, 2});  // "bold"
+
+    auto* toggle = dynamic_cast<newui::Toggle*>(grid_->treeView()->childViews()[0]);
+    ASSERT_NE(toggle, nullptr);
+    ASSERT_FALSE(button_.style().font().bold());
+
+    toggle->setChecked(true);  // fires onCheckedChanged, same as a real click's handleClicked()
+
+    EXPECT_TRUE(button_.style().font().bold());
+}
+
+// Real, live-reported gap: FontPropertyEditor's "name" sub-property offered no way to pick a
+// real, installed font by name - only free text. subPropertyDropdownValues() (non-empty for
+// index 0) should make rebuildLiveEditor() build a real DropDownList instead of a text field.
+TEST_F(PropertiesGridTest, ClickingTheFontNameSubPropertyValueCreatesALiveDropdownOfRealFonts)
+{
+    grid_->setSelection(&button_);
+    std::size_t styleIdx = indexOfChildNamed({}, "style");
+    std::size_t fontIdx = indexOfChildNamed({styleIdx}, "font");
+    grid_->treeView()->controller().setExpanded(std::vector<std::size_t>{styleIdx}, true);
+    grid_->treeView()->controller().setExpanded(std::vector<std::size_t>{styleIdx, fontIdx}, true);
+
+    selectAndClickValueColumn(std::vector<std::size_t>{styleIdx, fontIdx, 0});  // "name"
+
+    ASSERT_EQ(grid_->treeView()->childViews().size(), 1u);
+    auto* dropdown = dynamic_cast<newui::DropDownList*>(grid_->treeView()->childViews()[0]);
+    ASSERT_NE(dropdown, nullptr);
+    ASSERT_NE(dropdown->model(), nullptr);
+    EXPECT_GT(dropdown->model()->size(), 0u) << "expected at least one real installed system font";
+}
+
+// Real, live-reported bug: vBar()/hBar() (inherited from ScrollView) are siblings of treeView_,
+// not part of it, so a click on either one never reached handleTreeMouseDown()/
+// handleSelectionChanged() at all - the live editor stayed on screen, positioned against the
+// *old* scroll offset, once the scrollbar drag actually scrolled the tree underneath it.
+TEST_F(PropertiesGridTest, ClickingTheVerticalScrollBarDestroysTheLiveEditor)
+{
+    grid_->setSelection(&button_);
+    std::size_t leafIndex = firstLeafIndexOfType(std::type_index(typeid(std::string)));
+    ASSERT_LT(leafIndex, properties_.size()) << "expected newui::Button to have a real std::string leaf property";
+    selectAndClickValueColumn(std::vector<std::size_t>{leafIndex});
+    ASSERT_EQ(grid_->treeView()->childViews().size(), 1u) << "expected the live editor to have been created";
+
+    grid_->vBar()->onMouseDown(*grid_->vBar(), newui::Point(), 0, 0);
+
+    EXPECT_TRUE(grid_->treeView()->childViews().empty());
+}
+
+TEST_F(PropertiesGridTest, ClickingTheHorizontalScrollBarDestroysTheLiveEditor)
+{
+    grid_->setSelection(&button_);
+    std::size_t leafIndex = firstLeafIndexOfType(std::type_index(typeid(std::string)));
+    ASSERT_LT(leafIndex, properties_.size()) << "expected newui::Button to have a real std::string leaf property";
+    selectAndClickValueColumn(std::vector<std::size_t>{leafIndex});
+    ASSERT_EQ(grid_->treeView()->childViews().size(), 1u) << "expected the live editor to have been created";
+
+    grid_->hBar()->onMouseDown(*grid_->hBar(), newui::Point(), 0, 0);
+
+    EXPECT_TRUE(grid_->treeView()->childViews().empty());
 }
 
 TEST_F(PropertiesGridTest, ClickingTheValueColumnGivesTheLiveEditorRealKeyboardFocus)

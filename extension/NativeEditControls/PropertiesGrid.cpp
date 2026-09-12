@@ -39,6 +39,12 @@ namespace CodeToolsVsix
         // second, separate wrapping layer, same convention Toolbox's own
         // constructor comment documents.
         addChild(treeView_);
+
+        // See handleScrollBarMouseDown()'s own doc comment (PropertiesGrid.h) for why this is
+        // needed - vBar()/hBar() are ScrollView's own chrome, siblings of treeView_, so a click on
+        // either one never reaches handleTreeMouseDown()/handleSelectionChanged() at all.
+        vBar()->onMouseDown.add(this, &PropertiesGrid::handleScrollBarMouseDown);
+        hBar()->onMouseDown.add(this, &PropertiesGrid::handleScrollBarMouseDown);
     }
 
     void PropertiesGrid::setSelection(newui::SubView* selected)
@@ -156,13 +162,15 @@ namespace CodeToolsVsix
         std::string initialText = isSubProperty
             ? liveEditor_->subPropertyValueAsString(node.subPropertyIndex) : liveEditor_->valueAsString();
 
-        // A SubPropertyEntry (a synthetic float component - x/y/width/
-        // height) is always plain text, regardless of what EditStyle the
-        // parent compound editor itself reports (SubProperties) - only
-        // the *parent* row's own now-unused editStyle() would ever say
-        // SubProperties, never reached here since this function already
-        // returned above for anything but PropertyLeaf/SubPropertyEntry.
-        if (!isSubProperty && node.property->type() == std::type_index(typeid(bool))) {
+        // A SubPropertyEntry is plain text *unless* the editor itself flags this specific
+        // sub-index as boolean-shaped (FlagsEnumPropertyEditor's per-bit rows, FontPropertyEditor's
+        // bold/italic/underlined/strikeThrough) - those paint a checkbox glyph (PropertyItem::paint(),
+        // via subPropertyIsBool()) and need a real Toggle here too, or clicking one would silently
+        // swap it for a text field showing "true"/"false" instead of actually toggling.
+        bool showsAsToggle = !isSubProperty
+            ? node.property->type() == std::type_index(typeid(bool))
+            : liveEditor_->subPropertyIsBool(node.subPropertyIndex);
+        if (showsAsToggle) {
             auto* toggle = new newui::Toggle();
             toggle->setVisible(true);
             toggle->setChecked(initialText == "true");
@@ -177,8 +185,13 @@ namespace CodeToolsVsix
             return;
         }
 
-        if (!isSubProperty && liveEditor_->editStyle() == PropertyEditor::EditStyle::Dropdown) {
-            dropdownModel_.rows = liveEditor_->dropdownValues();
+        std::vector<std::string> subDropdownValues = isSubProperty
+            ? liveEditor_->subPropertyDropdownValues(node.subPropertyIndex) : std::vector<std::string>();
+        bool showsAsDropdown = isSubProperty
+            ? !subDropdownValues.empty()
+            : liveEditor_->editStyle() == PropertyEditor::EditStyle::Dropdown;
+        if (showsAsDropdown) {
+            dropdownModel_.rows = isSubProperty ? subDropdownValues : liveEditor_->dropdownValues();
 
             auto* dropdown = new newui::DropDownList();
             dropdown->setVisible(true);
@@ -419,11 +432,17 @@ namespace CodeToolsVsix
 
     newui::SyncReturn PropertiesGrid::handleLiveToggleChanged(newui::Toggle& sender)
     {
-        // A SubPropertyEntry is always plain text (see rebuildLiveEditor())
-        // - a Toggle widget only ever exists for a whole-value bool
-        // property, so liveEditorSubIndex_ is never set here.
+        // liveEditorSubIndex_ is set when this Toggle is standing in for a boolean-shaped
+        // sub-property row (FlagsEnumPropertyEditor's per-bit rows, FontPropertyEditor's
+        // bold/italic/underlined/strikeThrough - see rebuildLiveEditor()'s showsAsToggle) rather
+        // than a whole-value bool property.
         if (liveEditor_ != nullptr) {
-            liveEditor_->setValueFromString(sender.isChecked() ? "true" : "false");
+            const char* text = sender.isChecked() ? "true" : "false";
+            if (liveEditorSubIndex_.has_value()) {
+                liveEditor_->setSubPropertyValueFromString(*liveEditorSubIndex_, text);
+            } else {
+                liveEditor_->setValueFromString(text);
+            }
             markSelectedViewDirty();
             treeView_->style().markDirty();
         }
@@ -451,13 +470,19 @@ namespace CodeToolsVsix
             return newui::SyncReturn::Handled;
         }
 
-        // A plain Dropdown widget otherwise only ever exists for a whole-value property.
+        // A plain Dropdown widget otherwise exists either for a whole-value property (e.g. an
+        // Enum) or, when liveEditorSubIndex_ is set, a sub-property row whose editor offers a
+        // fixed set of choices (FontPropertyEditor's "name" row - see subPropertyDropdownValues()).
         if (liveEditor_ == nullptr) {
             return newui::SyncReturn::Ignored;
         }
         std::any value = sender.model()->value(*sender.selectedIndex());
         if (const std::string* text = std::any_cast<std::string>(&value)) {
-            liveEditor_->setValueFromString(*text);
+            if (liveEditorSubIndex_.has_value()) {
+                liveEditor_->setSubPropertyValueFromString(*liveEditorSubIndex_, *text);
+            } else {
+                liveEditor_->setValueFromString(*text);
+            }
             markSelectedViewDirty();
             treeView_->style().markDirty();
         }
@@ -529,5 +554,12 @@ namespace CodeToolsVsix
         }
         draggingDivider_ = false;
         return newui::SyncReturn::Handled;
+    }
+
+    newui::SyncReturn PropertiesGrid::handleScrollBarMouseDown(newui::View& /*sender*/, const newui::Point& /*pt*/,
+        std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/)
+    {
+        destroyLiveEditor();
+        return newui::SyncReturn::Ignored;
     }
 }
