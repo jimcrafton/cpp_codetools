@@ -77,6 +77,8 @@ namespace CodeToolsVsix
         }
         liveEditor_.reset();
         liveEditorSubIndex_.reset();
+        liveEditorIsParentPicker_ = false;
+        parentPickerCandidates_.clear();
     }
 
     void PropertiesGrid::rebuildLiveEditor()
@@ -90,12 +92,23 @@ namespace CodeToolsVsix
 
         PropertiesModel::Node node = model_.nodeAt(*path);
         bool isSubProperty = node.kind == PropertiesModel::Kind::SubPropertyEntry;
-        if (node.kind != PropertiesModel::Kind::PropertyLeaf && !isSubProperty) {
+        bool isParentPicker = node.kind == PropertiesModel::Kind::ParentPicker;
+        if (node.kind != PropertiesModel::Kind::PropertyLeaf && !isSubProperty && !isParentPicker) {
             return;
         }
 
         std::optional<newui::Rect> rowRect = treeView_->rectForPath(*path);
         if (!rowRect.has_value()) {
+            return;
+        }
+
+        auto* propsController = dynamic_cast<PropertiesTreeController*>(&treeView_->controller());
+        float keyColumnFraction = propsController != nullptr
+            ? propsController->keyColumnFraction() : PropertiesTreeController::kDefaultKeyColumnFraction;
+        newui::Rect valueRect = PropertyItem::valueRectFor(*rowRect, *path, keyColumnFraction);
+
+        if (isParentPicker) {
+            buildParentPickerLiveEditor(node, valueRect);
             return;
         }
 
@@ -111,11 +124,6 @@ namespace CodeToolsVsix
         }
         liveEditor_->setUndoStack(undoStack_);
         liveEditorSubIndex_ = isSubProperty ? std::optional<std::size_t>(node.subPropertyIndex) : std::nullopt;
-
-        auto* propsController = dynamic_cast<PropertiesTreeController*>(&treeView_->controller());
-        float keyColumnFraction = propsController != nullptr
-            ? propsController->keyColumnFraction() : PropertiesTreeController::kDefaultKeyColumnFraction;
-        newui::Rect valueRect = PropertyItem::valueRectFor(*rowRect, *path, keyColumnFraction);
 
         std::string initialText = isSubProperty
             ? liveEditor_->subPropertyValueAsString(node.subPropertyIndex) : liveEditor_->valueAsString();
@@ -190,6 +198,43 @@ namespace CodeToolsVsix
         focusLiveEditorView();
     }
 
+    void PropertiesGrid::buildParentPickerLiveEditor(const PropertiesModel::Node& node, const newui::Rect& valueRect)
+    {
+        auto* view = static_cast<newui::SubView*>(node.ownerInstance);
+        if (view == nullptr || !parentCandidatesProvider_) {
+            return;
+        }
+        std::vector<std::pair<newui::SubView*, std::string>> candidates = parentCandidatesProvider_(view);
+
+        dropdownModel_.rows.clear();
+        parentPickerCandidates_.clear();
+        for (const auto& [candidate, label] : candidates) {
+            dropdownModel_.rows.push_back(label);
+            parentPickerCandidates_.push_back(candidate);
+        }
+
+        auto* dropdown = new newui::DropDownList();
+        dropdown->setVisible(true);
+        dropdown->setModel(&dropdownModel_);
+
+        newui::View* currentParent = view->parent();
+        for (std::size_t i = 0; i < parentPickerCandidates_.size(); ++i) {
+            if (parentPickerCandidates_[i] == currentParent) {
+                dropdown->setSelectedIndex(i);
+                break;
+            }
+        }
+
+        dropdown->setBounds(valueRect);
+        dropdown->onSelectionChanged.add(this, &PropertiesGrid::handleLiveDropdownChanged);
+        dropdown->onLostFocus.add(this, &PropertiesGrid::handleLiveEditorLostFocus);
+        dropdown->onKeyDown.add(this, &PropertiesGrid::handleLiveEditorKeyDown);
+        treeView_->addChild(dropdown);
+        liveEditorView_ = dropdown;
+        liveEditorIsParentPicker_ = true;
+        focusLiveEditorView();
+    }
+
     void PropertiesGrid::focusLiveEditorView()
     {
         // See this method's own declaration comment (PropertiesGrid.h) for
@@ -215,7 +260,8 @@ namespace CodeToolsVsix
 
         PropertiesModel::Node node = model_.nodeAt(*path);
         bool isEditable = node.kind == PropertiesModel::Kind::PropertyLeaf
-            || node.kind == PropertiesModel::Kind::SubPropertyEntry;
+            || node.kind == PropertiesModel::Kind::SubPropertyEntry
+            || node.kind == PropertiesModel::Kind::ParentPicker;
         if (!isEditable) {
             return;
         }
@@ -355,9 +401,27 @@ namespace CodeToolsVsix
 
     newui::SyncReturn PropertiesGrid::handleLiveDropdownChanged(newui::DropDownList& sender)
     {
-        // Same as handleLiveToggleChanged() above - a Dropdown widget only
-        // ever exists for a whole-value property.
-        if (!sender.selectedIndex().has_value() || liveEditor_ == nullptr) {
+        if (!sender.selectedIndex().has_value()) {
+            return newui::SyncReturn::Ignored;
+        }
+
+        if (liveEditorIsParentPicker_) {
+            std::size_t index = *sender.selectedIndex();
+            std::optional<std::vector<std::size_t>> path = treeView_->selectedPath();
+            if (index >= parentPickerCandidates_.size() || !path.has_value()) {
+                return newui::SyncReturn::Ignored;
+            }
+            auto* view = static_cast<newui::SubView*>(model_.nodeAt(*path).ownerInstance);
+            newui::SubView* newParent = parentPickerCandidates_[index];
+            if (view != nullptr && newParent != nullptr && parentChangeRequestedHandler_) {
+                parentChangeRequestedHandler_(view, newParent);
+                treeView_->style().markDirty();
+            }
+            return newui::SyncReturn::Handled;
+        }
+
+        // A plain Dropdown widget otherwise only ever exists for a whole-value property.
+        if (liveEditor_ == nullptr) {
             return newui::SyncReturn::Ignored;
         }
         std::any value = sender.model()->value(*sender.selectedIndex());

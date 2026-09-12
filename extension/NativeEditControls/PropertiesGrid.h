@@ -8,8 +8,10 @@
 #include <newui/undostack.h>
 
 #include <any>
+#include <functional>
 #include <memory>
 #include <optional>
+#include <utility>
 #include <vector>
 
 namespace CodeToolsVsix
@@ -56,6 +58,24 @@ namespace CodeToolsVsix
         // already uses.
         newui::TreeView* treeView() const { return treeView_; }
         PropertiesModel& model() { return model_; }
+
+        // PropertiesModel::Kind::ParentPicker's own live editor - not a PropertyEditor at all (see
+        // that Kind's own comment for why parent()/setParent() can't be a real registered
+        // Property), so it needs its own, separate provider/commit shape instead of reusing
+        // PropertyEditorRegistry. Given the View currently being edited, returns every valid
+        // reparent target (real containers only, already excluding view itself and its own
+        // descendants - a cycle guard the caller is expected to apply, same as
+        // DesignerEditor::parentCandidatesFor()) paired with a display label (a breadcrumb path,
+        // since a plain name() isn't guaranteed unique across the tree).
+        using ParentCandidatesProvider = std::function<std::vector<std::pair<newui::SubView*, std::string>>(newui::SubView*)>;
+        void setParentCandidatesProvider(ParentCandidatesProvider provider) { parentCandidatesProvider_ = std::move(provider); }
+
+        // Fired once the user actually picks a different entry from the Parent dropdown -
+        // commits nothing itself (this class has no undo/reparent logic of its own); the real
+        // caller (DesignerEditor) is expected to route this through the same undo-aware reparent
+        // path the canvas/Outline drags already use.
+        using ParentChangeRequestedHandler = std::function<void(newui::SubView* view, newui::SubView* newParent)>;
+        void setParentChangeRequestedHandler(ParentChangeRequestedHandler handler) { parentChangeRequestedHandler_ = std::move(handler); }
 
     private:
         // Minimal newui::ListModel over a plain string list - mirrors
@@ -107,6 +127,11 @@ namespace CodeToolsVsix
         // below now - selection changing by itself no longer activates an
         // editor (see that method's own comment for why).
         void rebuildLiveEditor();
+        // The Kind::ParentPicker branch of rebuildLiveEditor() - builds a real
+        // newui::DropDownList from parentCandidatesProvider_(view) instead of a PropertyEditor
+        // (see that Kind's own comment for why). Assumes destroyLiveEditor() already ran (same
+        // precondition rebuildLiveEditor()'s other branches share).
+        void buildParentPickerLiveEditor(const PropertiesModel::Node& node, const newui::Rect& valueRect);
         void destroyLiveEditor();
 
         // Explicitly claims real keyboard focus for liveEditorView_ - a
@@ -178,6 +203,20 @@ namespace CodeToolsVsix
         std::unique_ptr<PropertyEditor> liveEditor_;
         newui::SubView* liveEditorView_ = nullptr;
         StringListModel dropdownModel_;
+
+        ParentCandidatesProvider parentCandidatesProvider_;
+        ParentChangeRequestedHandler parentChangeRequestedHandler_;
+        // Parallel to dropdownModel_.rows (same index) while liveEditorView_ is a ParentPicker's
+        // own DropDownList - dropdownModel_ itself only ever holds plain display strings
+        // (newui::ListModel's own generic contract), so this is where the real newui::SubView*
+        // each row actually refers to lives. Cleared by destroyLiveEditor() same as every other
+        // live-editor-only state.
+        std::vector<newui::SubView*> parentPickerCandidates_;
+        // Set only while liveEditorView_ is a ParentPicker's own DropDownList - distinguishes
+        // handleLiveDropdownChanged()'s two real editor shapes (this one has no liveEditor_ at
+        // all, so liveEditor_ == nullptr can't be reused as the signal: that's also the
+        // otherwise-unreachable "no editor built" case).
+        bool liveEditorIsParentPicker_ = false;
 
         // Set only when the currently-selected row is a
         // PropertiesModel::Kind::SubPropertyEntry (e.g. bounds' own "x"

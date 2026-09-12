@@ -328,7 +328,9 @@ namespace CodeToolsVsix
         ctx.restore();
 
         std::string keyText;
-        if (node.kind == PropertiesModel::Kind::DelegateEntry) {
+        if (node.kind == PropertiesModel::Kind::ParentPicker) {
+            keyText = "Parent";
+        } else if (node.kind == PropertiesModel::Kind::DelegateEntry) {
             keyText = node.delegate->name();
         } else if (node.kind == PropertiesModel::Kind::SubPropertyEntry) {
             // Filled in below, once the parent compound property's own
@@ -340,6 +342,19 @@ namespace CodeToolsVsix
             keyText = node.property->name();
         }
         paintText(ctx, keyRect, keyText, dimTextColor(*this));
+
+        if (node.kind == PropertiesModel::Kind::ParentPicker) {
+            // Not backed by a real Property - reads selected_'s own live parent() directly
+            // (node.ownerInstance is the selected View itself, same instance the Root node
+            // carries). "(root)" for the design surface's own RootViewProxy (a real parent(),
+            // just not a SubView so it has no name() of its own worth showing).
+            auto* view = static_cast<newui::SubView*>(node.ownerInstance);
+            newui::View* parent = view != nullptr ? view->parent() : nullptr;
+            auto* parentSub = dynamic_cast<newui::SubView*>(parent);
+            std::string label = parentSub != nullptr ? parentSub->name() : (parent != nullptr ? "(root)" : "(none)");
+            paintText(ctx, valueRect, label, rowTextColor(*this));
+            return;
+        }
 
         if (node.kind == PropertiesModel::Kind::PropertyUnsupported) {
             paintText(ctx, valueRect, "(unsupported)", rowTextColor(*this));

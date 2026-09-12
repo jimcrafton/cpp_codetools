@@ -50,14 +50,24 @@ namespace CodeToolsVsix
     {
         switch (container.kind) {
         case Kind::Root: {
+            std::size_t parentRow = showsParentPicker() ? 1 : 0;
+            if (parentRow != 0 && index == 0) {
+                Node node;
+                node.kind = Kind::ParentPicker;
+                node.ownerClass = container.ownerClass;
+                node.ownerInstance = container.ownerInstance;
+                return node;
+            }
+            std::size_t propertyIndex = index - parentRow;
+
             std::vector<const Property*> properties;
             container.ownerClass->allProperties(properties);
-            if (index < properties.size()) {
-                return classifyProperty(properties[index], container.ownerClass, container.ownerInstance);
+            if (propertyIndex < properties.size()) {
+                return classifyProperty(properties[propertyIndex], container.ownerClass, container.ownerInstance);
             }
             std::vector<const Delegate*> delegates;
             container.ownerClass->allDelegates(delegates);
-            if (index == properties.size() && !delegates.empty()) {
+            if (propertyIndex == properties.size() && !delegates.empty()) {
                 Node node;
                 node.kind = Kind::DelegatesHeader;
                 node.ownerClass = container.ownerClass;
@@ -122,7 +132,8 @@ namespace CodeToolsVsix
             node.ownerClass->allProperties(properties);
             std::vector<const Delegate*> delegates;
             node.ownerClass->allDelegates(delegates);
-            return properties.size() + (delegates.empty() ? 0 : 1);
+            std::size_t parentRow = showsParentPicker() ? 1 : 0;
+            return parentRow + properties.size() + (delegates.empty() ? 0 : 1);
         }
         case Kind::PropertyGroup: {
             const Class* nested = node.property->getClass(node.ownerInstance);
@@ -190,6 +201,8 @@ namespace CodeToolsVsix
             std::vector<std::string> names = editor != nullptr ? editor->subPropertyNames() : std::vector<std::string>();
             return node.subPropertyIndex < names.size() ? names[node.subPropertyIndex] : std::string();
         }
+        case Kind::ParentPicker:
+            return std::string("Parent");
         case Kind::DelegatesHeader:
             return std::string("Delegates");
         case Kind::DelegateEntry:

@@ -13,6 +13,7 @@
 
 #include <gtest/gtest.h>
 
+#include <any>
 #include <fstream>
 #include <memory>
 #include <string>
@@ -1357,4 +1358,126 @@ TEST(DesignerEditorToolbar, ClickingNewClearsTheDesignSurfaceAndSelection)
     EXPECT_TRUE(editor.workspace()->rootViewProxy()->childViews().empty());
     EXPECT_EQ(editor.viewDesignerController().primary(), nullptr);
     EXPECT_FALSE(editor.isDirty());
+}
+
+// ---------------------------------------------------------------------------
+// The Properties panel's own Parent picker (PropertiesModel::Kind::ParentPicker) - wired in
+// setupUI() via propertiesPane()->setParentCandidatesProvider()/setParentChangeRequestedHandler(),
+// both private (parentCandidatesFor()/handlePropertiesParentChangeRequested(), DesignerEditor.h),
+// so exercised here entirely through the real public path (propertiesPane()'s own TreeView),
+// same "real public entry point, not a private reach-in" convention the canvas/Outline drag tests
+// above already follow.
+// ---------------------------------------------------------------------------
+
+TEST(DesignerEditor, PropertiesParentPickerReparentsTheSelectedViewAndIsUndoAware)
+{
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&root);
+    ASSERT_NE(editor.workspace(), nullptr);
+    root.setBounds(newui::Rect(0, 0, 1400, 700));
+
+    newui::RootViewProxy* surface = editor.workspace()->rootViewProxy();
+    ASSERT_NE(surface, nullptr);
+
+    auto* container = new newui::SubView();
+    container->setName("container");
+    container->setVisible(true);
+    container->setLayout(std::make_unique<newui::AnchorLayout>());
+    container->setBounds(newui::Rect(200, 10, 100, 100));
+    surface->addChild(container);
+
+    auto* control = new newui::SubView();
+    control->setName("control");
+    control->setVisible(true);
+    control->setBounds(newui::Rect(10, 10, 30, 20));
+    surface->addChild(control);
+
+    CodeToolsVsix::PropertiesGrid* propertiesGrid = editor.workspace()->propertiesPane();
+    ASSERT_NE(propertiesGrid, nullptr);
+    propertiesGrid->setSelection(control);
+    ASSERT_EQ(propertiesGrid->model().nodeAt({0}).kind, CodeToolsVsix::PropertiesModel::Kind::ParentPicker);
+
+    // Same "select, then click the value column" gesture PropertiesGridTest's own
+    // selectAndClickValueColumn() drives - reimplemented here since that helper is local to
+    // test_properties_grid.cpp.
+    propertiesGrid->treeView()->setSelectedPath(std::vector<std::size_t>{0});
+    std::optional<newui::Rect> rowRect = propertiesGrid->treeView()->rectForPath(std::vector<std::size_t>{0});
+    ASSERT_TRUE(rowRect.has_value());
+    auto* propsController = dynamic_cast<CodeToolsVsix::PropertiesTreeController*>(&propertiesGrid->treeView()->controller());
+    ASSERT_NE(propsController, nullptr);
+    newui::Rect valueRect = CodeToolsVsix::PropertyItem::valueRectFor(*rowRect, std::vector<std::size_t>{0}, propsController->keyColumnFraction());
+    newui::Point clickPt(valueRect.left() + 2.0f, valueRect.top() + 2.0f);
+    propertiesGrid->treeView()->onMouseDown(*propertiesGrid->treeView(), clickPt, 0, 0);
+
+    ASSERT_EQ(propertiesGrid->treeView()->childViews().size(), 1u);
+    auto* dropdown = dynamic_cast<newui::DropDownList*>(propertiesGrid->treeView()->childViews()[0]);
+    ASSERT_NE(dropdown, nullptr);
+
+    // Real container candidates only (surface + container - control itself is excluded, and
+    // there's nothing else in the tree) - the exact breadcrumb text isn't asserted here, just that
+    // "container" is findable and picking it actually reparents control.
+    std::size_t containerIndex = dropdown->model()->size();
+    for (std::size_t i = 0; i < dropdown->model()->size(); ++i) {
+        std::any value = dropdown->model()->value(i);
+        if (const std::string* text = std::any_cast<std::string>(&value); text != nullptr && text->find("container") != std::string::npos) {
+            containerIndex = i;
+            break;
+        }
+    }
+    ASSERT_LT(containerIndex, dropdown->model()->size()) << "expected \"container\" among the dropdown's own candidates";
+
+    dropdown->setSelectedIndex(containerIndex);
+
+    EXPECT_EQ(control->parent(), container);
+    ASSERT_TRUE(editor.undoStack().canUndo());
+    editor.undoStack().undo();
+    EXPECT_EQ(control->parent(), surface);
+}
+
+TEST(DesignerEditor, PropertiesParentPickerNeverOffersTheSelectedViewsOwnDescendantsOrItself)
+{
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&root);
+    ASSERT_NE(editor.workspace(), nullptr);
+    root.setBounds(newui::Rect(0, 0, 1400, 700));
+
+    newui::RootViewProxy* surface = editor.workspace()->rootViewProxy();
+    ASSERT_NE(surface, nullptr);
+
+    auto* container = new newui::SubView();
+    container->setName("container");
+    container->setVisible(true);
+    container->setLayout(std::make_unique<newui::AnchorLayout>());
+    surface->addChild(container);
+
+    auto* grandchild = new newui::SubView();
+    grandchild->setName("grandchild");
+    grandchild->setVisible(true);
+    container->addChild(grandchild);
+
+    CodeToolsVsix::PropertiesGrid* propertiesGrid = editor.workspace()->propertiesPane();
+    ASSERT_NE(propertiesGrid, nullptr);
+    propertiesGrid->setSelection(container);
+    ASSERT_EQ(propertiesGrid->model().nodeAt({0}).kind, CodeToolsVsix::PropertiesModel::Kind::ParentPicker);
+
+    propertiesGrid->treeView()->setSelectedPath(std::vector<std::size_t>{0});
+    std::optional<newui::Rect> rowRect = propertiesGrid->treeView()->rectForPath(std::vector<std::size_t>{0});
+    ASSERT_TRUE(rowRect.has_value());
+    auto* propsController = dynamic_cast<CodeToolsVsix::PropertiesTreeController*>(&propertiesGrid->treeView()->controller());
+    ASSERT_NE(propsController, nullptr);
+    newui::Rect valueRect = CodeToolsVsix::PropertyItem::valueRectFor(*rowRect, std::vector<std::size_t>{0}, propsController->keyColumnFraction());
+    propertiesGrid->treeView()->onMouseDown(*propertiesGrid->treeView(),
+        newui::Point(valueRect.left() + 2.0f, valueRect.top() + 2.0f), 0, 0);
+
+    ASSERT_EQ(propertiesGrid->treeView()->childViews().size(), 1u);
+    auto* dropdown = dynamic_cast<newui::DropDownList*>(propertiesGrid->treeView()->childViews()[0]);
+    ASSERT_NE(dropdown, nullptr);
+
+    // container is being reparented, so neither it nor its own descendant (grandchild) can
+    // legally appear - only surface (the root) is left as a candidate.
+    ASSERT_EQ(dropdown->model()->size(), 1u);
+    std::any value = dropdown->model()->value(std::size_t(0));
+    const std::string* text = std::any_cast<std::string>(&value);
+    ASSERT_NE(text, nullptr);
+    EXPECT_EQ(*text, surface->name());
 }

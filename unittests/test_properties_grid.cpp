@@ -291,3 +291,84 @@ TEST_F(PropertiesGridTest, DraggingTheDividerRepositionsTheLiveEditorWithoutLosi
     EXPECT_EQ(textField->text(), L"uncommitted typed text") << "typed-but-uncommitted text must survive a divider drag";
     EXPECT_NE(textField->bounds().left(), leftBefore) << "the widget should have actually moved with the new column split";
 }
+
+// ---------------------------------------------------------------------------
+// Kind::ParentPicker's own live editor - not a PropertyEditor at all (see
+// that Kind's own comment, PropertiesModel.h), so it's driven entirely by
+// setParentCandidatesProvider()/setParentChangeRequestedHandler() rather than
+// PropertyEditorRegistry. A real DesignerEditor wires these to
+// parentCandidatesFor()/handlePropertiesParentChangeRequested() - these tests
+// stand in with a bare fixture container/handler instead, same "test this
+// class's own contract independently of DesignerEditor" spirit every other
+// test in this file already follows.
+// ---------------------------------------------------------------------------
+
+class PropertiesGridParentPickerTest : public PropertiesGridTest {
+protected:
+    void SetUp() override {
+        PropertiesGridTest::SetUp();
+        container_.setName("container");
+        other_.setName("other");
+        container_.addChild(&button_);
+        container_.addChild(&other_);
+
+        grid_->setParentCandidatesProvider([this](newui::SubView* /*view*/) {
+            return std::vector<std::pair<newui::SubView*, std::string>>{
+                {&container_, "root > container"}, {&other_, "root > container > other"}};
+        });
+        grid_->setParentChangeRequestedHandler([this](newui::SubView* view, newui::SubView* newParent) {
+            ++changeRequestedCount_;
+            lastChangeView_ = view;
+            lastChangeNewParent_ = newParent;
+        });
+    }
+
+    void TearDown() override {
+        container_.removeChild(&button_);
+        container_.removeChild(&other_);
+        PropertiesGridTest::TearDown();
+    }
+
+    newui::SubView container_;
+    newui::SubView other_;
+    int changeRequestedCount_ = 0;
+    newui::SubView* lastChangeView_ = nullptr;
+    newui::SubView* lastChangeNewParent_ = nullptr;
+};
+
+TEST_F(PropertiesGridParentPickerTest, ClickingTheValueColumnCreatesALiveDropdownFromTheProvider)
+{
+    grid_->setSelection(&button_);
+    ASSERT_EQ(grid_->model().nodeAt({0}).kind, PropertiesModel::Kind::ParentPicker);
+
+    selectAndClickValueColumn(std::vector<std::size_t>{0});
+
+    ASSERT_EQ(grid_->treeView()->childViews().size(), 1u);
+    auto* dropdown = dynamic_cast<newui::DropDownList*>(grid_->treeView()->childViews()[0]);
+    ASSERT_NE(dropdown, nullptr);
+    ASSERT_EQ(dropdown->model()->size(), 2u);
+    // container_ is button_'s real current parent() - preselected, same
+    // "initial selection matches the current value" convention every other
+    // live dropdown editor already follows.
+    ASSERT_TRUE(dropdown->selectedIndex().has_value());
+    EXPECT_EQ(*dropdown->selectedIndex(), 0u);
+}
+
+TEST_F(PropertiesGridParentPickerTest, PickingADifferentEntryFiresTheHandlerNotAPropertyCommit)
+{
+    grid_->setSelection(&button_);
+    selectAndClickValueColumn(std::vector<std::size_t>{0});
+
+    auto* dropdown = dynamic_cast<newui::DropDownList*>(grid_->treeView()->childViews()[0]);
+    ASSERT_NE(dropdown, nullptr);
+
+    dropdown->setSelectedIndex(1);  // "other" - setSelectedIndex() already fires onSelectionChanged()
+
+    EXPECT_EQ(changeRequestedCount_, 1);
+    EXPECT_EQ(lastChangeView_, &button_);
+    EXPECT_EQ(lastChangeNewParent_, &other_);
+    // The handler owns the actual reparent (a real caller routes it through
+    // an undo-aware action) - this class never mutates the tree itself, so
+    // button_'s own real parent() is untouched by picking a dropdown entry.
+    EXPECT_EQ(button_.parent(), &container_);
+}

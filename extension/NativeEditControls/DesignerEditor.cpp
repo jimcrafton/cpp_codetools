@@ -248,6 +248,14 @@ namespace CodeToolsVsix
         // onActionPushed keeps their enabled state honest after any of
         // those, not just after an undo()/redo() click.
         workspace_->propertiesPane()->setUndoStack(&undoStack_);
+        // PropertiesModel::Kind::ParentPicker's own candidate list/commit path - see
+        // parentCandidatesFor()/handlePropertiesParentChangeRequested()'s own comments.
+        workspace_->propertiesPane()->setParentCandidatesProvider(
+            [this](newui::SubView* view) { return parentCandidatesFor(view); });
+        workspace_->propertiesPane()->setParentChangeRequestedHandler(
+            [this](newui::SubView* view, newui::SubView* newParent) {
+                handlePropertiesParentChangeRequested(view, newParent);
+            });
         workspace_->setUndoStack(&undoStack_);
         workspace_->setPrimarySelectionProvider([this]() { return viewDesignerController_.primary(); });
         undoStack_.onActionPushed.add(this, &DesignerEditor::handleUndoStackActionPushed);
@@ -564,6 +572,56 @@ namespace CodeToolsVsix
             getRootView()->markDirty();
         };
         return action;
+    }
+
+    namespace {
+        // Recursive walk backing parentCandidatesFor() below - node == exclude short-circuits
+        // before recursing into its children, so the whole subtree rooted at the View actually
+        // being reparented (never a legal target for itself, per View::setParent()'s own cycle
+        // guard) is skipped rather than just node itself. isRoot always includes
+        // viewDesignerModel_.root() (rootViewProxy()) regardless of ToolboxRegistry::isContainer()
+        // - it has no Layout of its own to satisfy that check, but Workspace's own Toolbox-add
+        // fallback (targetParent = isContainer(selected) ? selected : rootViewProxy_) already
+        // treats it as an always-valid container, so this matches that same convention.
+        void collectParentCandidates(newui::SubView* node, const std::string& breadcrumb, newui::SubView* exclude,
+            bool isRoot, std::vector<std::pair<newui::SubView*, std::string>>& out)
+        {
+            if (node == nullptr || node == exclude) {
+                return;
+            }
+            std::string label = breadcrumb.empty() ? node->name() : breadcrumb + " > " + node->name();
+            if (isRoot || ToolboxRegistry::isContainer(node)) {
+                out.emplace_back(node, label);
+            }
+            for (newui::SubView* child : node->childViews()) {
+                collectParentCandidates(child, label, exclude, false, out);
+            }
+        }
+    }
+
+    // Backs PropertiesGrid's own ParentPicker dropdown (PropertiesModel::Kind::ParentPicker) -
+    // every real container view currently reachable, excluding view itself and its own
+    // descendants (the same cycle guard View::setParent() already enforces, applied here too so
+    // the dropdown never even offers an illegal choice), labeled with a full breadcrumb path
+    // rather than a plain name() - names aren't guaranteed unique across the tree (two sibling
+    // SubViews can easily share a default name), so a flat name list could be ambiguous.
+    std::vector<std::pair<newui::SubView*, std::string>> DesignerEditor::parentCandidatesFor(newui::SubView* view) const
+    {
+        std::vector<std::pair<newui::SubView*, std::string>> candidates;
+        collectParentCandidates(viewDesignerModel_.root(), std::string(), view, true, candidates);
+        return candidates;
+    }
+
+    // Commits a Parent-dropdown pick through the exact same undo-aware reparent path the canvas
+    // drag and Document Outline drag already use (disposition Into == "become a child of
+    // newParent, appended at the end") - one shared code path, not a third, parallel
+    // implementation of the same reparent-with-position-preserved logic.
+    void DesignerEditor::handlePropertiesParentChangeRequested(newui::SubView* view, newui::SubView* newParent)
+    {
+        if (workspace_ == nullptr || workspace_->documentOutlinePane() == nullptr) {
+            return;
+        }
+        handleOutlineDropRequested(*workspace_->documentOutlinePane(), view, newParent, DocumentOutlineDropDisposition::Into);
     }
 
     std::vector<newui::SubView*> DesignerEditor::reparentTargets() const

@@ -478,16 +478,7 @@ namespace CodeToolsVsix
             cursorKind = target->disposition == DocumentOutlineDropDisposition::Into
                 ? newui::CursorKind::Hand : newui::CursorKind::SizeNS;
         }
-        treeView_->setCursor(newui::Cursor(cursorKind));
-
-        // TEMPORARY diagnostic - remove once the cursor-during-drag investigation is done.
-        {
-            char buf[256];
-            ::wsprintfA(buf, "[outline] handleTreeMouseMove wantKind=%d readBackKind=%d treeView=%p\n",
-                static_cast<int>(cursorKind), static_cast<int>(treeView_->cursorKind()),
-                static_cast<void*>(treeView_));
-            ::OutputDebugStringA(buf);
-        }
+        treeView_->cursor().setCursorKind(cursorKind);
 
         treeView_->redraw();
         return newui::SyncReturn::Ignored;
@@ -503,7 +494,7 @@ namespace CodeToolsVsix
 
         std::optional<DocumentOutlineDropTarget> target = outlineController_->pendingDropTarget();
         outlineController_->setPendingDropTarget(std::nullopt);
-        treeView_->setCursor(newui::Cursor(newui::CursorKind::Arrow));
+        treeView_->cursor().setCursorKind(newui::CursorKind::Arrow);
         treeView_->redraw();
 
         if (!started || dragged == nullptr || !target.has_value() || model_.source() == nullptr) {

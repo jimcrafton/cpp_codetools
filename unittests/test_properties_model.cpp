@@ -259,3 +259,57 @@ TEST_F(PropertiesModelTest, OutOfRangeRootIndexIsInvalid)
     EXPECT_EQ(model_.nodeAt(path).kind, PropertiesModel::Kind::Invalid);
     EXPECT_EQ(model_.childCount(path), 0u);
 }
+
+// ---------------------------------------------------------------------------
+// Kind::ParentPicker - a synthetic row, not backed by a real
+// newui::reflection::Property (see its own Kind comment, PropertiesModel.h).
+// PropertiesModelTest's own button_ has no parent() (never addChild()'d onto
+// anything), which is exactly why every test above can keep using {i} to mean
+// "the i-th real property" - showsParentPicker() correctly stays false for
+// it, matching this suite's own established index convention. These tests
+// use a real container instead specifically to exercise the "true" case.
+// ---------------------------------------------------------------------------
+
+TEST_F(PropertiesModelTest, ParentPickerIsAbsentWhenSelectedHasNoParent)
+{
+    ASSERT_EQ(button_.parent(), nullptr);
+    EXPECT_EQ(model_.childCount({}), properties_.size() + 1);
+    EXPECT_NE(model_.nodeAt({0}).kind, PropertiesModel::Kind::ParentPicker);
+    EXPECT_EQ(model_.nodeAt({0}).property, properties_[0]);
+}
+
+TEST_F(PropertiesModelTest, ParentPickerIsTheFirstRootChildWhenSelectedHasAParent)
+{
+    newui::SubView container;
+    container.setName("container");
+    container.addChild(&button_);
+    model_.setSelection(&button_);
+
+    ASSERT_EQ(button_.parent(), &container);
+    EXPECT_EQ(model_.childCount({}), properties_.size() + 2);  // +1 Parent row, +1 DelegatesHeader
+
+    PropertiesModel::Node parentNode = model_.nodeAt({0});
+    EXPECT_EQ(parentNode.kind, PropertiesModel::Kind::ParentPicker);
+    EXPECT_EQ(parentNode.ownerInstance, static_cast<void*>(&button_));
+    EXPECT_EQ(std::any_cast<std::string>(model_.value(std::vector<std::size_t>{0})), std::string("Parent"));
+
+    // Every real property/DelegatesHeader shifts by exactly one slot to make room.
+    for (std::size_t i = 0; i < properties_.size(); ++i) {
+        EXPECT_EQ(model_.nodeAt({i + 1}).property, properties_[i]) << properties_[i]->name();
+    }
+    EXPECT_EQ(model_.nodeAt({properties_.size() + 1}).kind, PropertiesModel::Kind::DelegatesHeader);
+
+    container.removeChild(&button_);
+}
+
+TEST_F(PropertiesModelTest, ParentPickerNeverAppearsForANonViewSelection)
+{
+    // showsParentPicker() dynamic_casts the live selected_ pointer to
+    // newui::View - selected_ is always a real SubView* today (View-derived),
+    // so this can't be exercised with a genuinely non-View object yet, but a
+    // null selection is the one case reachable right now and must still
+    // resolve to an empty, ParentPicker-free tree.
+    PropertiesModel empty;
+    EXPECT_EQ(empty.childCount({}), 0u);
+    EXPECT_EQ(empty.nodeAt({0}).kind, PropertiesModel::Kind::Invalid);
+}

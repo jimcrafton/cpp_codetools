@@ -5,6 +5,7 @@
 #include <newui/models.h>
 #include <newui/reflection.h>
 #include <newui/subview.h>
+#include <newui/view.h>
 
 #include <any>
 #include <vector>
@@ -56,6 +57,19 @@ namespace CodeToolsVsix
             // for why these can't just be real PropertyGroup/PropertyLeaf
             // nodes.
             PropertySubGroup, SubPropertyEntry,
+            // A synthetic "Parent" row, injected as the first Root child whenever
+            // showsParentPicker() (below) says so - not backed by a newui::reflection::Property at
+            // all (View::parent() is deliberately @reflect ignore=true, see its own comment in
+            // view.h: a registered Property would make ObjectWriter/ObjectReader walk straight
+            // back into the same subtree they're already recursing through to reach this View - a
+            // real serialization cycle, not a style choice). ownerInstance is the selected View
+            // itself (the same instance the Root node already carries); there is no ownerClass/
+            // property to speak of. See PropertiesGrid's own ParentCandidatesProvider/
+            // ParentChangeRequestedHandler for how this actually commits a reparent, and
+            // showsParentPicker() below for why this only ever appears for a real, attached View
+            // selection - a future non-View selection (an Animation, a Component, ...) must never
+            // get one.
+            ParentPicker,
             Invalid
         };
 
@@ -104,6 +118,22 @@ namespace CodeToolsVsix
         std::size_t childCountOf(const Node& node) const;
         static Node classifyProperty(const newui::reflection::Property* property,
             const newui::reflection::Class* ownerClass, void* ownerInstance);
+
+        // Gates the synthetic ParentPicker row (above) to a real newui::View selection that
+        // actually has a parent() to reparent *from* - a plain dynamic_cast on the live selected_
+        // pointer, not a reflection-class check, so this stays correct without any registry lookup
+        // once PropertiesModel eventually supports selecting a non-View object too (an Animation,
+        // a Component, ...): those simply aren't View-derived, so this returns false for them with
+        // no extra gating needed at the call site. selected_ is already a SubView* (View-derived)
+        // for every selection today, so the dynamic_cast is always true right now - it exists for
+        // that future case, not this one. The parent() != nullptr half matters today, though: a
+        // standalone SubView built in isolation (no addChild() onto anything, e.g. most of this
+        // class's own unit test fixtures) has nothing to reparent from - showing the row for one
+        // would be misleading (there's no real "current parent" to display or move away from).
+        bool showsParentPicker() const {
+            const newui::View* view = dynamic_cast<const newui::View*>(selected_);
+            return view != nullptr && view->parent() != nullptr;
+        }
 
         newui::SubView* selected_ = nullptr;
         const newui::reflection::Class* rootClass_ = nullptr;

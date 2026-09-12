@@ -177,6 +177,11 @@ namespace CodeToolsVsix
         newui::SyncReturn handleOutlineDropRequested(DocumentOutline& sender, newui::SubView* dragged,
             newui::SubView* referenceRow, DocumentOutlineDropDisposition disposition);
 
+        // PropertiesGrid's own Kind::ParentPicker provider/handler pair (wired in setupUI()) -
+        // see each one's own definition comment (DesignerEditor.cpp) for the real reasoning.
+        std::vector<std::pair<newui::SubView*, std::string>> parentCandidatesFor(newui::SubView* view) const;
+        void handlePropertiesParentChangeRequested(newui::SubView* view, newui::SubView* newParent);
+
         // Refreshes viewDesignerModel_ after Workspace's own Toolbox-add
         // wiring mutates rootViewProxy()'s children directly (see
         // Workspace::onDesignSurfaceChanged's own comment).

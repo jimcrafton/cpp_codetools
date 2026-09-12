@@ -221,3 +221,29 @@ TEST(PropertiesTreeControllerTest, SetKeyColumnFractionFiresOnDataChangedOnlyWhe
     controller.setKeyColumnFraction(0.6f);
     EXPECT_EQ(changedCount, 1);
 }
+
+TEST_F(PropertyItemTest, ParentPickerRowPaintsTheKeyAndTheCurrentParentsName)
+{
+    newui::SubView container;
+    container.setName("container");
+    container.addChild(&button_);
+    model_.setSelection(&button_);
+
+    ASSERT_EQ(model_.nodeAt({0}).kind, PropertiesModel::Kind::ParentPicker);
+    EXPECT_TRUE(paintPath({0}));
+
+    container.removeChild(&button_);
+}
+
+TEST_F(PropertyItemTest, ParentPickerRowStillPaintsWithNoParentButtonIsNeverGivenOne)
+{
+    // button_ (the fixture's own member) never gets addChild()'d anywhere in
+    // this test, so showsParentPicker() correctly keeps the row out of the
+    // tree entirely (see test_properties_model.cpp's own
+    // ParentPickerIsAbsentWhenSelectedHasNoParent) - nothing here paints a
+    // ParentPicker row at all, which is itself the behavior worth asserting:
+    // path {0} must resolve to a real property, never Invalid/ParentPicker.
+    ASSERT_EQ(button_.parent(), nullptr);
+    EXPECT_NE(model_.nodeAt({0}).kind, PropertiesModel::Kind::ParentPicker);
+    EXPECT_NE(model_.nodeAt({0}).kind, PropertiesModel::Kind::Invalid);
+}
