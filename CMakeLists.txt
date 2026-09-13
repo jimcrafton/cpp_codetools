@@ -184,6 +184,10 @@ add_library(NativeEditControls SHARED
     extension/NativeEditControls/PropertyEditor.cpp
     extension/NativeEditControls/GradientEditorDialog.h
     extension/NativeEditControls/GradientEditorDialog.cpp
+    extension/NativeEditControls/ColorPicker.h
+    extension/NativeEditControls/ColorPicker.cpp
+    extension/NativeEditControls/PaintUtils.h
+    extension/NativeEditControls/PaintUtils.cpp
     extension/NativeEditControls/ComponentEditor.h
     extension/NativeEditControls/ComponentEditor.cpp
     extension/NativeEditControls/ToolboxRegistry.h
@@ -252,6 +256,8 @@ add_executable(testharness
     extension/NativeEditControls/DesignerEditor.cpp
     extension/NativeEditControls/PropertyEditor.cpp
     extension/NativeEditControls/GradientEditorDialog.cpp
+    extension/NativeEditControls/ColorPicker.cpp
+    extension/NativeEditControls/PaintUtils.cpp
     extension/NativeEditControls/ComponentEditor.cpp
     extension/NativeEditControls/ToolboxRegistry.cpp
     extension/NativeEditControls/Toolbox.cpp
