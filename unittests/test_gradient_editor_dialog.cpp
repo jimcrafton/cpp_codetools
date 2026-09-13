@@ -22,6 +22,18 @@ namespace
         gradient.stops().push_back(newui::gfx::GradientStop(1.0f, newui::Color(0, 0, 255)));
         return gradient;
     }
+
+    // Positions fall inside GradientEditorDialog's own default shapeBounds() ({0,0,200,140}) -
+    // real tests below either use that default directly or set it explicitly to something
+    // matching previewBox()'s own test bounds for exact, checkable screen<->shape math.
+    newui::gfx::Gradient makeTwoPointGradient()
+    {
+        newui::gfx::Gradient gradient;
+        gradient.setKind(newui::gfx::GradientKind::Point);
+        gradient.points().push_back(newui::gfx::GradientPoint(newui::Point(20.0f, 20.0f), newui::Color(255, 0, 0)));
+        gradient.points().push_back(newui::gfx::GradientPoint(newui::Point(180.0f, 120.0f), newui::Color(0, 0, 255)));
+        return gradient;
+    }
 }
 
 TEST(GradientEditorDialogTest, SetGradientSeedsGradientBackVerbatim)
@@ -103,8 +115,10 @@ TEST(GradientEditorDialogTest, ChangingKindViaTheRealSegmentedControlDoesNotCras
     dialog.kindControl()->setSelectedIndex(static_cast<std::size_t>(newui::gfx::GradientKind::Point));
 
     EXPECT_EQ(dialog.gradient().kind(), newui::gfx::GradientKind::Point);
-    // Point isn't built yet (Phase 4) - the shared stop editor is hidden while it's selected.
-    EXPECT_FALSE(dialog.selectedStopEditor()->isVisible());
+    // Point has no 1D stop track at all (2D points are edited directly in the preview instead) -
+    // the shared item editor itself stays visible (now retargeted at the selected point).
+    EXPECT_FALSE(dialog.stopTrack()->isVisible());
+    EXPECT_TRUE(dialog.selectedItemEditor()->isVisible());
 }
 
 TEST(GradientEditorDialogTest, SwitchingBackFromPointRestoresTheSelectedStopEditor)
@@ -116,7 +130,8 @@ TEST(GradientEditorDialogTest, SwitchingBackFromPointRestoresTheSelectedStopEdit
     dialog.kindControl()->setSelectedIndex(static_cast<std::size_t>(newui::gfx::GradientKind::Linear));
 
     EXPECT_EQ(dialog.gradient().kind(), newui::gfx::GradientKind::Linear);
-    EXPECT_TRUE(dialog.selectedStopEditor()->isVisible());
+    EXPECT_TRUE(dialog.stopTrack()->isVisible());
+    EXPECT_TRUE(dialog.selectedItemEditor()->isVisible());
     EXPECT_EQ(dialog.colorPicker()->color().toString(), dialog.gradient().stops()[0].color().toString());
 }
 
@@ -245,11 +260,11 @@ TEST(GradientEditorDialogTest, DeleteStopButtonIsDisabledAtTheMinimumAndEnabledA
 {
     CodeToolsVsix::GradientEditorDialog dialog;
     dialog.setGradient(makeTwoStopLinearGradient());
-    ASSERT_NE(dialog.deleteStopButton(), nullptr);
-    EXPECT_FALSE(dialog.deleteStopButton()->isEnabled());
+    ASSERT_NE(dialog.deleteItemButton(), nullptr);
+    EXPECT_FALSE(dialog.deleteItemButton()->isEnabled());
 
     dialog.addStopAt(0.5f);
-    EXPECT_TRUE(dialog.deleteStopButton()->isEnabled());
+    EXPECT_TRUE(dialog.deleteItemButton()->isEnabled());
 }
 
 // Drives the real button click (not deleteSelectedStop() directly) - proves the wiring, matching
@@ -261,28 +276,30 @@ TEST(GradientEditorDialogTest, ClickingTheRealDeleteButtonRemovesTheSelectedStop
     dialog.addStopAt(0.5f);
     dialog.selectStop(2);
 
-    dialog.deleteStopButton()->onClick(*dialog.deleteStopButton());
+    dialog.deleteItemButton()->onClick(*dialog.deleteItemButton());
 
     EXPECT_EQ(dialog.gradient().stops().size(), 2u);
 }
 
-TEST(GradientEditorDialogTest, PreviewAndTrackAreHiddenForPointKindAndShownOtherwise)
+// track_ alone toggles by kind now - Point has no 1D stop position at all (its points are edited
+// directly in previewBox_ instead); previewBox_/selectedItemEditor_ stay visible for every kind.
+TEST(GradientEditorDialogTest, TrackIsHiddenForPointKindAndShownOtherwise)
 {
     CodeToolsVsix::GradientEditorDialog dialog;
     dialog.setGradient(makeTwoStopLinearGradient());
     ASSERT_TRUE(dialog.previewBox()->isVisible());
     ASSERT_TRUE(dialog.stopTrack()->isVisible());
-    ASSERT_TRUE(dialog.selectedStopEditor()->isVisible());
+    ASSERT_TRUE(dialog.selectedItemEditor()->isVisible());
 
     dialog.setKind(newui::gfx::GradientKind::Point);
-    EXPECT_FALSE(dialog.previewBox()->isVisible());
+    EXPECT_TRUE(dialog.previewBox()->isVisible());
     EXPECT_FALSE(dialog.stopTrack()->isVisible());
-    EXPECT_FALSE(dialog.selectedStopEditor()->isVisible());
+    EXPECT_TRUE(dialog.selectedItemEditor()->isVisible());
 
     dialog.setKind(newui::gfx::GradientKind::Linear);
     EXPECT_TRUE(dialog.previewBox()->isVisible());
     EXPECT_TRUE(dialog.stopTrack()->isVisible());
-    EXPECT_TRUE(dialog.selectedStopEditor()->isVisible());
+    EXPECT_TRUE(dialog.selectedItemEditor()->isVisible());
 }
 
 // Drives the real track's onMouseDown/onMouseMove/onMouseUp path (same convention
@@ -340,4 +357,301 @@ TEST(GradientEditorDialogTest, ClickingTheTrackAwayFromEveryHandleInsertsANewSto
     newui::Color midpoint = dialog.gradient().stops()[2].color();
     EXPECT_NEAR(midpoint.r, 127.5f, 0.1f);
     EXPECT_NEAR(midpoint.b, 127.5f, 0.1f);
+}
+
+// Phase 4 - GradientKind::Point. Unlike stops, a point's own position() *is* the real committed
+// data (see GradientEditorDialog.h's own header comment) - these tests exercise the real public
+// API directly; the PreviewBox drag tests further below drive the actual mouse path.
+
+TEST(GradientEditorDialogTest, SwitchingToPointSeedsTwoDefaultPoints)
+{
+    CodeToolsVsix::GradientEditorDialog dialog;
+    dialog.setGradient(makeTwoStopLinearGradient());
+
+    dialog.setKind(newui::gfx::GradientKind::Point);
+
+    EXPECT_EQ(dialog.gradient().points().size(), 2u);
+}
+
+// Real, live-debugged bug (found via a real breakpoint in PreviewBox::paint(), not guessed): a
+// real View's own Point-kind Gradient arrived at this dialog with pointBlendPower()/
+// pointRasterMax() already at 0 (not their real C++ class defaults, 2.0f/64) and 2 real points
+// already present - so the old "seed points if empty" guard alone never touched these two scalar
+// fields at all. A pointRasterMax() of 0 collapses rasterizePoints()'s own baked raster to a
+// degenerate ~1x1 image with an undefined pattern transform - exactly why the live preview showed
+// nothing but checkerboard, no visible blend at all. Reproduces that exact degenerate state
+// directly (not relying on whatever upstream process produced it live) and proves setGradient()
+// normalizes it.
+TEST(GradientEditorDialogTest, SetGradientNormalizesDegeneratePointBlendSettings)
+{
+    newui::gfx::Gradient degenerate = makeTwoPointGradient();
+    degenerate.setPointBlendPower(0.0f);
+    degenerate.setPointRasterMax(0);
+
+    CodeToolsVsix::GradientEditorDialog dialog;
+    dialog.setGradient(degenerate);
+
+    EXPECT_GT(dialog.gradient().pointBlendPower(), 0.0f);
+    EXPECT_GT(dialog.gradient().pointRasterMax(), 0);
+    // The real points themselves are untouched - only the degenerate scalars are normalized.
+    ASSERT_EQ(dialog.gradient().points().size(), 2u);
+    EXPECT_EQ(dialog.gradient().points()[0].color().toString(), degenerate.points()[0].color().toString());
+}
+
+TEST(GradientEditorDialogTest, SelectPointClampsToTheLastValidIndex)
+{
+    CodeToolsVsix::GradientEditorDialog dialog;
+    dialog.setGradient(makeTwoPointGradient());
+
+    dialog.selectPoint(5);
+
+    EXPECT_EQ(dialog.selectedPointIndex(), 1u);
+}
+
+TEST(GradientEditorDialogTest, SetSelectedPointColorMutatesOnlyThatPoint)
+{
+    CodeToolsVsix::GradientEditorDialog dialog;
+    dialog.setGradient(makeTwoPointGradient());
+
+    dialog.selectPoint(1);
+    dialog.setSelectedPointColor(newui::Color(0, 255, 0));
+
+    EXPECT_EQ(dialog.gradient().points()[1].color().toString(), newui::Color(0, 255, 0).toString());
+    EXPECT_EQ(dialog.gradient().points()[0].color().toString(), newui::Color(255, 0, 0).toString());
+}
+
+TEST(GradientEditorDialogTest, SetSelectedPointPositionMovesOnlyThatPoint)
+{
+    CodeToolsVsix::GradientEditorDialog dialog;
+    dialog.setGradient(makeTwoPointGradient());
+
+    dialog.selectPoint(0);
+    dialog.setSelectedPointPosition(newui::Point(55.0f, 66.0f));
+
+    EXPECT_FLOAT_EQ(dialog.gradient().points()[0].position().x, 55.0f);
+    EXPECT_FLOAT_EQ(dialog.gradient().points()[0].position().y, 66.0f);
+    EXPECT_FLOAT_EQ(dialog.gradient().points()[1].position().x, 180.0f);
+}
+
+TEST(GradientEditorDialogTest, AddPointAtSeedsColorFromTheNearestExistingPoint)
+{
+    CodeToolsVsix::GradientEditorDialog dialog;
+    dialog.setGradient(makeTwoPointGradient());
+
+    // Closer to point 0 (20,20) than point 1 (180,120).
+    dialog.addPointAt(newui::Point(30.0f, 30.0f));
+
+    ASSERT_EQ(dialog.gradient().points().size(), 3u);
+    EXPECT_EQ(dialog.selectedPointIndex(), 2u);
+    EXPECT_EQ(dialog.gradient().points()[2].color().toString(), newui::Color(255, 0, 0).toString());
+}
+
+TEST(GradientEditorDialogTest, DeleteSelectedPointRemovesItAndSelectsTheFirstPoint)
+{
+    CodeToolsVsix::GradientEditorDialog dialog;
+    dialog.setGradient(makeTwoPointGradient());
+    dialog.selectPoint(1);
+
+    dialog.deleteSelectedPoint();
+
+    EXPECT_EQ(dialog.gradient().points().size(), 1u);
+    EXPECT_EQ(dialog.selectedPointIndex(), 0u);
+}
+
+// A single point still renders something real (Gradient::rasterizePoints() blends however many
+// there are) - unlike stops, which need at least 2, so 1 is the real floor here.
+TEST(GradientEditorDialogTest, DeleteSelectedPointIsANoOpAtTheMinimumOfOnePoint)
+{
+    CodeToolsVsix::GradientEditorDialog dialog;
+    dialog.setGradient(makeTwoPointGradient());
+    dialog.deleteSelectedPoint();
+    ASSERT_EQ(dialog.gradient().points().size(), 1u);
+
+    dialog.deleteSelectedPoint();
+
+    EXPECT_EQ(dialog.gradient().points().size(), 1u);
+}
+
+TEST(GradientEditorDialogTest, SelectingAPointRetargetsTheSharedEditor)
+{
+    CodeToolsVsix::GradientEditorDialog dialog;
+    newui::gfx::Gradient seed = makeTwoPointGradient();
+    dialog.setGradient(seed);
+
+    dialog.selectPoint(1);
+
+    EXPECT_EQ(dialog.colorPicker()->color().toString(), seed.points()[1].color().toString());
+    EXPECT_EQ(dialog.hexField()->text(), CodeToolsVsix::utf8ToWide(seed.points()[1].color().toString()));
+}
+
+// Proves the wiring (colorPicker_->onColorChanged branches to setSelectedPointColor() when
+// working_.kind() == Point) - ColorPicker's own drag mechanics are already covered by
+// test_color_picker.cpp.
+TEST(GradientEditorDialogTest, DrivingTheRealColorPickerCommitsTheSelectedPointsColor)
+{
+    CodeToolsVsix::GradientEditorDialog dialog;
+    dialog.setGradient(makeTwoPointGradient());
+    dialog.selectPoint(1);
+
+    dialog.colorPicker()->setColor(newui::Color(0, 255, 0));
+
+    EXPECT_EQ(dialog.gradient().points()[1].color().toString(), newui::Color(0, 255, 0).toString());
+    EXPECT_EQ(dialog.gradient().points()[0].color().toString(), newui::Color(255, 0, 0).toString());
+}
+
+TEST(GradientEditorDialogTest, DeleteItemButtonThresholdIsOneForPointsNotTwo)
+{
+    CodeToolsVsix::GradientEditorDialog dialog;
+    dialog.setGradient(makeTwoPointGradient());
+    dialog.selectPoint(1);
+    dialog.deleteSelectedPoint();
+    ASSERT_EQ(dialog.gradient().points().size(), 1u);
+
+    // Only 1 point left - disabled, unlike stops' own floor of 2.
+    EXPECT_FALSE(dialog.deleteItemButton()->isEnabled());
+}
+
+TEST(GradientEditorDialogTest, PreviewBoxIgnoresMouseForNonPointKinds)
+{
+    CodeToolsVsix::GradientEditorDialog dialog;
+    dialog.setGradient(makeTwoStopLinearGradient());
+    newui::SubView* preview = dialog.previewBox();
+    ASSERT_NE(preview, nullptr);
+    preview->setBounds(newui::Rect(0.0f, 0.0f, 300.0f, 96.0f));
+
+    newui::SyncReturn result = preview->onMouseDown.syncCallFirst(*preview, newui::Point(50.0f, 50.0f), 0, 0);
+
+    EXPECT_EQ(result, newui::SyncReturn::Ignored);
+}
+
+// Drives the real previewBox()'s own onMouseDown/onMouseMove/onMouseUp path (same setBounds()-
+// first convention every other drag test in this file uses) - previewBox()'s own bounds are set
+// equal to shapeBounds() here so screen<->shape mapping is 1:1, keeping the expected numbers exact.
+TEST(GradientEditorDialogTest, DraggingTheRealPreviewBoxHandleRepositionsTheSelectedPoint)
+{
+    CodeToolsVsix::GradientEditorDialog dialog;
+    dialog.setShapeBounds(newui::Rect(0.0f, 0.0f, 200.0f, 140.0f));
+    dialog.setGradient(makeTwoPointGradient());
+    newui::SubView* preview = dialog.previewBox();
+    ASSERT_NE(preview, nullptr);
+    preview->setBounds(newui::Rect(0.0f, 0.0f, 200.0f, 140.0f));
+
+    // Point 0 sits at shape-space (20,20) - identical on screen since previewBox()'s bounds match
+    // shapeBounds() exactly here.
+    newui::SyncReturn downResult = preview->onMouseDown.syncCallFirst(*preview, newui::Point(20.0f, 20.0f), 0, 0);
+    EXPECT_EQ(downResult, newui::SyncReturn::Handled);
+    EXPECT_EQ(dialog.selectedPointIndex(), 0u);
+
+    newui::SyncReturn moveResult = preview->onMouseMove.syncCallFirst(*preview, newui::Point(100.0f, 70.0f), 0, 0);
+    EXPECT_EQ(moveResult, newui::SyncReturn::Handled);
+    EXPECT_NEAR(dialog.gradient().points()[0].position().x, 100.0f, 0.01f);
+    EXPECT_NEAR(dialog.gradient().points()[0].position().y, 70.0f, 0.01f);
+
+    newui::SyncReturn upResult = preview->onMouseUp.syncCallFirst(*preview, newui::Point(100.0f, 70.0f), 0, 0);
+    EXPECT_EQ(upResult, newui::SyncReturn::Handled);
+
+    // No longer dragging once mouseUp fired.
+    newui::SyncReturn moveAfterUp = preview->onMouseMove.syncCallFirst(*preview, newui::Point(0.0f, 0.0f), 0, 0);
+    EXPECT_EQ(moveAfterUp, newui::SyncReturn::Ignored);
+    EXPECT_NEAR(dialog.gradient().points()[0].position().x, 100.0f, 0.01f);
+}
+
+TEST(GradientEditorDialogTest, ClickingThePreviewBoxAwayFromEveryHandleAddsANewPoint)
+{
+    CodeToolsVsix::GradientEditorDialog dialog;
+    dialog.setShapeBounds(newui::Rect(0.0f, 0.0f, 200.0f, 140.0f));
+    dialog.setGradient(makeTwoPointGradient());
+    newui::SubView* preview = dialog.previewBox();
+    preview->setBounds(newui::Rect(0.0f, 0.0f, 200.0f, 140.0f));
+
+    // Far from both existing points (20,20)/(180,120) and their hit radius.
+    newui::SyncReturn result = preview->onMouseDown.syncCallFirst(*preview, newui::Point(100.0f, 70.0f), 0, 0);
+
+    EXPECT_EQ(result, newui::SyncReturn::Handled);
+    ASSERT_EQ(dialog.gradient().points().size(), 3u);
+    EXPECT_EQ(dialog.selectedPointIndex(), 2u);
+    EXPECT_NEAR(dialog.gradient().points()[2].position().x, 100.0f, 0.01f);
+    EXPECT_NEAR(dialog.gradient().points()[2].position().y, 70.0f, 0.01f);
+}
+
+// Real, live-reported bug: the preview showed bare checkerboard for Point kind, no visible color
+// blend at all. Root cause - newui::Color's own (r,g,b,a) constructor stores raw, unclamped
+// floats: Color(255, 255, 255) is *not* white, it's (255.0f, 255.0f, 255.0f, 1.0f), wildly out of
+// [0,1] range. That never visibly broke Linear/Radial/Conic stops (blend2d's own per-channel
+// stop-color packing clamps independently), but rasterizePoints()'s weighted-average blend
+// operates on the raw values directly, with no clamping until the very end - so even a tiny,
+// far-away point's weight times 255 could swamp a much larger nearby weight times a
+// correctly-scaled color, producing exactly the wrong-colored (or here, all-white) result seen
+// live. Fixed in seedDefaultPointsIfEmpty() (real [0,1]-scale Color(1.0f, 1.0f, 1.0f)) - this
+// test proves the raster itself now blends correctly near each real point, not just that
+// toBLVar()/rasterizePoints() produces *some* non-empty image (which it already did even with the
+// bug - the image was real, just filled with the wrong color).
+TEST(GradientEditorDialogTest, PointGradientRasterBlendsTowardTheNearestPointsRealColor)
+{
+    newui::gfx::Gradient g;
+    g.setKind(newui::gfx::GradientKind::Point);
+    g.points().push_back(newui::gfx::GradientPoint(newui::Point(20.0f, 20.0f), newui::Color(0.0f, 0.0f, 0.0f)));
+    g.points().push_back(newui::gfx::GradientPoint(newui::Point(180.0f, 120.0f), newui::Color(1.0f, 1.0f, 1.0f)));
+
+    newui::Rect bounds(0.0f, 0.0f, 336.0f, 96.0f);
+    BLVar fill = g.toBLVar(bounds);
+    ASSERT_TRUE(fill.is_pattern());
+    BLImage img = fill.as<BLPattern>().get_image();
+    ASSERT_FALSE(img.is_empty());
+
+    BLImageData data;
+    img.get_data(&data);
+    const uint8_t* pixels = static_cast<const uint8_t*>(data.pixel_data);
+    auto pixelAt = [&](int x, int y) { return pixels + intptr_t(y) * data.stride + intptr_t(x) * 4; };
+
+    // Top-left corner raster pixel is nearest the black point (20,20) - premultiplied BGRA should
+    // be near-black, not near-white.
+    const uint8_t* nearBlack = pixelAt(0, 0);
+    EXPECT_LT(int(nearBlack[0]), 40) << "blue channel too high near the black point";
+    EXPECT_LT(int(nearBlack[2]), 40) << "red channel too high near the black point";
+
+    // Bottom-right corner raster pixel is nearest the white point (180,120) - should be near-white.
+    // Inverse-distance blending never reaches pure 255 here (the black point is still a finite,
+    // if much larger, distance away too) - 190 is comfortably "clearly white-ish", not a demand
+    // for perfect purity.
+    const uint8_t* nearWhite = pixelAt(int(img.size().w) - 1, int(img.size().h) - 1);
+    EXPECT_GT(int(nearWhite[0]), 190) << "blue channel too low near the white point";
+    EXPECT_GT(int(nearWhite[2]), 190) << "red channel too low near the white point";
+}
+
+// The previous test only inspected rasterizePoints()'s own intermediate BLImage - it never proved
+// that ctx.set_fill_style(fill)/ctx.fill_rect() (the exact call PreviewBox::paint() makes) actually
+// composites that image onto a real canvas the way it visibly needs to. This one renders through a
+// real BLContext bound to a real BLImage, pre-filled with a known sentinel color, and checks that
+// color was actually overwritten - the only way to tell whether the fill call itself is a no-op.
+TEST(GradientEditorDialogTest, PointGradientFillActuallyPaintsOntoARealCanvas)
+{
+    newui::gfx::Gradient g;
+    g.setKind(newui::gfx::GradientKind::Point);
+    g.points().push_back(newui::gfx::GradientPoint(newui::Point(20.0f, 20.0f), newui::Color(0.0f, 0.0f, 0.0f)));
+    g.points().push_back(newui::gfx::GradientPoint(newui::Point(180.0f, 120.0f), newui::Color(1.0f, 1.0f, 1.0f)));
+
+    newui::Rect bounds(0.0f, 0.0f, 200.0f, 140.0f);
+
+    BLImage canvas;
+    ASSERT_EQ(canvas.create(int(bounds.width()), int(bounds.height()), BL_FORMAT_PRGB32), BL_SUCCESS);
+
+    BLContext ctx(canvas);
+    // Sentinel: pure opaque red, nothing else in this test ever produces red.
+    ctx.set_fill_style(BLRgba32(255, 0, 0, 255));
+    ctx.fill_all();
+
+    BLVar fill = g.toBLVar(bounds);
+    ctx.set_fill_style(fill);
+    ctx.fill_rect(BLRect(bounds));
+    ctx.end();
+
+    BLImageData data;
+    canvas.get_data(&data);
+    const uint8_t* px = static_cast<const uint8_t*>(data.pixel_data) + intptr_t(70) * data.stride + intptr_t(100) * 4;
+    // Center of the canvas - should be some blend of black/white (all channels roughly equal,
+    // none of them the sentinel's pure red), if the fill actually painted at all.
+    bool stillSentinelRed = (int(px[2]) > 200 && int(px[1]) < 40 && int(px[0]) < 40);
+    EXPECT_FALSE(stillSentinelRed) << "fill_rect() left the sentinel red untouched - the Point "
+        << "gradient fill never actually painted anything (BGR=" << int(px[0]) << "," << int(px[1]) << "," << int(px[2]) << ")";
 }
