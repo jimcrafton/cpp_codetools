@@ -139,6 +139,20 @@ namespace CodeToolsVsix
         liveEditor_->setUndoStack(undoStack_);
         liveEditorSubIndex_ = isSubProperty ? std::optional<std::size_t>(node.subPropertyIndex) : std::nullopt;
 
+        // EditStyle::Dialog (e.g. GradientPropertyEditor) never fits SubProperties' fixed-row
+        // shape at all (variable-length stops()/points()) - there's no inline live editor widget
+        // to build here. edit() itself blocks (a real modal newui::Dialog), commits internally
+        // (PropertyEditor::commitValue(), same undo-aware path every other editor already uses)
+        // and returns once the user closes it - only a display refresh is needed afterward, same
+        // as every other commit path below.
+        if (!isSubProperty && liveEditor_->editStyle() == PropertyEditor::EditStyle::Dialog) {
+            liveEditor_->edit(model_.selected());
+            markSelectedViewDirty();
+            treeView_->style().markDirty();
+            liveEditor_.reset();
+            return;
+        }
+
         // "bounds" specifically (see Node::readOnly's own comment, PropertiesModel.h - this row
         // is only ever reachable here at all once that gating has already confirmed the owning
         // View's real parent affords free positioning) - keeps AnchorLayoutParams in sync with

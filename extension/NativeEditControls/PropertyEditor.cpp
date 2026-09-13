@@ -1,4 +1,5 @@
 #include "PropertyEditor.h"
+#include "GradientEditorDialog.h"
 
 #include <algorithm>
 #include <cctype>
@@ -27,6 +28,16 @@ namespace CodeToolsVsix
                 text.pop_back();
             }
             return text;
+        }
+
+        std::string gradientKindName(newui::gfx::GradientKind kind)
+        {
+            switch (kind) {
+            case newui::gfx::GradientKind::Linear: return "Linear";
+            case newui::gfx::GradientKind::Radial: return "Radial";
+            case newui::gfx::GradientKind::Conic: return "Conic";
+            default: return "Point";
+            }
         }
 
         // Whether a candidate Font would actually resolve to a real, loadable BLFont -
@@ -382,6 +393,45 @@ namespace CodeToolsVsix
         commitValue(std::any(f));
     }
 
+    std::string GradientPropertyEditor::valueAsString() const
+    {
+        newui::gfx::Gradient g = std::any_cast<newui::gfx::Gradient>(rawValue());
+        std::string summary = gradientKindName(g.kind());
+        if (g.kind() != newui::gfx::GradientKind::Point) {
+            summary += " \xC2\xB7 " + std::to_string(g.stops().size()) + " stops";
+        } else {
+            summary += " \xC2\xB7 " + std::to_string(g.points().size()) + " points";
+        }
+        return summary;
+    }
+
+    std::optional<std::any> GradientPropertyEditor::parseValue(const std::string& /*text*/) const
+    {
+        // Dialog-only editing - see this class's own declaration comment (PropertyEditor.h) for
+        // why there's no sensible single-line text form to accept here.
+        return std::nullopt;
+    }
+
+    void GradientPropertyEditor::edit(newui::View* owner)
+    {
+        newui::gfx::Gradient current = std::any_cast<newui::gfx::Gradient>(rawValue());
+
+        GradientEditorDialog dialog;
+        dialog.setShapeBounds(owner->bounds());
+        dialog.setGradient(current);
+
+        // newui::Dialog::showModal(View*) resolves the real owning HWND via
+        // owner->rootView()->windowHandle() - works whether that RootView is hosted by a real
+        // newui::Frame (testharness.exe) or lives directly inside a native HWND with no Frame at
+        // all (NativeEditControls' VSIX-hosted RootView), unlike the Frame*-only overload. owner
+        // is always a real, attached View here - PropertiesGrid (this method's only caller) never
+        // reaches EditStyle::Dialog dispatch without a live model_.selected() backing the property
+        // tree a PropertyLeaf row came from.
+        if (dialog.showModal(owner) == newui::DialogResult::Ok) {
+            commitValue(std::any(dialog.gradient()));
+        }
+    }
+
     std::string EnumPropertyEditor::valueAsString() const
     {
         std::uint64_t value = enum_->toUInt64(rawValue());
@@ -640,5 +690,7 @@ namespace CodeToolsVsix
             [](const newui::reflection::Property* p, void* instance) { return std::make_unique<RectPropertyEditor>(p, instance); });
         registerEditor(std::type_index(typeid(newui::Font)),
             [](const newui::reflection::Property* p, void* instance) { return std::make_unique<FontPropertyEditor>(p, instance); });
+        registerEditor(std::type_index(typeid(newui::gfx::Gradient)),
+            [](const newui::reflection::Property* p, void* instance) { return std::make_unique<GradientPropertyEditor>(p, instance); });
     }
 }

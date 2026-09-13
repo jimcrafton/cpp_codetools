@@ -88,7 +88,7 @@ namespace CodeToolsVsix
             return fileName.empty() ? std::string() : wideToUtf8(stripExtension(fileName));
         }
 
-        // The real newui::Dialog::ShowOpenFile()/ShowSaveFile() (native
+        // The real newui::Dialog::showOpenFile()/showSaveFile() (native
         // IFileDialog, dialogs.h) - not a raw GetOpenFileNameW()/
         // GetSaveFileNameW() call, which would've duplicated a real,
         // already-built mechanism. Filtered to *.newui specifically,
@@ -106,8 +106,8 @@ namespace CodeToolsVsix
             options.filters.push_back({"newui files", "*.newui"});
 
             std::string utf8Path;
-            bool ok = forSave ? newui::Dialog::ShowSaveFile(hwndOwner, options, utf8Path)
-                               : newui::Dialog::ShowOpenFile(hwndOwner, options, utf8Path);
+            bool ok = forSave ? newui::Dialog::showSaveFile(hwndOwner, options, utf8Path)
+                               : newui::Dialog::showOpenFile(hwndOwner, options, utf8Path);
             return ok ? utf8ToWide(utf8Path) : std::wstring();
         }
     }

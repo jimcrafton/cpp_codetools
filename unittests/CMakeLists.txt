@@ -23,6 +23,7 @@ gtest_discover_tests(cpptools_tests)
 # PropertyEditor/ComponentEditor tests need.
 add_executable(nativeeditcontrols_tests
     test_property_editor.cpp
+    test_gradient_editor_dialog.cpp
     test_component_editor.cpp
     test_designer_editor.cpp
     test_workspace.cpp
@@ -38,6 +39,7 @@ add_executable(nativeeditcontrols_tests
     test_selection_overlay.cpp
     test_layout_editing_policy.cpp
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/PropertyEditor.cpp"
+    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/GradientEditorDialog.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/ComponentEditor.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/ToolboxRegistry.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/Toolbox.cpp"

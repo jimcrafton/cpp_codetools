@@ -224,7 +224,7 @@ int main()
             newui::FileDialogOptions options;
             options.title = "Select a project folder";
             std::string selectedPath;
-            if (newui::Dialog::ShowBrowseForFolder(frame.frameHandle(), options, selectedPath))
+            if (newui::Dialog::showBrowseForFolder(frame.frameHandle(), options, selectedPath))
             {
                 directoryTree->setRootPath(selectedPath);
                 // "we need to know what directory/project we're working on" even without a real

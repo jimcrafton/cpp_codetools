@@ -1,5 +1,6 @@
 #include "../extension/NativeEditControls/PropertyEditor.h"
 
+#include <newui/graphics.h>
 #include <newui/reflection.h>
 
 #include <gtest/gtest.h>
@@ -61,6 +62,7 @@ namespace
         Direction facing = Direction::North;
         Modifiers modifiers = Modifiers::None;
         newui::Font font;
+        newui::gfx::Gradient gradient;  // getter/setter, identical addressability gap font had - see GradientPropertyEditorRegistersForTheGradientTypeWildcard
 
         bool isEnabled() const { return enabled; }
         void setEnabled(bool v) { enabled = v; }
@@ -88,6 +90,8 @@ namespace
         void setModifiers(Modifiers v) { modifiers = v; }
         newui::Font getFont() const { return font; }
         void setFont(newui::Font v) { font = v; }
+        newui::gfx::Gradient getGradient() const { return gradient; }
+        void setGradient(newui::gfx::Gradient v) { gradient = v; }
     };
 
     const Class* registerWidgetOnce()
@@ -109,7 +113,8 @@ namespace
                 .property("bounds", Scope::Public, &Widget::getBounds, &Widget::setBounds)
                 .property("facing", Scope::Public, &Widget::getFacing, &Widget::setFacing)
                 .property("modifiers", Scope::Public, &Widget::getModifiers, &Widget::setModifiers)
-                .property("font", Scope::Public, &Widget::getFont, &Widget::setFont);
+                .property("font", Scope::Public, &Widget::getFont, &Widget::setFont)
+                .property("gradient", Scope::Public, &Widget::getGradient, &Widget::setGradient);
             ReflectionRegistry::registerClass(builder);
             return classinfo(typeid(Widget));
         }();
@@ -490,6 +495,52 @@ TEST_F(PropertyEditorTest, FontEditorCommitsABoldEditThatDoesResolve)
     editor->setSubPropertyValueFromString(2, "true");  // "bold"
 
     EXPECT_TRUE(widget_.font.bold());
+}
+
+// gfx::Fill::gradient() has the identical addressability gap font had (a non-const getter, but
+// also a real setGradient()) - see GradientPropertyEditor's own declaration comment
+// (PropertyEditor.h) for the full reasoning. Registered the same type-only-wildcard way
+// FontPropertyEditor is.
+TEST_F(PropertyEditorTest, GradientEditorRegistersForTheGradientTypeWildcard)
+{
+    const Property* prop = findProperty(widgetClass_, "gradient");
+    ASSERT_NE(prop, nullptr);
+
+    auto editor = CodeToolsVsix::PropertyEditorRegistry::instance().createEditor(prop, widgetClass_, &widget_);
+    ASSERT_NE(editor, nullptr);
+    EXPECT_NE(dynamic_cast<CodeToolsVsix::GradientPropertyEditor*>(editor.get()), nullptr);
+}
+
+TEST_F(PropertyEditorTest, GradientEditorReportsDialogEditStyle)
+{
+    const Property* prop = findProperty(widgetClass_, "gradient");
+    auto editor = CodeToolsVsix::PropertyEditorRegistry::instance().createEditor(prop, widgetClass_, &widget_);
+    ASSERT_NE(editor, nullptr);
+
+    EXPECT_EQ(editor->editStyle(), CodeToolsVsix::PropertyEditor::EditStyle::Dialog);
+}
+
+TEST_F(PropertyEditorTest, GradientEditorValueAsStringSummarizesKindAndStopCount)
+{
+    const Property* prop = findProperty(widgetClass_, "gradient");
+    auto editor = CodeToolsVsix::PropertyEditorRegistry::instance().createEditor(prop, widgetClass_, &widget_);
+    ASSERT_NE(editor, nullptr);
+
+    widget_.gradient.setKind(newui::gfx::GradientKind::Linear);
+    widget_.gradient.stops().push_back(newui::gfx::GradientStop(0.0f, newui::Color()));
+    widget_.gradient.stops().push_back(newui::gfx::GradientStop(1.0f, newui::Color()));
+    EXPECT_EQ(editor->valueAsString(), "Linear \xC2\xB7 2 stops");
+}
+
+// Dialog-only editing - there's no sensible single-line text form to type a whole gradient into
+// (see GradientPropertyEditor::parseValue()'s own comment).
+TEST_F(PropertyEditorTest, GradientEditorParseValueAlwaysRejectsText)
+{
+    const Property* prop = findProperty(widgetClass_, "gradient");
+    auto editor = CodeToolsVsix::PropertyEditorRegistry::instance().createEditor(prop, widgetClass_, &widget_);
+    ASSERT_NE(editor, nullptr);
+
+    EXPECT_FALSE(editor->parseValue("anything").has_value());
 }
 
 TEST_F(PropertyEditorTest, EnumEditorRoundTripsThroughTheRealProperty)

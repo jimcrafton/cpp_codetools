@@ -12,6 +12,7 @@
 #include <newui/color.h>
 #include <newui/font.h>
 #include <newui/geometry.h>
+#include <newui/graphics.h>
 #include <newui/reflection.h>
 #include <newui/undostack.h>
 #include <newui/view.h>
@@ -237,6 +238,32 @@ namespace CodeToolsVsix
         void setSubPropertyValueFromString(std::size_t index, const std::string& text) override;
         bool subPropertyIsBool(std::size_t index) const override { return index >= 2; }
         std::vector<std::string> subPropertyDropdownValues(std::size_t index) const override;
+    };
+
+    // gfx::Fill::gradient() has the identical addressability problem font had (a non-const
+    // getter, but also a real setGradient() - reflectgen.py's addressability rule explicitly
+    // excludes that shape too, confirmed by reading collect_property_accessors()/
+    // is_addressable_getter directly), so this is registered the same type-only-wildcard way
+    // FontPropertyEditor is. Unlike Font/Rect, Gradient has variable-length collections
+    // (stops()/points()) that don't fit EditStyle::SubProperties' fixed named-row shape at all -
+    // this is the first real consumer of EditStyle::Dialog/edit(), previously declared but never
+    // wired anywhere (see PropertiesGrid.cpp's own rebuildLiveEditor() dispatch for the other
+    // half of this). parseValue() always rejects text - this property is dialog-only editable,
+    // there's no sensible single-line text form to type a whole gradient into.
+    class GradientPropertyEditor : public PropertyEditor
+    {
+    public:
+        using PropertyEditor::PropertyEditor;
+        EditStyle editStyle() const override { return EditStyle::Dialog; }
+        std::string valueAsString() const override;
+        std::optional<std::any> parseValue(const std::string& text) const override;
+        // owner is the View currently being edited - always real (PropertiesGrid, this method's
+        // only caller, never reaches EditStyle::Dialog dispatch without a live model_.selected()
+        // backing the property tree a PropertyLeaf row came from). Its bounds() anchors the
+        // dialog's shape-relative math (radial/conic center chip, preview aspect - see
+        // GradientEditorDialog::setShapeBounds()); it's also passed straight to
+        // newui::Dialog::showModal(View*) as the modal's real owner.
+        void edit(newui::View* owner) override;
     };
 
     // A generic dropdown for *any* non-flags registered newui::reflection::Enum -
