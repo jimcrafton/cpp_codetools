@@ -655,3 +655,217 @@ TEST(GradientEditorDialogTest, PointGradientFillActuallyPaintsOntoARealCanvas)
     EXPECT_FALSE(stillSentinelRed) << "fill_rect() left the sentinel red untouched - the Point "
         << "gradient fill never actually painted anything (BGR=" << int(px[0]) << "," << int(px[1]) << "," << int(px[2]) << ")";
 }
+
+// Phase 5 - built-in presets (design/reference/gradient_editor_dialog.html's own `presets` array,
+// minus each entry's own "angle" - see GradientEditorDialog.h's own header comment on why that's
+// dropped).
+TEST(GradientEditorDialogTest, ApplyPresetSetsKindToLinearAndReplacesStops)
+{
+    CodeToolsVsix::GradientEditorDialog dialog;
+    dialog.setGradient(makeTwoPointGradient());
+    ASSERT_EQ(dialog.gradient().kind(), newui::gfx::GradientKind::Point);
+
+    dialog.applyPreset(0);
+
+    EXPECT_EQ(dialog.gradient().kind(), newui::gfx::GradientKind::Linear);
+    ASSERT_EQ(dialog.gradient().stops().size(), 2u);
+    newui::Color expected;
+    newui::Color::fromString("#5A7CE9", expected);
+    EXPECT_EQ(dialog.gradient().stops()[0].color().toString(), expected.toString());
+}
+
+TEST(GradientEditorDialogTest, ApplyPresetSelectsTheFirstStopAndRefreshesTheSharedEditor)
+{
+    CodeToolsVsix::GradientEditorDialog dialog;
+    dialog.setGradient(makeTwoStopLinearGradient());
+
+    dialog.applyPreset(1);
+
+    EXPECT_EQ(dialog.selectedStopIndex(), 0u);
+    EXPECT_EQ(dialog.colorPicker()->color().toString(), dialog.gradient().stops()[0].color().toString());
+}
+
+TEST(GradientEditorDialogTest, ApplyPresetOutOfRangeIsANoOp)
+{
+    CodeToolsVsix::GradientEditorDialog dialog;
+    newui::gfx::Gradient seed = makeTwoStopLinearGradient();
+    dialog.setGradient(seed);
+
+    dialog.applyPreset(CodeToolsVsix::GradientEditorDialog::presetCount() + 1);
+
+    ASSERT_EQ(dialog.gradient().stops().size(), 2u);
+    EXPECT_EQ(dialog.gradient().stops()[0].color().toString(), seed.stops()[0].color().toString());
+    EXPECT_EQ(dialog.gradient().stops()[1].color().toString(), seed.stops()[1].color().toString());
+}
+
+// The last built-in preset is opaque-to-transparent same blue - guards the real alpha value
+// actually survives presetColor()'s own hex-parse-then-set-alpha construction (the exact class of
+// mistake this file already found and fixed twice this session for other Color literals).
+TEST(GradientEditorDialogTest, LastPresetPreservesItsRealAlphaValues)
+{
+    CodeToolsVsix::GradientEditorDialog dialog;
+    dialog.setGradient(makeTwoStopLinearGradient());
+
+    dialog.applyPreset(CodeToolsVsix::GradientEditorDialog::presetCount() - 1);
+
+    ASSERT_EQ(dialog.gradient().stops().size(), 2u);
+    EXPECT_FLOAT_EQ(dialog.gradient().stops()[0].color().a, 0.0f);
+    EXPECT_FLOAT_EQ(dialog.gradient().stops()[1].color().a, 1.0f);
+}
+
+// +1 for the trailing AddPresetButton ("+") - always present alongside one PresetButton per
+// current preset.
+TEST(GradientEditorDialogTest, PresetsRowHasOneRealButtonPerPresetPlusTheAddButton)
+{
+    CodeToolsVsix::GradientEditorDialog dialog;
+    dialog.setGradient(makeTwoStopLinearGradient());
+    ASSERT_NE(dialog.presetsRow(), nullptr);
+
+    EXPECT_EQ(dialog.presetsRow()->childViews().size(), CodeToolsVsix::GradientEditorDialog::presetCount() + 1);
+}
+
+TEST(GradientEditorDialogTest, PresetsAreHiddenForPointKindAndShownOtherwise)
+{
+    CodeToolsVsix::GradientEditorDialog dialog;
+    dialog.setGradient(makeTwoStopLinearGradient());
+    ASSERT_TRUE(dialog.presetsRow()->isVisible());
+
+    dialog.setKind(newui::gfx::GradientKind::Point);
+    EXPECT_FALSE(dialog.presetsRow()->isVisible());
+
+    dialog.setKind(newui::gfx::GradientKind::Linear);
+    EXPECT_TRUE(dialog.presetsRow()->isVisible());
+}
+
+// Drives the real click on a real preset button (not applyPreset() directly) - matches this
+// file's own "drive the real method a click would" convention for every other control here.
+TEST(GradientEditorDialogTest, ClickingARealPresetButtonAppliesIt)
+{
+    CodeToolsVsix::GradientEditorDialog dialog;
+    dialog.setGradient(makeTwoPointGradient());
+    ASSERT_NE(dialog.presetsRow(), nullptr);
+    newui::SubView* secondPreset = dialog.presetsRow()->childViews()[2];
+
+    newui::SyncReturn result = secondPreset->onMouseDown.syncCallFirst(*secondPreset, newui::Point(1.0f, 1.0f), 0, 0);
+
+    EXPECT_EQ(result, newui::SyncReturn::Handled);
+    EXPECT_EQ(dialog.gradient().kind(), newui::gfx::GradientKind::Linear);
+    ASSERT_EQ(dialog.gradient().stops().size(), 2u);
+    newui::Color expected;
+    newui::Color::fromString("#2FBF71", expected);
+    EXPECT_EQ(dialog.gradient().stops()[0].color().toString(), expected.toString());
+}
+
+TEST(GradientEditorDialogTest, ApplyPresetSelectsIt)
+{
+    CodeToolsVsix::GradientEditorDialog dialog;
+    dialog.setGradient(makeTwoStopLinearGradient());
+
+    dialog.applyPreset(2);
+
+    ASSERT_TRUE(dialog.selectedPresetIndex().has_value());
+    EXPECT_EQ(*dialog.selectedPresetIndex(), 2u);
+}
+
+// presetRegistry() (GradientEditorDialog.cpp) is a real, process-wide shared registry - every
+// GradientEditorDialog instance in this same test binary sees the same one. Tests below that
+// mutate it round-trip (add then remove, or vice versa) so they leave it exactly as they found it
+// rather than leaking state into whichever test happens to run next.
+
+TEST(GradientEditorDialogTest, AddPresetFromCurrentAppendsAndSelectsANewPreset)
+{
+    CodeToolsVsix::GradientEditorDialog dialog;
+    dialog.setGradient(makeTwoStopLinearGradient());
+    std::size_t before = CodeToolsVsix::GradientEditorDialog::presetCount();
+
+    dialog.addPresetFromCurrent();
+
+    EXPECT_EQ(CodeToolsVsix::GradientEditorDialog::presetCount(), before + 1);
+    ASSERT_TRUE(dialog.selectedPresetIndex().has_value());
+    EXPECT_EQ(*dialog.selectedPresetIndex(), before);
+
+    dialog.removePreset(before);
+    ASSERT_EQ(CodeToolsVsix::GradientEditorDialog::presetCount(), before);
+}
+
+TEST(GradientEditorDialogTest, RemovePresetRemovesItAndClearsSelection)
+{
+    CodeToolsVsix::GradientEditorDialog dialog;
+    dialog.setGradient(makeTwoStopLinearGradient());
+    std::size_t before = CodeToolsVsix::GradientEditorDialog::presetCount();
+    dialog.addPresetFromCurrent();
+    ASSERT_EQ(CodeToolsVsix::GradientEditorDialog::presetCount(), before + 1);
+
+    dialog.removePreset(before);
+
+    EXPECT_EQ(CodeToolsVsix::GradientEditorDialog::presetCount(), before);
+    EXPECT_FALSE(dialog.selectedPresetIndex().has_value());
+}
+
+TEST(GradientEditorDialogTest, RemovePresetOutOfRangeIsANoOp)
+{
+    CodeToolsVsix::GradientEditorDialog dialog;
+    dialog.setGradient(makeTwoStopLinearGradient());
+    std::size_t before = CodeToolsVsix::GradientEditorDialog::presetCount();
+
+    dialog.removePreset(before + 100);
+
+    EXPECT_EQ(CodeToolsVsix::GradientEditorDialog::presetCount(), before);
+}
+
+// Drives the real click on the real trailing "+" button (not addPresetFromCurrent() directly).
+TEST(GradientEditorDialogTest, ClickingTheRealAddButtonAppendsAPreset)
+{
+    CodeToolsVsix::GradientEditorDialog dialog;
+    dialog.setGradient(makeTwoStopLinearGradient());
+    std::size_t before = CodeToolsVsix::GradientEditorDialog::presetCount();
+    newui::SubView* addButton = dialog.presetsRow()->childViews().back();
+
+    newui::SyncReturn result = addButton->onMouseDown.syncCallFirst(*addButton, newui::Point(1.0f, 1.0f), 0, 0);
+
+    EXPECT_EQ(result, newui::SyncReturn::Handled);
+    EXPECT_EQ(CodeToolsVsix::GradientEditorDialog::presetCount(), before + 1);
+
+    dialog.removePreset(before);
+    ASSERT_EQ(CodeToolsVsix::GradientEditorDialog::presetCount(), before);
+}
+
+// A click within the delete-corner region on a preset that ISN'T currently selected just applies
+// it instead - only the selected swatch's own delete-corner is ever real, so there's no ambiguity
+// about which preset a delete click would remove (the user's own concern with an earlier draft
+// that showed a delete mark on every swatch at once).
+TEST(GradientEditorDialogTest, ClickingNearWhereADeleteCornerWouldBeOnAnUnselectedPresetJustAppliesIt)
+{
+    CodeToolsVsix::GradientEditorDialog dialog;
+    dialog.setGradient(makeTwoStopLinearGradient());
+    newui::SubView* preset = dialog.presetsRow()->childViews()[0];
+    preset->setBounds(newui::Rect(0.0f, 0.0f, 32.0f, 32.0f));
+
+    // Top-right corner - where the delete mark would render if this preset were selected.
+    newui::SyncReturn result = preset->onMouseDown.syncCallFirst(*preset, newui::Point(28.0f, 4.0f), 0, 0);
+
+    EXPECT_EQ(result, newui::SyncReturn::Handled);
+    EXPECT_EQ(dialog.gradient().kind(), newui::gfx::GradientKind::Linear);
+    ASSERT_TRUE(dialog.selectedPresetIndex().has_value());
+    EXPECT_EQ(*dialog.selectedPresetIndex(), 0u);
+}
+
+// Once a preset IS selected, a click in that same top-right corner removes it instead of
+// re-applying it.
+TEST(GradientEditorDialogTest, ClickingTheSelectedPresetsDeleteCornerRemovesIt)
+{
+    CodeToolsVsix::GradientEditorDialog dialog;
+    dialog.setGradient(makeTwoStopLinearGradient());
+    std::size_t before = CodeToolsVsix::GradientEditorDialog::presetCount();
+    dialog.addPresetFromCurrent();
+    ASSERT_TRUE(dialog.selectedPresetIndex().has_value());
+    ASSERT_EQ(*dialog.selectedPresetIndex(), before);
+    newui::SubView* newPreset = dialog.presetsRow()->childViews()[before];
+    newPreset->setBounds(newui::Rect(0.0f, 0.0f, 32.0f, 32.0f));
+
+    newui::SyncReturn result = newPreset->onMouseDown.syncCallFirst(*newPreset, newui::Point(28.0f, 4.0f), 0, 0);
+
+    EXPECT_EQ(result, newui::SyncReturn::Handled);
+    EXPECT_EQ(CodeToolsVsix::GradientEditorDialog::presetCount(), before);
+    EXPECT_FALSE(dialog.selectedPresetIndex().has_value());
+}

@@ -12,6 +12,7 @@
 #include <newui/subview.h>
 
 #include <cstddef>
+#include <optional>
 #include <vector>
 
 namespace CodeToolsVsix
@@ -58,6 +59,25 @@ namespace CodeToolsVsix
     // commit, deleteItemButton_'s click) also branches the same way, so there's exactly one rule
     // ("Point uses points(), everything else uses stops()") applied consistently rather than
     // duplicated per call site.
+    //
+    // Phase 5: a row of presets (presetsRow_, matching the mockup's own `.presets` grid, seeded
+    // from its own 6 built-in entries) - each swatch is a real, independently-clickable
+    // PresetButton showing its own actual resolved gradient. Clicking one selects *and* applies it
+    // in one gesture - always resets kind to Linear and replaces stops() (applyPreset()) - the
+    // mockup's own presets also carry an "angle" per preset, deliberately dropped here: this dialog
+    // has no real control surface for editing Linear's own start/end geometry yet (see
+    // previewGradientFor()'s own comment on that separate, still-open gap), so there's no real
+    // "angle" concept to apply a preset's own value onto. Hidden for Point alongside track_ - a
+    // preset is a Linear stop list, meaningless for Point's own anchors.
+    //
+    // Phase 5b (this pass): presets became a real, mutable, process-lifetime registry
+    // (presetRegistry(), GradientEditorDialog.cpp) rather than a fixed list - a trailing
+    // AddPresetButton ("+") appends the current working_.stops() as a new preset
+    // (addPresetFromCurrent()), and whichever preset is currently selected (selectedPresetIndex())
+    // shows both a highlight ring and a small delete-corner mark, so it's always visually
+    // unambiguous which one a delete click would remove (removePreset()) - a real, user-raised
+    // concern with an earlier draft that showed a delete mark on every swatch at once. Not
+    // persisted across process restarts - a real, later feature if ever wanted.
     //
     // The kind tabs are 4 real newui::CardLayout pages (linearPage_/radialPage_/conicPage_/
     // pointPage_ below, built once in buildChrome() in that exact order so a GradientKind's own
@@ -147,6 +167,45 @@ namespace CodeToolsVsix
         // the mockup's own `state.points.length <= 1` guard exactly, not stops' own 2).
         void deleteSelectedPoint();
 
+        // --- Presets ---
+
+        // How many presets currently exist - built-in plus any added this process's run (see
+        // GradientEditorDialog.cpp's own presetRegistry() for why this is process-lifetime state,
+        // not persisted to disk). Real, current count, exposed so tests/UI never hardcode it.
+        static std::size_t presetCount();
+
+        // Replaces the working gradient's kind (always Linear - see this method's own .cpp comment
+        // for why) and stops with preset index's own, selects stop 0, and marks index as the
+        // selected preset (selectedPresetIndex()) - the highlighted swatch presetsRow_'s own delete
+        // affordance targets. Out-of-range index is a silent no-op, same contract every other
+        // bounds-guarded mutator here has. The real path a PresetButton's own (non-delete-corner)
+        // click calls.
+        void applyPreset(std::size_t index);
+
+        // Which preset (if any) is currently selected - real UI state, not a formatting/derived
+        // value: presetsRow_'s own PresetButton draws a highlight ring around this one and only
+        // shows its own small delete-corner mark there, so it's always visually unambiguous which
+        // preset a delete click would remove (a real, user-raised concern - a delete affordance on
+        // every swatch at once left that ambiguous). No preset is selected until the first
+        // applyPreset()/addPresetFromCurrent() call - unlike selectedStopIndex()/
+        // selectedPointIndex(), which always have a real target (a gradient always has stops or
+        // points once seeded), nothing here requires a preset to ever be "the current one".
+        std::optional<std::size_t> selectedPresetIndex() const { return selectedPresetIndex_; }
+
+        // Appends a copy of the current working_.stops() as a new preset (available to every
+        // GradientEditorDialog instance for the rest of this process's run) and selects it. The
+        // real path presetsRow_'s own "+" button calls.
+        void addPresetFromCurrent();
+
+        // Removes preset index and rebuilds presetsRow_ to match - out-of-range is a silent no-op.
+        // Works on any preset, built-in or user-added; unlike stops/points there's no real floor -
+        // presetsRow_ can legitimately end up holding only its "+" button, since "+" alone can
+        // always rebuild the list back up. Clears selectedPresetIndex() (the deleted one was
+        // necessarily the selected one - see PresetButton's own comment on why delete is only ever
+        // reachable through the selected swatch). The real path the selected PresetButton's own
+        // small delete-corner click calls.
+        void removePreset(std::size_t index);
+
         // Exposed for testability - same convention PropertiesGrid::treeView()/
         // Toolbox::treeView() already use for their own real child controls.
         newui::SegmentedControl* kindControl() const { return kindControl_; }
@@ -156,6 +215,7 @@ namespace CodeToolsVsix
         ColorPicker* colorPicker() const { return colorPicker_; }
         newui::TextField* hexField() const { return hexField_; }
         newui::Button* deleteItemButton() const { return deleteItemButton_; }
+        newui::SubView* presetsRow() const { return presetsRow_; }
 
     private:
         // Builds the permanent chrome once (contentRoot_, kindControl_, pagesContainer_ and its 4
@@ -235,10 +295,20 @@ namespace CodeToolsVsix
         // still real, independently testable public methods) are what it actually calls.
         void deleteSelectedItem();
 
+        // Clears presetsRow_'s own children and rebuilds them fresh from the current
+        // presetRegistry() (GradientEditorDialog.cpp) plus one trailing AddPresetButton ("+") -
+        // called from buildChrome() (the initial build) and after every addPresetFromCurrent()/
+        // removePreset() (the registry's own size changed). Rebuilding fresh each time, rather than
+        // patching in/out one child, keeps every PresetButton's own captured index_ correct without
+        // a separate renumbering step - removeChild() only detaches (never deletes), same
+        // "copy the list first, delete each" shape Workspace's own "New" button already uses.
+        void rebuildPresetsRow();
+
         newui::gfx::Gradient working_;
         newui::Rect shapeBounds_{0.0f, 0.0f, 200.0f, 140.0f};
         std::size_t selectedStopIndex_ = 0;
         std::size_t selectedPointIndex_ = 0;
+        std::optional<std::size_t> selectedPresetIndex_;
 
         newui::SubView* contentRoot_ = nullptr;
         newui::SegmentedControl* kindControl_ = nullptr;
@@ -272,5 +342,12 @@ namespace CodeToolsVsix
         ColorPicker* colorPicker_ = nullptr;
         newui::TextField* hexField_ = nullptr;
         newui::Button* deleteItemButton_ = nullptr;
+
+        // Presets (Phase 5) - a row of PresetButton (GradientEditorDialog.cpp anonymous namespace)
+        // swatches plus one trailing AddPresetButton ("+"), rebuilt fresh by rebuildPresetsRow()
+        // whenever presetRegistry()'s own size changes. Hidden for Point alongside track_ (a preset
+        // is always a Linear stop list - meaningless for Point's own scattered anchors).
+        newui::SubView* presetsLabel_ = nullptr;
+        newui::SubView* presetsRow_ = nullptr;
     };
 }

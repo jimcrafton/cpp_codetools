@@ -14,4 +14,10 @@ namespace CodeToolsVsix
     // Uses the mockup's own neutral dialog-chrome checker colors (gradient_editor_dialog.html's
     // --checker-a/b), not ImageFillStyle's configurable ones.
     void paintCheckerboard(BLContext& ctx, const newui::Rect& rect, double tile = 6.0);
+
+    // One shared corner radius for every custom-painted gradient-dialog surface (previewBox_,
+    // ColorPicker's SV-square/hue/alpha rails, preset swatches) - a single, consistent visual
+    // language across GradientEditorDialog.cpp and ColorPicker.cpp rather than each picking its
+    // own value independently.
+    constexpr double kCornerRadius = 6.0;
 }

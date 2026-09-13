@@ -65,19 +65,19 @@ namespace CodeToolsVsix
 
                 ctx.save();
                 ctx.set_fill_style(newui::Color::fromHSV(owner_.hue(), 1.0f, 1.0f).toBLRgba32());
-                ctx.fill_rect(rect);
+                ctx.fill_round_rect(rect, kCornerRadius);
 
                 BLGradient whiteToClear(BLLinearGradientValues(rect.x, rect.y, rect.x + rect.w, rect.y));
                 whiteToClear.add_stop(0.0, BLRgba32(255, 255, 255, 255));
                 whiteToClear.add_stop(1.0, BLRgba32(255, 255, 255, 0));
                 ctx.set_fill_style(whiteToClear);
-                ctx.fill_rect(rect);
+                ctx.fill_round_rect(rect, kCornerRadius);
 
                 BLGradient clearToBlack(BLLinearGradientValues(rect.x, rect.y, rect.x, rect.y + rect.h));
                 clearToBlack.add_stop(0.0, BLRgba32(0, 0, 0, 0));
                 clearToBlack.add_stop(1.0, BLRgba32(0, 0, 0, 255));
                 ctx.set_fill_style(clearToBlack);
-                ctx.fill_rect(rect);
+                ctx.fill_round_rect(rect, kCornerRadius);
                 ctx.restore();
 
                 double cx = double(bounds.left()) + double(owner_.saturation()) * double(bounds.width());
@@ -157,7 +157,7 @@ namespace CodeToolsVsix
                 }
                 ctx.save();
                 ctx.set_fill_style(hueSpectrum);
-                ctx.fill_round_rect(rect, 4.0);
+                ctx.fill_round_rect(rect, kCornerRadius);
                 ctx.restore();
 
                 paintThumb(ctx, bounds, owner_.hue() / 360.0f);
@@ -244,7 +244,7 @@ namespace CodeToolsVsix
                 alphaSpectrum.add_stop(1.0, newui::Color(rgb.r, rgb.g, rgb.b, 1.0f).toBLRgba32());
                 ctx.save();
                 ctx.set_fill_style(alphaSpectrum);
-                ctx.fill_round_rect(rect, 4.0);
+                ctx.fill_round_rect(rect, kCornerRadius);
                 ctx.restore();
 
                 double thumbY = double(bounds.top()) + double(owner_.alpha()) * double(bounds.height());

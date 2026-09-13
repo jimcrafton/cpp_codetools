@@ -14,7 +14,7 @@ namespace CodeToolsVsix
     namespace
     {
         constexpr float kDialogWidth = 360.0f;
-        constexpr float kDialogHeight = 560.0f;
+        constexpr float kDialogHeight = 640.0f;
         constexpr float kRowHeight = 24.0f;
         constexpr float kLabelWidth = 70.0f;
         constexpr float kPreviewHeight = 96.0f;
@@ -34,6 +34,52 @@ namespace CodeToolsVsix
         constexpr float kStopHandleHitRadius = 9.0f;
         constexpr float kPointHandleRadius = 7.0f;
         constexpr float kPointHandleHitRadius = 9.0f;
+        constexpr float kPresetSwatchSize = 32.0f;
+        constexpr float kPresetsRowSpacing = 6.0f;
+
+        // Color::fromString() (real, already-tested hex parsing) rather than the raw (r,g,b)
+        // float constructor - Color(255, 0, 0) would silently store (255.0f, 0.0f, 0.0f), wildly
+        // out of the real [0,1] channel range every Color here needs (the exact bug this whole
+        // file already found and fixed twice this session, once for stops' own default seeding and
+        // once for points'). alpha is a real [0,1] scale value, applied after parsing (the mockup's
+        // own preset data keeps offset/alpha as separate numbers too, not baked into the hex).
+        newui::Color presetColor(const char* hex, float alpha = 1.0f)
+        {
+            newui::Color color;
+            newui::Color::fromString(hex, color);
+            color.a = alpha;
+            return color;
+        }
+
+        // The 6 built-in presets, verbatim from design/reference/gradient_editor_dialog.html's own
+        // `presets` array - each entry's own "angle" is deliberately dropped (see
+        // GradientEditorDialog.h's own header comment on why: no real control surface for Linear's
+        // own start/end geometry exists yet, so there's nothing to apply an angle onto). The last
+        // preset (opaque-to-transparent same blue) exercises real alpha, same as everywhere else in
+        // this dialog.
+        std::vector<std::vector<newui::gfx::GradientStop>> builtinPresetStops()
+        {
+            return {
+                { newui::gfx::GradientStop(0.0f, presetColor("#5A7CE9")), newui::gfx::GradientStop(1.0f, presetColor("#8A5CE0")) },
+                { newui::gfx::GradientStop(0.0f, presetColor("#F45B8D")), newui::gfx::GradientStop(1.0f, presetColor("#F2B705")) },
+                { newui::gfx::GradientStop(0.0f, presetColor("#2FBF71")), newui::gfx::GradientStop(1.0f, presetColor("#22C1D6")) },
+                { newui::gfx::GradientStop(0.0f, presetColor("#1C1D1F")), newui::gfx::GradientStop(1.0f, presetColor("#4B4E52")) },
+                { newui::gfx::GradientStop(0.0f, presetColor("#E9705A")), newui::gfx::GradientStop(0.5f, presetColor("#F2B705")),
+                    newui::gfx::GradientStop(1.0f, presetColor("#2FBF71")) },
+                { newui::gfx::GradientStop(0.0f, presetColor("#5A7CE9", 0.0f)), newui::gfx::GradientStop(1.0f, presetColor("#5A7CE9", 1.0f)) },
+            };
+        }
+
+        // The one real, mutable preset list every GradientEditorDialog instance shares for the
+        // rest of this process's run - a plain function-local static (constructed once, from
+        // builtinPresetStops(), on first use) rather than a global, avoiding static initialization
+        // order concerns. addPresetFromCurrent()/removePreset() mutate it directly; nothing here
+        // persists it to disk - a real, later feature if ever wanted.
+        std::vector<std::vector<newui::gfx::GradientStop>>& presetRegistry()
+        {
+            static std::vector<std::vector<newui::gfx::GradientStop>> presets = builtinPresetStops();
+            return presets;
+        }
 
         // Maps a real shapeBounds()-relative position into screenBounds' own local coordinates -
         // proportional, same "fit shapeBounds()'s own aspect into whatever's previewing it" idea
@@ -139,7 +185,7 @@ namespace CodeToolsVsix
                 BLVar fill = preview.toBLVar(bounds);
                 ctx.save();
                 ctx.set_fill_style(fill);
-                ctx.fill_rect(BLRect(bounds));
+                ctx.fill_round_rect(BLRect(bounds), kCornerRadius);
                 ctx.restore();
 
                 if (owner_.gradient().kind() == newui::gfx::GradientKind::Point) {
@@ -410,6 +456,158 @@ namespace CodeToolsVsix
             GradientEditorDialog& owner_;
             bool dragging_ = false;
         };
+
+        // One clickable preset swatch - paints its own preset's real resolved gradient (always
+        // rendered as a plain left-to-right Linear fill, matching what applyPreset() actually
+        // commits - see this class's own header comment on why "angle" is dropped). Plain SubView
+        // + its own click detection (StopTrack/PreviewBox's own established shape), not
+        // newui::Button, since the whole point is a custom gradient-filled background rather than
+        // button chrome.
+        //
+        // A click on the swatch's own body always selects *and* applies it in one gesture
+        // (owner_.applyPreset()) - no drag concept here, same as StopTrack's own
+        // click-away-from-a-handle "add" gesture. Only the currently *selected* swatch
+        // (owner_.selectedPresetIndex() == index_) draws a highlight ring and a small
+        // delete-corner mark, and only a click inside that small corner region removes it
+        // (owner_.removePreset()) - a real, user-raised concern with an earlier draft that showed
+        // a delete mark on every swatch at once ("so we can tell which one is being deleted"):
+        // with only the selected one ever showing it, there's never any ambiguity about which
+        // preset a delete click would remove.
+        class PresetButton : public newui::SubView
+        {
+        public:
+            PresetButton(GradientEditorDialog& owner, std::size_t index, std::vector<newui::gfx::GradientStop> stops)
+                : owner_(owner), index_(index), stops_(std::move(stops))
+            {
+                onMouseDown.add(this, &PresetButton::handleMouseDown);
+            }
+
+            void paint(BLContext& ctx) override
+            {
+                newui::Rect bounds = getClientBounds();
+                if (bounds.width() <= 0.0f || bounds.height() <= 0.0f) {
+                    return;
+                }
+                paintCheckerboard(ctx, bounds, 4.0);
+
+                newui::gfx::Gradient preview;
+                preview.setKind(newui::gfx::GradientKind::Linear);
+                float midY = bounds.top() + bounds.height() * 0.5f;
+                preview.setLinearStart(newui::Point(bounds.left(), midY));
+                preview.setLinearEnd(newui::Point(bounds.right(), midY));
+                for (const newui::gfx::GradientStop& stop : stops_) {
+                    preview.stops().push_back(stop);
+                }
+                ctx.save();
+                ctx.set_fill_style(preview.toBLVar(bounds));
+                ctx.fill_round_rect(BLRect(bounds), kCornerRadius);
+                ctx.restore();
+
+                if (isSelected()) {
+                    ctx.save();
+                    ctx.set_stroke_style(newui::UIColorManager::colorFor(newui::UIColorRole::HighlightBackground).toBLRgba32());
+                    ctx.set_stroke_width(2.0);
+                    ctx.stroke_round_rect(BLRect(bounds), kCornerRadius);
+                    ctx.restore();
+
+                    paintDeleteCorner(ctx, bounds);
+                }
+            }
+
+        private:
+            bool isSelected() const
+            {
+                std::optional<std::size_t> selected = owner_.selectedPresetIndex();
+                return selected.has_value() && *selected == index_;
+            }
+
+            static newui::Rect deleteCornerRect(const newui::Rect& bounds)
+            {
+                float size = 12.0f;
+                return newui::Rect(bounds.right() - size - 2.0f, bounds.top() + 2.0f, size, size);
+            }
+
+            static void paintDeleteCorner(BLContext& ctx, const newui::Rect& bounds)
+            {
+                newui::Rect deleteRect = deleteCornerRect(bounds);
+                double cx = double(deleteRect.left() + deleteRect.width() * 0.5f);
+                double cy = double(deleteRect.top() + deleteRect.height() * 0.5f);
+                double r = double(deleteRect.width()) * 0.5;
+                ctx.save();
+                ctx.set_fill_style(BLRgba32(20, 20, 20, 200));
+                ctx.fill_circle(cx, cy, r);
+                ctx.set_stroke_style(BLRgba32(255, 255, 255, 235));
+                ctx.set_stroke_width(1.3);
+                double mark = r * 0.5;
+                ctx.stroke_line(cx - mark, cy - mark, cx + mark, cy + mark);
+                ctx.stroke_line(cx - mark, cy + mark, cx + mark, cy - mark);
+                ctx.restore();
+            }
+
+            newui::SyncReturn handleMouseDown(newui::View& /*sender*/, const newui::Point& pt,
+                    std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/)
+            {
+                if (isSelected()) {
+                    newui::Rect deleteRect = deleteCornerRect(getClientBounds());
+                    if (pt.x >= deleteRect.left() && pt.x <= deleteRect.right()
+                            && pt.y >= deleteRect.top() && pt.y <= deleteRect.bottom()) {
+                        owner_.removePreset(index_);
+                        return newui::SyncReturn::Handled;
+                    }
+                }
+                owner_.applyPreset(index_);
+                return newui::SyncReturn::Handled;
+            }
+
+            GradientEditorDialog& owner_;
+            std::size_t index_;
+            std::vector<newui::gfx::GradientStop> stops_;
+        };
+
+        // The trailing "+" swatch at the end of presetsRow_ - always present, appends the current
+        // working gradient's own stops as a new preset (owner_.addPresetFromCurrent()). Same plain
+        // SubView + own click detection shape as every other custom control in this file.
+        class AddPresetButton : public newui::SubView
+        {
+        public:
+            explicit AddPresetButton(GradientEditorDialog& owner) : owner_(owner)
+            {
+                onMouseDown.add(this, &AddPresetButton::handleMouseDown);
+            }
+
+            void paint(BLContext& ctx) override
+            {
+                newui::Rect bounds = getClientBounds();
+                if (bounds.width() <= 0.0f || bounds.height() <= 0.0f) {
+                    return;
+                }
+                ctx.save();
+                ctx.set_fill_style(newui::UIColorManager::colorFor(newui::UIColorRole::ControlBackground).toBLRgba32());
+                ctx.fill_round_rect(BLRect(bounds), kCornerRadius);
+                ctx.set_stroke_style(newui::UIColorManager::colorFor(newui::UIColorRole::ControlBorder).toBLRgba32());
+                ctx.set_stroke_width(1.0);
+                ctx.stroke_round_rect(BLRect(bounds), kCornerRadius);
+
+                double cx = double(bounds.left() + bounds.width() * 0.5f);
+                double cy = double(bounds.top() + bounds.height() * 0.5f);
+                double mark = double(bounds.width()) * 0.28;
+                ctx.set_stroke_style(newui::UIColorManager::colorFor(newui::UIColorRole::ControlText).toBLRgba32());
+                ctx.set_stroke_width(1.6);
+                ctx.stroke_line(cx - mark, cy, cx + mark, cy);
+                ctx.stroke_line(cx, cy - mark, cx, cy + mark);
+                ctx.restore();
+            }
+
+        private:
+            newui::SyncReturn handleMouseDown(newui::View& /*sender*/, const newui::Point& /*pt*/,
+                    std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/)
+            {
+                owner_.addPresetFromCurrent();
+                return newui::SyncReturn::Handled;
+            }
+
+            GradientEditorDialog& owner_;
+        };
     }
 
     GradientEditorDialog::GradientEditorDialog()
@@ -639,6 +837,49 @@ namespace CodeToolsVsix
         refreshPreview();
     }
 
+    std::size_t GradientEditorDialog::presetCount()
+    {
+        return presetRegistry().size();
+    }
+
+    void GradientEditorDialog::applyPreset(std::size_t index)
+    {
+        const std::vector<std::vector<newui::gfx::GradientStop>>& presets = presetRegistry();
+        if (index >= presets.size()) {
+            return;
+        }
+        // Always Linear - see this class's own header comment for why a preset's own "angle" is
+        // dropped rather than applied to Linear's own (still uneditable) start/end geometry.
+        working_.setKind(newui::gfx::GradientKind::Linear);
+        working_.stops() = presets[index];
+        kindControl_->setSelectedIndex(static_cast<std::size_t>(newui::gfx::GradientKind::Linear));
+        selectStop(0);
+        selectedPresetIndex_ = index;
+        showPageForKind(newui::gfx::GradientKind::Linear);
+        if (presetsRow_ != nullptr) {
+            presetsRow_->redraw();
+        }
+    }
+
+    void GradientEditorDialog::addPresetFromCurrent()
+    {
+        std::vector<std::vector<newui::gfx::GradientStop>>& presets = presetRegistry();
+        presets.push_back(working_.stops());
+        selectedPresetIndex_ = presets.size() - 1;
+        rebuildPresetsRow();
+    }
+
+    void GradientEditorDialog::removePreset(std::size_t index)
+    {
+        std::vector<std::vector<newui::gfx::GradientStop>>& presets = presetRegistry();
+        if (index >= presets.size()) {
+            return;
+        }
+        presets.erase(presets.begin() + static_cast<std::ptrdiff_t>(index));
+        selectedPresetIndex_.reset();
+        rebuildPresetsRow();
+    }
+
     void GradientEditorDialog::buildChrome()
     {
         // Real top-level surfaces elsewhere in this codebase (Workspace, DesignerEditor,
@@ -818,6 +1059,30 @@ namespace CodeToolsVsix
         pointPage_ = pointHintBuilder.build();
         pagesContainer_->addChild(pointPage_);
 
+        // Presets (Phase 5) - a "Presets" label + a row of real, independently-clickable
+        // PresetButton swatches, last content section before the footer, matching the mockup's own
+        // layout order exactly. Hidden for Point alongside track_ (showPageForKind()).
+        newui::ViewBuilder<newui::Label> presetsLabelBuilder;
+        presetsLabelBuilder.name("gradientPresetsLabel")
+            .visible(true)
+            .desiredSize(newui::Size(0.0f, kRowHeight))
+            .configure([](newui::Label& label) { label.setText("Presets"); });
+        presetsLabel_ = presetsLabelBuilder.build();
+        contentRoot_->addChild(presetsLabel_);
+
+        newui::ViewBuilder<newui::SubView> presetsRowBuilder;
+        presetsRowBuilder.name("gradientPresetsRow")
+            .visible(true)
+            .desiredSize(newui::Size(0.0f, kPresetSwatchSize))
+            .layout<newui::FlexLayout>([](newui::FlexLayout& layout) {
+                layout.setOrientation(newui::Orientation::Horizontal);
+                layout.setSpacing(kPresetsRowSpacing);
+            });
+        presetsRow_ = presetsRowBuilder.build();
+        contentRoot_->addChild(presetsRow_);
+
+        rebuildPresetsRow();
+
         newui::ViewBuilder<newui::SubView> footerBuilder;
         footerBuilder.name("gradientEditorFooter")
             .visible(true)
@@ -865,13 +1130,17 @@ namespace CodeToolsVsix
     {
         pagesLayout_->show(static_cast<std::size_t>(kind));
 
-        // track_ only applies to Linear/Radial/Conic's own 1D stop positions - Point uses direct
-        // 2D drag-in-preview instead (previewBox_ itself), so it alone still toggles by kind;
-        // previewBox_/selectedItemEditor_ stay visible for every kind now.
-        track_->setVisible(kind != newui::gfx::GradientKind::Point);
+        // track_/presets only apply to Linear/Radial/Conic's own stop-based editing - Point uses
+        // direct 2D drag-in-preview instead (previewBox_ itself) and a preset is always a Linear
+        // stop list, meaningless for Point's own scattered anchors - so both toggle by kind the
+        // same way; previewBox_/selectedItemEditor_ stay visible for every kind now.
+        bool showsStopBasedEditing = (kind != newui::gfx::GradientKind::Point);
+        track_->setVisible(showsStopBasedEditing);
+        presetsLabel_->setVisible(showsStopBasedEditing);
+        presetsRow_->setVisible(showsStopBasedEditing);
         // setVisible() alone doesn't reflow anything (see its own definition, subview.cpp) -
         // contentRoot_'s FlexLayout needs to actually re-run so it gives pagesContainer_/the
-        // footer the space track_ just gave up (or reclaims when it reappears).
+        // footer the space these rows just gave up (or reclaims when they reappear).
         contentRoot_->updateLayout();
 
         refreshSelectedItemEditor();
@@ -940,5 +1209,34 @@ namespace CodeToolsVsix
         } else {
             deleteSelectedStop();
         }
+    }
+
+    void GradientEditorDialog::rebuildPresetsRow()
+    {
+        // removeChild() only detaches (never deletes) - same "copy the list first, delete each"
+        // shape Workspace's own "New" button already uses.
+        std::vector<newui::SubView*> old = presetsRow_->childViews();
+        for (newui::SubView* child : old) {
+            presetsRow_->removeChild(child);
+            delete child;
+        }
+
+        const std::vector<std::vector<newui::gfx::GradientStop>>& presets = presetRegistry();
+        for (std::size_t i = 0; i < presets.size(); ++i) {
+            newui::ViewBuilder<PresetButton> presetBuilder(new PresetButton(*this, i, presets[i]));
+            presetBuilder.name("gradientPresetButton")
+                .visible(true)
+                .desiredSize(newui::Size(kPresetSwatchSize, kPresetSwatchSize));
+            presetsRow_->addChild(presetBuilder.build());
+        }
+
+        newui::ViewBuilder<AddPresetButton> addBuilder(new AddPresetButton(*this));
+        addBuilder.name("gradientAddPresetButton")
+            .visible(true)
+            .desiredSize(newui::Size(kPresetSwatchSize, kPresetSwatchSize));
+        presetsRow_->addChild(addBuilder.build());
+
+        contentRoot_->updateLayout();
+        presetsRow_->redraw();
     }
 }
