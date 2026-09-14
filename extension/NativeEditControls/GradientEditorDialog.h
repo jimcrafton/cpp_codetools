@@ -159,6 +159,29 @@ namespace CodeToolsVsix
         // Linear/Radial/Conic - see deleteSelectedItem()).
         void deleteSelectedStop();
 
+        // --- Linear angle (Linear kind only) ---
+
+        // Angle (radians) of the Linear gradient's own start->end line, measured in shapeBounds()'s
+        // real pixel aspect ratio (not the raw proportional [0,1] one linearStart()/linearEnd() are
+        // actually stored in, which would distort the angle on a non-square box) - 0 points along
+        // +x (left-to-right, the default), positive rotates clockwise (screen y grows downward,
+        // matching atan2's usual convention). 0.0 if shapeBounds() is degenerate (zero width/
+        // height) - nothing meaningful to measure against. Derived fresh from linearStart()/
+        // linearEnd() every call rather than kept as separate dialog-side state, same "no separate
+        // UI state to drift out of sync" convention every other live-rendered control in this file
+        // already follows (see e.g. PreviewBox's own comment).
+        float linearAngle() const;
+
+        // Rotates the Linear gradient's own start/end line to radians, recentered on shapeBounds()
+        // and resized to exactly span it corner-to-corner in that direction - the same gradient-
+        // line-length formula (half-extent = halfWidth*|cos| + halfHeight*|sin|) CSS's own
+        // linear-gradient(<angle>, ...) uses, so rotating never leaves a flat, ungraded band in a
+        // box corner. Computed in real box-space (accounts for aspect ratio) and converted back to
+        // the proportional [0,1] fractions linearStart()/linearEnd() are actually stored as
+        // (graphics.h) - a no-op if shapeBounds() is degenerate. The real path AngleDial's own drag
+        // calls.
+        void setLinearAngle(float radians);
+
         // --- Points (Point kind only) ---
 
         // Selects which point the shared editor targets - clamped to [0, gradient().points().
@@ -234,6 +257,8 @@ namespace CodeToolsVsix
         newui::TextField* hexField() const { return hexField_; }
         newui::Button* deleteItemButton() const { return deleteItemButton_; }
         newui::SubView* presetsRow() const { return presetsRow_; }
+        newui::SubView* linearAngleDial() const { return linearAngleDial_; }
+        newui::Label* linearAngleLabel() const { return linearAngleLabel_; }
 
     private:
         // Builds the permanent chrome once (contentRoot_, kindControl_, pagesContainer_ and its 4
@@ -322,6 +347,13 @@ namespace CodeToolsVsix
         // "copy the list first, delete each" shape Workspace's own "New" button already uses.
         void rebuildPresetsRow();
 
+        // Sets linearAngleLabel_'s own text to the current linearAngle(), in whole degrees
+        // (normalized to [0,360) - atan2's own [-pi,pi] range would otherwise show confusing
+        // negative values for anything past straight up). Called from setLinearAngle() (every real
+        // drag) and setGradient() (so a freshly loaded gradient's own angle shows correctly before
+        // the user ever touches the dial).
+        void refreshLinearAngleLabel();
+
         newui::gfx::Gradient working_;
         newui::Rect shapeBounds_{0.0f, 0.0f, 200.0f, 140.0f};
         std::size_t selectedStopIndex_ = 0;
@@ -335,13 +367,15 @@ namespace CodeToolsVsix
         // Built in GradientKind order (Linear=0, Radial=1, Conic=2, Point=3) - see buildChrome()'s
         // own comment for why that ordering matters (it's what lets showPageForKind() index
         // pagesLayout_ directly off the enum value, no translation table).
-        // Currently empty for Linear/Radial/Conic (none of their own real kind-specific controls -
-        // an angle dial, a shape toggle - are built yet) - real, distinct pages ready for those
-        // later, not dead weight; pointPage_ holds a real usage hint, not a placeholder.
+        // linearPage_ now holds a real angle dial (linearAngleDial_ below) - Radial/Conic remain
+        // empty (no shape toggle built yet), real, distinct pages ready for that later, not dead
+        // weight; pointPage_ holds a real usage hint, not a placeholder.
         newui::SubView* linearPage_ = nullptr;
         newui::SubView* radialPage_ = nullptr;
         newui::SubView* conicPage_ = nullptr;
         newui::SubView* pointPage_ = nullptr;
+        newui::SubView* linearAngleDial_ = nullptr;
+        newui::Label* linearAngleLabel_ = nullptr;
 
         // PreviewBox/StopTrack (GradientEditorDialog.cpp, anonymous namespace) - own no state of
         // their own beyond drag tracking, always painting straight off gradient()/

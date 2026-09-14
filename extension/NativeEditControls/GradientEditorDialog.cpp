@@ -7,20 +7,30 @@
 #include <newui/uicolormanager.h>
 #include <newui/viewbuilder.h>
 
+#include <cmath>
 #include <memory>
+#include <string>
 
 namespace CodeToolsVsix
 {
     namespace
     {
         constexpr float kDialogWidth = 360.0f;
-        // 24 (kind) + 96 (preview) + 28 (track) + 130 (selectedItemEditor) + 24 (pages) +
-        // 24 (presetsLabel) + 32 (presetsRow) + 32 (footer) + 7*8 spacing + 2*12 padding = 470 -
+        constexpr float kAngleDialSize = 48.0f;  // 75% of the original 64
+        constexpr float kAngleDialPadding = 4.0f;
+        constexpr float kAngleLabelWidth = 44.0f;
+        // Tall enough for linearPage_'s own real angle dial (kAngleDialSize) plus a little
+        // breathing room on both sides - Radial/Conic remain empty for now (no shape toggle
+        // built yet), Point's hint label easily fits too.
+        constexpr float kPagesHeight = kAngleDialSize + kAngleDialPadding * 2.0f;
+        // 24 (kind) + 96 (preview) + 28 (track) + 130 (selectedItemEditor) + kPagesHeight (pages) +
+        // 24 (presetsLabel) + 32 (presetsRow) + 32 (footer) + 7*8 spacing + 2*12 padding -
         // recomputed after pagesContainer_ stopped weight-stretching to fill the (until-then-
-        // empty) leftover space between the hex row and Presets. 480 clipped the footer live (the
-        // window's own non-client chrome eats into that budget too), so this carries real slack,
-        // not just rounding.
-        constexpr float kDialogHeight = 520.0f;
+        // empty) leftover space between the hex row and Presets, and again after linearPage_ grew
+        // a real angle dial. 480 (back when pages was a plain kRowHeight) clipped the footer live
+        // (the window's own non-client chrome eats into that budget too), so this carries the same
+        // real slack, not just rounding.
+        constexpr float kDialogHeight = 496.0f + kPagesHeight;
         constexpr float kRowHeight = 24.0f;
         constexpr float kLabelWidth = 70.0f;
         constexpr float kPreviewHeight = 96.0f;
@@ -597,6 +607,102 @@ namespace CodeToolsVsix
 
             GradientEditorDialog& owner_;
         };
+
+        // A circular rotation control for the Linear gradient's own angle (owner_.linearAngle()/
+        // setLinearAngle()) - same established shape as every other custom-painted drag control in
+        // this file (own paint() + its own onMouseDown/onMouseMove/onMouseUp, not newui::Slider -
+        // there's no existing angle-knob control to reuse). Draws a ring, a radial line from
+        // center to the current angle, and a small round handle at its tip; dragging anywhere
+        // inside the dial recomputes the angle from the pointer's own position relative to the
+        // dial's center (not just the handle) - same jump-to-click responsiveness convention
+        // StopTrack/SVSquare/HueRail etc. already use. Always drawn/sized as a perfect square
+        // (linearAngleDial_'s own desiredSize(), buildChrome()), so reading angle straight off
+        // std::atan2() here matches owner_.linearAngle()'s own real-box-space math with no aspect-
+        // ratio correction needed - the dial's local space already *is* square.
+        class AngleDial : public newui::SubView
+        {
+        public:
+            explicit AngleDial(GradientEditorDialog& owner) : owner_(owner)
+            {
+                onMouseDown.add(this, &AngleDial::handleMouseDown);
+                onMouseMove.add(this, &AngleDial::handleMouseMove);
+                onMouseUp.add(this, &AngleDial::handleMouseUp);
+            }
+
+            void paint(BLContext& ctx) override
+            {
+                newui::Rect bounds = getClientBounds();
+                if (bounds.width() <= 0.0f || bounds.height() <= 0.0f) {
+                    return;
+                }
+                double cx = double(bounds.left() + bounds.width() * 0.5f);
+                double cy = double(bounds.top() + bounds.height() * 0.5f);
+                float shortSide = bounds.width() < bounds.height() ? bounds.width() : bounds.height();
+                double radius = double(shortSide) * 0.5 - double(kAngleHandleRadius) - 1.0;
+
+                ctx.save();
+                ctx.set_stroke_style(newui::UIColorManager::colorFor(newui::UIColorRole::ControlBorder).toBLRgba32());
+                ctx.set_stroke_width(1.5);
+                ctx.stroke_circle(cx, cy, radius);
+
+                double angle = double(owner_.linearAngle());
+                double hx = cx + std::cos(angle) * radius;
+                double hy = cy + std::sin(angle) * radius;
+                BLRgba32 accent = newui::UIColorManager::colorFor(newui::UIColorRole::HighlightBackground).toBLRgba32();
+                ctx.set_stroke_style(accent);
+                ctx.set_stroke_width(2.0);
+                ctx.stroke_line(cx, cy, hx, hy);
+
+                ctx.set_fill_style(accent);
+                ctx.fill_circle(hx, hy, double(kAngleHandleRadius));
+                ctx.set_stroke_style(BLRgba32(255, 255, 255));
+                ctx.set_stroke_width(1.5);
+                ctx.stroke_circle(hx, hy, double(kAngleHandleRadius));
+                ctx.restore();
+            }
+
+        private:
+            static constexpr float kAngleHandleRadius = 5.0f;
+
+            void updateFromPoint(const newui::Point& pt)
+            {
+                newui::Rect bounds = getClientBounds();
+                float cx = bounds.left() + bounds.width() * 0.5f;
+                float cy = bounds.top() + bounds.height() * 0.5f;
+                owner_.setLinearAngle(std::atan2(pt.y - cy, pt.x - cx));
+            }
+
+            newui::SyncReturn handleMouseDown(newui::View& /*sender*/, const newui::Point& pt,
+                    std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/)
+            {
+                dragging_ = true;
+                updateFromPoint(pt);
+                return newui::SyncReturn::Handled;
+            }
+
+            newui::SyncReturn handleMouseMove(newui::View& /*sender*/, const newui::Point& pt,
+                    std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/)
+            {
+                if (!dragging_) {
+                    return newui::SyncReturn::Ignored;
+                }
+                updateFromPoint(pt);
+                return newui::SyncReturn::Handled;
+            }
+
+            newui::SyncReturn handleMouseUp(newui::View& /*sender*/, const newui::Point& /*pt*/,
+                    std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/)
+            {
+                if (!dragging_) {
+                    return newui::SyncReturn::Ignored;
+                }
+                dragging_ = false;
+                return newui::SyncReturn::Handled;
+            }
+
+            GradientEditorDialog& owner_;
+            bool dragging_ = false;
+        };
     }
 
     GradientEditorDialog::GradientEditorDialog()
@@ -605,6 +711,7 @@ namespace CodeToolsVsix
         setBounds(newui::Rect(120.0f, 120.0f, kDialogWidth, kDialogHeight));
         buildChrome();
         showPageForKind(working_.kind());
+        refreshLinearAngleLabel();
     }
 
     void GradientEditorDialog::setGradient(const newui::gfx::Gradient& gradient)
@@ -630,6 +737,7 @@ namespace CodeToolsVsix
         selectedPointIndex_ = 0;
         kindControl_->setSelectedIndex(static_cast<std::size_t>(working_.kind()));
         showPageForKind(working_.kind());
+        refreshLinearAngleLabel();
     }
 
     void GradientEditorDialog::setKind(newui::gfx::GradientKind kind)
@@ -762,6 +870,57 @@ namespace CodeToolsVsix
         stops.erase(stops.begin() + static_cast<std::ptrdiff_t>(selectedStopIndex_));
         selectStop(0);
         refreshPreview();
+    }
+
+    float GradientEditorDialog::linearAngle() const
+    {
+        if (shapeBounds_.width() <= 0.0f || shapeBounds_.height() <= 0.0f) {
+            return 0.0f;
+        }
+        const newui::Point& start = working_.linearStart();
+        const newui::Point& end = working_.linearEnd();
+        float dx = (end.x - start.x) * shapeBounds_.width();
+        float dy = (end.y - start.y) * shapeBounds_.height();
+        return std::atan2(dy, dx);
+    }
+
+    void GradientEditorDialog::setLinearAngle(float radians)
+    {
+        if (shapeBounds_.width() <= 0.0f || shapeBounds_.height() <= 0.0f) {
+            return;
+        }
+        float halfWidth = shapeBounds_.width() * 0.5f;
+        float halfHeight = shapeBounds_.height() * 0.5f;
+        float dx = std::cos(radians);
+        float dy = std::sin(radians);
+        // Same gradient-line-length formula CSS's own linear-gradient(<angle>, ...) uses - the
+        // line's half-extent is the farthest any of the box's 4 corners projects onto (dx,dy), so
+        // rotating never leaves a flat, ungraded band in a corner.
+        float halfLen = halfWidth * std::fabs(dx) + halfHeight * std::fabs(dy);
+        float offsetX = halfLen * dx / shapeBounds_.width();
+        float offsetY = halfLen * dy / shapeBounds_.height();
+        working_.setLinearStart(newui::Point(0.5f - offsetX, 0.5f - offsetY));
+        working_.setLinearEnd(newui::Point(0.5f + offsetX, 0.5f + offsetY));
+        refreshPreview();
+        if (linearAngleDial_ != nullptr) {
+            linearAngleDial_->redraw();
+        }
+        refreshLinearAngleLabel();
+    }
+
+    void GradientEditorDialog::refreshLinearAngleLabel()
+    {
+        if (linearAngleLabel_ == nullptr) {
+            return;
+        }
+        float degrees = linearAngle() * (180.0f / 3.14159265f);
+        if (degrees < 0.0f) {
+            degrees += 360.0f;
+        }
+        // "\xC2\xB0" is the UTF-8 encoding of U+00B0 DEGREE SIGN, spelled as raw bytes rather than
+        // a literal '\xB0'/degree-sign character in this source file - guaranteed correct
+        // regardless of what encoding this .cpp itself happens to be saved/compiled as.
+        linearAngleLabel_->setText(std::to_string(static_cast<int>(degrees + 0.5f)) + "\xC2\xB0");
     }
 
     void GradientEditorDialog::selectPoint(std::size_t index)
@@ -1004,28 +1163,27 @@ namespace CodeToolsVsix
         // pagesContainer_ owns a CardLayout switching between the 4 pages below - built once
         // here, never destroyed/rebuilt on a kind change (see this class's own header comment for
         // why each kind gets its own real page instead of one shared, rebuilt-in-place container).
-        // Fixed to kRowHeight, not weight-stretched - Linear/Radial/Conic's own pages are still
-        // real, currently-empty placeholders (see this function's own comment below), and giving
-        // this container the remaining leftover space left a large blank gap between the hex/
-        // delete row and Presets for every kind but Point (whose hint label is the only thing
-        // that lives here today). Revisit once a kind actually gets real per-kind controls (an
-        // angle dial, a shape toggle) - this may need to grow again then.
+        // Fixed to kPagesHeight, not weight-stretched - giving this container the remaining
+        // leftover space used to leave a large blank gap between the hex/delete row and Presets
+        // for every kind but Point (whose hint label was the only thing that lived here at the
+        // time). kPagesHeight is now sized for linearPage_'s own real angle dial - Radial/Conic
+        // remain empty placeholders (no shape toggle built yet); revisit again once one of those
+        // gets real content taller than this.
         newui::ViewBuilder<newui::SubView> pagesBuilder;
         pagesBuilder.name("gradientPages")
             .visible(true)
-            .desiredSize(newui::Size(0.0f, kRowHeight));
+            .desiredSize(newui::Size(0.0f, kPagesHeight));
         pagesContainer_ = pagesBuilder.build();
         auto pagesLayout = std::make_unique<newui::CardLayout>();
         pagesLayout_ = pagesLayout.get();
         pagesContainer_->setLayout(std::move(pagesLayout));
         contentRoot_->addChild(pagesContainer_);
 
-        // Linear/Radial/Conic each get their own real, currently-empty page (built identically via
-        // this local helper) - added in that exact order, matching GradientKind's own numeric
-        // values, so showPageForKind() can index pagesLayout_ directly off the enum with no lookup
-        // table. Ready for each kind's own future controls (an angle dial, a shape toggle - see
-        // this class's own header comment) - not dead weight just because nothing lives in them
-        // yet.
+        // Radial/Conic each get their own real, currently-empty page (built identically via this
+        // local helper) - added in the exact order GradientKind's own numeric values give, so
+        // showPageForKind() can index pagesLayout_ directly off the enum with no lookup table.
+        // Ready for each kind's own future controls (a shape toggle - see this class's own header
+        // comment) - not dead weight just because nothing lives in them yet.
         auto buildStopsPage = [](const char* name) {
             newui::ViewBuilder<newui::SubView> pageBuilder;
             pageBuilder.name(name)
@@ -1036,8 +1194,38 @@ namespace CodeToolsVsix
                 });
             return pageBuilder.build();
         };
-        linearPage_ = buildStopsPage("gradientLinearPage");
+
+        // linearPage_ holds a real angle dial (AngleDial, this file's own anonymous namespace) -
+        // built separately from the shared helper above since it has real content, unlike its two
+        // still-empty siblings.
+        newui::ViewBuilder<newui::SubView> linearPageBuilder;
+        linearPageBuilder.name("gradientLinearPage")
+            .visible(true)
+            .layout<newui::FlexLayout>([](newui::FlexLayout& layout) {
+                layout.setOrientation(newui::Orientation::Horizontal);
+                layout.setPadding(kAngleDialPadding);
+                layout.setSpacing(8.0f);
+            });
+        linearPage_ = linearPageBuilder.build();
         pagesContainer_->addChild(linearPage_);
+
+        newui::ViewBuilder<AngleDial> angleDialBuilder(new AngleDial(*this));
+        angleDialBuilder.name("gradientLinearAngleDial")
+            .visible(true)
+            .desiredSize(newui::Size(kAngleDialSize, kAngleDialSize));
+        linearAngleDial_ = angleDialBuilder.build();
+        linearPage_->addChild(linearAngleDial_);
+
+        newui::ViewBuilder<newui::Label> angleLabelBuilder;
+        angleLabelBuilder.name("gradientLinearAngleLabel")
+            .visible(true)
+            .desiredSize(newui::Size(kAngleLabelWidth, kRowHeight))
+            .layoutParams<newui::FlexLayoutParams>([](newui::FlexLayoutParams& params) {
+                params.crossAxisAlignment = newui::CrossAxisAlignment::Center;
+            });
+        linearAngleLabel_ = angleLabelBuilder.build();
+        linearPage_->addChild(linearAngleLabel_);
+
         radialPage_ = buildStopsPage("gradientRadialPage");
         pagesContainer_->addChild(radialPage_);
         conicPage_ = buildStopsPage("gradientConicPage");

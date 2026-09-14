@@ -77,6 +77,79 @@ TEST(GradientEditorDialogTest, CommittedGradientSpansWhateverRealBoxItsLaterReso
     EXPECT_DOUBLE_EQ(wideBox.as<BLGradient>().linear().x1, 500.0);
 }
 
+// setLinearAngle()/linearAngle() work in shapeBounds()'s own real aspect ratio, not the raw
+// proportional [0,1] one linearStart()/linearEnd() are actually stored in - a non-square box here
+// (200x140) so a bug that forgot to account for aspect ratio would show up as a wrong angle/
+// offset, not just a wrong sign.
+TEST(GradientEditorDialogTest, SetLinearAngleZeroSpansTheFullWidthAtVerticalCenter)
+{
+    CodeToolsVsix::GradientEditorDialog dialog;
+    dialog.setGradient(makeTwoStopLinearGradient());
+    dialog.setShapeBounds(newui::Rect(0.0f, 0.0f, 200.0f, 140.0f));
+
+    dialog.setLinearAngle(0.0f);
+
+    EXPECT_NEAR(dialog.gradient().linearStart().x, 0.0f, 0.001f);
+    EXPECT_NEAR(dialog.gradient().linearStart().y, 0.5f, 0.001f);
+    EXPECT_NEAR(dialog.gradient().linearEnd().x, 1.0f, 0.001f);
+    EXPECT_NEAR(dialog.gradient().linearEnd().y, 0.5f, 0.001f);
+}
+
+TEST(GradientEditorDialogTest, SetLinearAngleNinetyDegreesSpansTheFullHeightAtHorizontalCenter)
+{
+    CodeToolsVsix::GradientEditorDialog dialog;
+    dialog.setGradient(makeTwoStopLinearGradient());
+    dialog.setShapeBounds(newui::Rect(0.0f, 0.0f, 200.0f, 140.0f));
+
+    dialog.setLinearAngle(1.5707963f);  // pi/2 - straight down in screen space
+
+    EXPECT_NEAR(dialog.gradient().linearStart().x, 0.5f, 0.001f);
+    EXPECT_NEAR(dialog.gradient().linearStart().y, 0.0f, 0.001f);
+    EXPECT_NEAR(dialog.gradient().linearEnd().x, 0.5f, 0.001f);
+    EXPECT_NEAR(dialog.gradient().linearEnd().y, 1.0f, 0.001f);
+}
+
+TEST(GradientEditorDialogTest, LinearAngleRoundTripsThroughSetLinearAngle)
+{
+    CodeToolsVsix::GradientEditorDialog dialog;
+    dialog.setGradient(makeTwoStopLinearGradient());
+    dialog.setShapeBounds(newui::Rect(0.0f, 0.0f, 200.0f, 140.0f));
+
+    dialog.setLinearAngle(0.6f);
+
+    EXPECT_NEAR(dialog.linearAngle(), 0.6f, 0.001f);
+}
+
+// Drives the real AngleDial's own onMouseDown path (not setLinearAngle() directly), matching this
+// file's own "drive the real method a click would" convention - a click at the dial's own
+// 3-o'clock edge (straight right of its center) should set angle 0.
+TEST(GradientEditorDialogTest, ClickingTheRealAngleDialSetsLinearAngle)
+{
+    CodeToolsVsix::GradientEditorDialog dialog;
+    dialog.setGradient(makeTwoStopLinearGradient());
+    dialog.setShapeBounds(newui::Rect(0.0f, 0.0f, 200.0f, 140.0f));
+    newui::SubView* dial = dialog.linearAngleDial();
+    ASSERT_NE(dial, nullptr);
+    dial->setBounds(newui::Rect(0.0f, 0.0f, 64.0f, 64.0f));
+
+    newui::SyncReturn result = dial->onMouseDown.syncCallFirst(*dial, newui::Point(64.0f, 32.0f), 0, 0);
+
+    EXPECT_EQ(result, newui::SyncReturn::Handled);
+    EXPECT_NEAR(dialog.linearAngle(), 0.0f, 0.01f);
+}
+
+TEST(GradientEditorDialogTest, SetLinearAngleUpdatesTheRealDegreesLabel)
+{
+    CodeToolsVsix::GradientEditorDialog dialog;
+    dialog.setGradient(makeTwoStopLinearGradient());
+    dialog.setShapeBounds(newui::Rect(0.0f, 0.0f, 200.0f, 140.0f));
+    ASSERT_NE(dialog.linearAngleLabel(), nullptr);
+
+    dialog.setLinearAngle(1.5707963f);  // pi/2 -> 90 degrees
+
+    EXPECT_EQ(dialog.linearAngleLabel()->text(), "90\xC2\xB0");
+}
+
 // gradient() must stay a real reference to working_, not a value-returning getter -
 // PreviewBox/StopTrack's own internal hit-testing binds a `const auto&` to
 // owner_.gradient().stops()/.points() and keeps using it after that statement; a value-returning
