@@ -49,6 +49,50 @@ TEST(GradientEditorDialogTest, SetGradientSeedsGradientBackVerbatim)
     EXPECT_EQ(dialog.gradient().stops()[1].color().toString(), seed.stops()[1].color().toString());
 }
 
+// Real, live-reported bug, two-fold: applying a Linear gradient edited through this dialog
+// rendered compressed into a small corner of the real target view, with the rest a flat pad of
+// the last stop's color - and even after a first fix (a commit-time snapshot resolved against
+// shapeBounds_), resizing the view afterward left it stale again, since a snapshot can't track a
+// size that hasn't happened yet. Both fixed at the root now, in newui::gfx::Gradient itself:
+// linearStart_/linearEnd_ etc. (graphics.h) are proportional [0,1] fractions of whatever box
+// they're resolved against, re-resolved fresh on every real paint - so gradient() (what
+// GradientPropertyEditor::edit() actually commits) needs no dialog-side resolution step at all
+// any more. Drives the real committed Gradient's own toBLVar() at two different box sizes to
+// prove it isn't a frozen snapshot either way.
+TEST(GradientEditorDialogTest, CommittedGradientSpansWhateverRealBoxItsLaterResolvedAgainstAtAnySize)
+{
+    CodeToolsVsix::GradientEditorDialog dialog;
+    dialog.setGradient(makeTwoStopLinearGradient());
+
+    newui::gfx::Gradient committed = dialog.gradient();
+
+    BLVar smallBox = committed.toBLVar(newui::Rect(0.0f, 0.0f, 100.0f, 40.0f));
+    ASSERT_TRUE(smallBox.is_gradient());
+    EXPECT_DOUBLE_EQ(smallBox.as<BLGradient>().linear().x1, 100.0);
+
+    // Same Gradient object, no re-authoring - a later resize of the real target view resolves
+    // correctly too, not just whatever size it happened to be committed at.
+    BLVar wideBox = committed.toBLVar(newui::Rect(0.0f, 0.0f, 500.0f, 40.0f));
+    ASSERT_TRUE(wideBox.is_gradient());
+    EXPECT_DOUBLE_EQ(wideBox.as<BLGradient>().linear().x1, 500.0);
+}
+
+// gradient() must stay a real reference to working_, not a value-returning getter -
+// PreviewBox/StopTrack's own internal hit-testing binds a `const auto&` to
+// owner_.gradient().stops()/.points() and keeps using it after that statement; a value-returning
+// gradient() would make that reference dangle immediately (a real regression this exact test file
+// caught: the two "clicking away from every handle" tests below started silently under-counting
+// stops/points the moment gradient() briefly became value-returning, during an earlier draft of
+// this fix that routed commits through a second, value-returning resolvedGradient() method -
+// since removed now that the resolution step lives in newui::gfx::Gradient itself).
+TEST(GradientEditorDialogTest, GradientGetterIsARealReferenceToTheWorkingCopy)
+{
+    CodeToolsVsix::GradientEditorDialog dialog;
+    dialog.setGradient(makeTwoStopLinearGradient());
+
+    EXPECT_EQ(&dialog.gradient(), &dialog.gradient());
+}
+
 // Phase 3 - the shared "selected stop" editor (colorPicker()/hexField()) replaced the Phase 1
 // per-stop hex-field rows this test originally covered - it now targets whichever stop is
 // selected (stop 0 right after a fresh seed) instead of building one field per stop.

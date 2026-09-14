@@ -417,7 +417,14 @@ namespace CodeToolsVsix
         newui::gfx::Gradient current = std::any_cast<newui::gfx::Gradient>(rawValue());
 
         GradientEditorDialog dialog;
-        dialog.setShapeBounds(owner->bounds());
+        // owner->bounds() is parent-relative (its own x/y position within owner's parent) - but
+        // Gradient's own Linear/Radial/Conic geometry (linearStart_/linearEnd_ etc., graphics.h)
+        // is painted in the owning view's *local* space (View::paintStyle() passes only
+        // bounds_.size() through to ViewStyle::paint(), never bounds_'s own position - the parent
+        // already translated the context before calling in). Only owner's *size* belongs here;
+        // its position would otherwise get baked into the committed gradient's geometry as a
+        // spurious offset.
+        dialog.setShapeBounds(newui::Rect(0.0f, 0.0f, owner->bounds().width(), owner->bounds().height()));
         dialog.setGradient(current);
 
         // newui::Dialog::showModal(View*) resolves the real owning HWND via

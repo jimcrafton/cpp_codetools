@@ -12,8 +12,12 @@ namespace CodeToolsVsix
     // consumer) since ColorPicker's own alpha rail needs the exact same thing and neither one is
     // an ImageFillStyle instance (no checkerSize()/checkerColorA()/colorB() to call through).
     // Uses the mockup's own neutral dialog-chrome checker colors (gradient_editor_dialog.html's
-    // --checker-a/b), not ImageFillStyle's configurable ones.
-    void paintCheckerboard(BLContext& ctx, const newui::Rect& rect, double tile = 6.0);
+    // --checker-a/b), not ImageFillStyle's configurable ones. Pass the same radius the caller is
+    // about to fill_round_rect() with right after this (e.g. kCornerRadius below) so the checker
+    // itself stays inside the rounded shape instead of squaring off past its corners - radius 0.0
+    // (the default) keeps the old plain-rect tiling, fine for thin unrounded strips like
+    // StopTrack's own lineRect.
+    void paintCheckerboard(BLContext& ctx, const newui::Rect& rect, double tile = 6.0, double radius = 0.0);
 
     // One shared corner radius for every custom-painted gradient-dialog surface (previewBox_,
     // ColorPicker's SV-square/hue/alpha rails, preset swatches) - a single, consistent visual

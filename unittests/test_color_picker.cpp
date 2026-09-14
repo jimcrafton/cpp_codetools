@@ -45,6 +45,44 @@ TEST(ColorPickerTest, ColorRoundTripsThroughHSVA)
     EXPECT_NEAR(result.a, seed.a, 0.01f);
 }
 
+// Real bug, caught live: a stop that starts fully black (or any gray) has zero saturation/value,
+// so Color::toHSV() can't recover a hue from it (mathematically indeterminate for an achromatic
+// RGB) and reports it back as 0. GradientEditorDialog::refreshSelectedItemEditor() round-trips
+// every hue-rail edit straight back through setColor() this way (setSelectedStopColor() stores
+// the picker's own reported color into the stop, then reads it back to resync colorPicker_/
+// hexField_) - without preserving hue_ across that round trip, dragging the hue rail on a black
+// stop silently snapped back to hue 0 on every single click; only clicking near wherever the
+// thumb was already pinned looked like it worked.
+TEST(ColorPickerTest, SettingHueOnBlackSurvivesARealColorRoundTrip)
+{
+    CodeToolsVsix::ColorPicker picker;
+    picker.setColor(newui::Color(0.0f, 0.0f, 0.0f, 1.0f));
+
+    picker.setHue(200.0f);
+    EXPECT_NEAR(picker.hue(), 200.0f, 0.01f);
+
+    // Exactly what refreshSelectedItemEditor() does right after storing the picker's own
+    // reported color back into a stop: read it back and feed it straight into setColor() again.
+    picker.setColor(picker.color());
+
+    EXPECT_NEAR(picker.hue(), 200.0f, 0.01f);
+}
+
+// Same indeterminate-round-trip issue, for saturation specifically - only lost when value hits
+// exactly 0 (black), where Color::toHSV()'s own division guard forces saturation to 0 too.
+TEST(ColorPickerTest, SettingSaturationOnBlackSurvivesARealColorRoundTrip)
+{
+    CodeToolsVsix::ColorPicker picker;
+    picker.setColor(newui::Color(0.0f, 0.0f, 0.0f, 1.0f));
+
+    picker.setSaturationValue(0.6f, 0.0f);
+    EXPECT_NEAR(picker.saturation(), 0.6f, 0.01f);
+
+    picker.setColor(picker.color());
+
+    EXPECT_NEAR(picker.saturation(), 0.6f, 0.01f);
+}
+
 TEST(ColorPickerTest, SetHueWrapsOutOfRangeValues)
 {
     CodeToolsVsix::ColorPicker picker;

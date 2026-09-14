@@ -14,7 +14,13 @@ namespace CodeToolsVsix
     namespace
     {
         constexpr float kDialogWidth = 360.0f;
-        constexpr float kDialogHeight = 640.0f;
+        // 24 (kind) + 96 (preview) + 28 (track) + 130 (selectedItemEditor) + 24 (pages) +
+        // 24 (presetsLabel) + 32 (presetsRow) + 32 (footer) + 7*8 spacing + 2*12 padding = 470 -
+        // recomputed after pagesContainer_ stopped weight-stretching to fill the (until-then-
+        // empty) leftover space between the hex row and Presets. 480 clipped the footer live (the
+        // window's own non-client chrome eats into that budget too), so this carries real slack,
+        // not just rounding.
+        constexpr float kDialogHeight = 520.0f;
         constexpr float kRowHeight = 24.0f;
         constexpr float kLabelWidth = 70.0f;
         constexpr float kPreviewHeight = 96.0f;
@@ -104,48 +110,29 @@ namespace CodeToolsVsix
             return newui::Point(shapeBounds.left() + nx * shapeBounds.width(), shapeBounds.top() + ny * shapeBounds.height());
         }
 
-        // Copies source, then overwrites *only* its rendering-geometry fields (linearStart/End,
-        // radialCenter/Radius, conicCenter, or every point's own position for Point) with values
-        // fit to bounds. Linear/Radial/Conic's own geometry fields (graphics.h) are absolute
-        // coordinates in whatever View the gradient is eventually painted onto (e.g. a Button's
-        // own local bounds) - this dialog has no real control surface for editing those yet (a
-        // later phase), so the preview can only ever show a representative rendering for those 3
-        // kinds, fit to whatever box is previewing it, never the real final placement. Point is
-        // different: a GradientPoint's own position() *is* the real committed data (there's no
-        // separate "stops" list independent of placement the way Linear/Radial/Conic have) - so
-        // this rescales the *real* positions (via mapToScreen(), shapeBounds()-relative to
-        // bounds-relative) rather than fabricating throwaway ones, which is also what makes
-        // clicking/dragging directly in the preview a real, correct edit for Point (see
-        // PreviewBox's own comment). Either way, nothing here is ever written back into working_
-        // itself - previewBox_'s own paint() throws this copy away every time.
+        // Copies source, remapping only Point's own real positions (a GradientPoint's position()
+        // *is* the real committed data - there's no separate "stops" list independent of
+        // placement the way Linear/Radial/Conic have) from shapeBounds()-relative to
+        // bounds-relative, via mapToScreen() - what makes clicking/dragging directly in the
+        // preview a real, correct edit for Point (see PreviewBox's own comment). Nothing here is
+        // ever written back into working_ itself - previewBox_'s own paint() throws this copy
+        // away every time.
+        //
+        // Linear/Radial/Conic need no such remap any more: their own geometry fields (graphics.h)
+        // are proportional [0,1] fractions of whatever box toBLVar() resolves them against, not
+        // absolute coordinates - source's own real geometry (working_'s, whatever it actually is)
+        // already renders correctly at any box size, this preview box included, with no throwaway
+        // copy needed. (Used to be a real, live-reported bug the other way: this function forged
+        // a fresh absolute geometry fit to the preview box alone, and working_'s own real geometry
+        // - what actually got committed - never matched any real target view's size at all. Fixed
+        // at the root in newui::gfx::Gradient itself, not here.)
         newui::gfx::Gradient previewGradientFor(const newui::gfx::Gradient& source, const newui::Rect& bounds, const newui::Rect& shapeBounds)
         {
             newui::gfx::Gradient preview = source;
-            float centerX = bounds.left() + bounds.width() * 0.5f;
-            float centerY = bounds.top() + bounds.height() * 0.5f;
-
-            switch (preview.kind()) {
-            case newui::gfx::GradientKind::Radial: {
-                preview.setRadialCenter(newui::Point(centerX, centerY));
-                preview.setRadialFocalOffset(newui::Point(0.0f, 0.0f));
-                float radius = bounds.width() < bounds.height() ? bounds.width() : bounds.height();
-                preview.setRadialRadius(radius * 0.5f);
-                break;
-            }
-            case newui::gfx::GradientKind::Conic:
-                preview.setConicCenter(newui::Point(centerX, centerY));
-                break;
-            case newui::gfx::GradientKind::Point: {
+            if (preview.kind() == newui::gfx::GradientKind::Point) {
                 for (newui::gfx::GradientPoint& point : preview.points()) {
                     point.setPosition(mapToScreen(shapeBounds, bounds, point.position()));
                 }
-                break;
-            }
-            case newui::gfx::GradientKind::Linear:
-            default:
-                preview.setLinearStart(newui::Point(bounds.left(), centerY));
-                preview.setLinearEnd(newui::Point(bounds.right(), centerY));
-                break;
             }
             return preview;
         }
@@ -179,7 +166,7 @@ namespace CodeToolsVsix
                     return;
                 }
 
-                paintCheckerboard(ctx, bounds);
+                paintCheckerboard(ctx, bounds, 6.0, kCornerRadius);
 
                 newui::gfx::Gradient preview = previewGradientFor(owner_.gradient(), bounds, owner_.shapeBounds());
                 BLVar fill = preview.toBLVar(bounds);
@@ -335,11 +322,12 @@ namespace CodeToolsVsix
                 if (!stops.empty()) {
                     // A throwaway Linear gradient spanning lineRect - visualizes stop
                     // position/color only, never owner_.gradient()'s own real kind/geometry (see
-                    // this class's own comment).
+                    // this class's own comment). Left at Gradient's own default linearStart()/
+                    // linearEnd() (proportional (0,0)->(1,0) - left edge to right edge, graphics.h)
+                    // rather than set explicitly - toBLVar(lineRect) below resolves that against
+                    // lineRect fresh, exactly the full-width span this track always wants.
                     newui::gfx::Gradient line;
                     line.setKind(newui::gfx::GradientKind::Linear);
-                    line.setLinearStart(newui::Point(lineRect.left(), lineRect.top()));
-                    line.setLinearEnd(newui::Point(lineRect.right(), lineRect.top()));
                     for (const newui::gfx::GradientStop& stop : stops) {
                         line.stops().push_back(stop);
                     }
@@ -488,13 +476,14 @@ namespace CodeToolsVsix
                 if (bounds.width() <= 0.0f || bounds.height() <= 0.0f) {
                     return;
                 }
-                paintCheckerboard(ctx, bounds, 4.0);
+                paintCheckerboard(ctx, bounds, 4.0, kCornerRadius);
 
+                // Left at Gradient's own default linearStart()/linearEnd() (proportional
+                // (0,0)->(1,0) - left edge to right edge, graphics.h) rather than set explicitly -
+                // toBLVar(bounds) below resolves that against this swatch's own bounds fresh,
+                // exactly the full-width span a preset preview always wants.
                 newui::gfx::Gradient preview;
                 preview.setKind(newui::gfx::GradientKind::Linear);
-                float midY = bounds.top() + bounds.height() * 0.5f;
-                preview.setLinearStart(newui::Point(bounds.left(), midY));
-                preview.setLinearEnd(newui::Point(bounds.right(), midY));
                 for (const newui::gfx::GradientStop& stop : stops_) {
                     preview.stops().push_back(stop);
                 }
@@ -1015,10 +1004,16 @@ namespace CodeToolsVsix
         // pagesContainer_ owns a CardLayout switching between the 4 pages below - built once
         // here, never destroyed/rebuilt on a kind change (see this class's own header comment for
         // why each kind gets its own real page instead of one shared, rebuilt-in-place container).
+        // Fixed to kRowHeight, not weight-stretched - Linear/Radial/Conic's own pages are still
+        // real, currently-empty placeholders (see this function's own comment below), and giving
+        // this container the remaining leftover space left a large blank gap between the hex/
+        // delete row and Presets for every kind but Point (whose hint label is the only thing
+        // that lives here today). Revisit once a kind actually gets real per-kind controls (an
+        // angle dial, a shape toggle) - this may need to grow again then.
         newui::ViewBuilder<newui::SubView> pagesBuilder;
         pagesBuilder.name("gradientPages")
             .visible(true)
-            .layoutParams<newui::FlexLayoutParams>([](newui::FlexLayoutParams& params) { params.weight = 1.0f; });
+            .desiredSize(newui::Size(0.0f, kRowHeight));
         pagesContainer_ = pagesBuilder.build();
         auto pagesLayout = std::make_unique<newui::CardLayout>();
         pagesLayout_ = pagesLayout.get();

@@ -103,6 +103,24 @@ namespace CodeToolsVsix
         // Seeds the working copy this dialog edits - resets kind tabs/stops/points to match. Call
         // before showModal()/any of the mutators below.
         void setGradient(const newui::gfx::Gradient& gradient);
+        // The real working copy - a plain reference getter (not value-returning): PreviewBox/
+        // StopTrack's own internal hit-testing (same file) binds a `const auto&` to
+        // owner_.gradient().stops()/.points() and keeps using it after that one statement, which
+        // a value-returning getter would leave dangling (a function-call return breaks C++'s
+        // usual temporary-lifetime extension) - a real regression an earlier draft of this getter
+        // introduced, caught immediately by 2 failing tests.
+        //
+        // Used to need a separate resolvedGradient() here too: Linear/Radial/Conic's own geometry
+        // (linearStart_/linearEnd_ etc., graphics.h) used to be absolute local-space pixel
+        // coordinates, and this dialog only ever built a throwaway, box-fitted copy for its own
+        // previewBox_ (previewGradientFor()) - working_'s own real geometry was never touched, so
+        // committing it as-is applied a tiny, arbitrary absolute span that had nothing to do with
+        // the real target view's actual size (and, being frozen, didn't follow a later resize
+        // either). Both real, live-reported bugs. Now fixed at the root, in newui::gfx::Gradient
+        // itself: that geometry is proportional [0,1] fractions of whatever box it's resolved
+        // against, re-resolved fresh on every real paint - so working_'s own class defaults
+        // (graphics.h) are already correct and portable, and committing gradient() directly here
+        // is correct again, matching how Point kind's own real positions always worked.
         const newui::gfx::Gradient& gradient() const { return working_; }
 
         // The real target View's own local bounds (e.g. a Button's own bounds() - see

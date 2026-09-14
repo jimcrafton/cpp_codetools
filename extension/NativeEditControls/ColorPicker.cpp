@@ -236,7 +236,7 @@ namespace CodeToolsVsix
                     return;
                 }
                 BLRect rect(bounds);
-                paintCheckerboard(ctx, bounds, 4.0);
+                paintCheckerboard(ctx, bounds, 4.0, kCornerRadius);
 
                 newui::Color rgb = newui::Color::fromHSV(owner_.hue(), owner_.saturation(), owner_.value());
                 BLGradient alphaSpectrum(BLLinearGradientValues(rect.x, rect.y, rect.x, rect.y + rect.h));
@@ -337,11 +337,23 @@ namespace CodeToolsVsix
     void ColorPicker::setColor(const newui::Color& color)
     {
         newui::HSVColor hsv = color.toHSV();
-        if (hsv.h == hue_ && hsv.s == sat_ && hsv.v == val_ && color.a == alpha_) {
+        // An achromatic RGB (black, white, or any pure gray) carries no real hue - and once
+        // value hits 0 (black), no real saturation either - so Color::toHSV() reports both as an
+        // arbitrary 0 in those cases (color.h's own hueFromRGB()/toHSV(), gated by the same
+        // "delta <= kEpsilon"/"maxC > 0" checks). This dialog round-trips every hue-rail edit
+        // straight back through setColor() (setSelectedStopColor() -> refreshSelectedItemEditor())
+        // to keep colorPicker_/hexField_ in sync - without this, dragging the hue rail on a stop
+        // that started out black (or any gray) got silently snapped back to hue 0 on every single
+        // click, a real bug the user caught live (only clicking near the already-pinned handle
+        // looked like it worked). Keep this picker's own last real hue/saturation instead of
+        // accepting the indeterminate round-tripped one, same as any real color picker does.
+        float h = (hsv.s <= 0.0f) ? hue_ : hsv.h;
+        float s = (hsv.v <= 0.0f) ? sat_ : hsv.s;
+        if (h == hue_ && s == sat_ && hsv.v == val_ && color.a == alpha_) {
             return;
         }
-        hue_ = hsv.h;
-        sat_ = hsv.s;
+        hue_ = h;
+        sat_ = s;
         val_ = hsv.v;
         alpha_ = color.a;
         refreshAll();
