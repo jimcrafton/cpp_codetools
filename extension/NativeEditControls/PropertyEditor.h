@@ -156,16 +156,44 @@ namespace CodeToolsVsix
         std::optional<std::any> parseValue(const std::string& text) const override;
     };
 
-    // Text edit only for now (EditStyle::None, the base default) - reuses
-    // newui::Color::toString()/fromString() (CSS-style hex) directly
-    // rather than inventing another format. A real picker (EditStyle::
-    // Dialog) is a future increment, not built here.
+    // Registered by tag ("filepath" - PropertyEditorRegistry::registerEditor(const std::string&,
+    // Factory)), not by C++ type - createEditor() checks property()->tags() before the plain
+    // std::string wildcard (StringPropertyEditor above), so a property tagged this way (e.g. a
+    // future gfx::Fill::imagePath() once it carries "@reflect tags=filepath" on the newui side -
+    // not done as of this class existing; that's a vendored-newui-side edit left for the user's
+    // own D:\code\newui checkout, not this repo's 3rdparty copy) gets a native file picker
+    // instead of a plain text field. valueAsString()/parseValue() are unchanged from
+    // StringPropertyEditor's own shape (parseValue() is never actually reached - EditStyle::
+    // Dialog only ever calls edit(), never setValueFromString() - kept real rather than
+    // returning std::nullopt unconditionally, in case a future caller ever types a path in by
+    // hand through some other path).
+    class FilePathPropertyEditor : public PropertyEditor
+    {
+    public:
+        using PropertyEditor::PropertyEditor;
+        EditStyle editStyle() const override { return EditStyle::Dialog; }
+        std::string valueAsString() const override;
+        std::optional<std::any> parseValue(const std::string& text) const override;
+        // owner's own rootView()->windowHandle() is the real native owner HWND for the picker -
+        // same owner-resolution GradientPropertyEditor::edit() already relies on (see its own
+        // comment). Commits through the ordinary commitValue() path (undo-aware) on a real
+        // selection; a no-op on Cancel/dialog failure, same contract every other EditStyle::
+        // Dialog editor here already has.
+        void edit(newui::View* owner) override;
+    };
+
+    // valueAsString()/parseValue() still reuse newui::Color::toString()/fromString() (CSS-style
+    // hex) directly - unchanged from this class's original text-only shape. edit() (EditStyle::
+    // Dialog, ColorEditorDialog.h) is the real picker, same shape as GradientPropertyEditor's own
+    // edit() below.
     class ColorPropertyEditor : public PropertyEditor
     {
     public:
         using PropertyEditor::PropertyEditor;
+        EditStyle editStyle() const override { return EditStyle::Dialog; }
         std::string valueAsString() const override;
         std::optional<std::any> parseValue(const std::string& text) const override;
+        void edit(newui::View* owner) override;
     };
 
     // Compact comma-separated text ("x, y" / "width, height" / "x, y,

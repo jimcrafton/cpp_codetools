@@ -24,6 +24,7 @@ gtest_discover_tests(cpptools_tests)
 add_executable(nativeeditcontrols_tests
     test_property_editor.cpp
     test_gradient_editor_dialog.cpp
+    test_color_editor_dialog.cpp
     test_color_picker.cpp
     test_component_editor.cpp
     test_designer_editor.cpp
@@ -42,6 +43,7 @@ add_executable(nativeeditcontrols_tests
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/PropertyEditor.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/GradientEditorDialog.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/ColorPicker.cpp"
+    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/ColorEditorDialog.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/PaintUtils.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/ComponentEditor.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/ToolboxRegistry.cpp"

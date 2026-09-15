@@ -203,6 +203,23 @@ TEST_F(PropertyEditorTest, StringEditorRoundTripsThroughTheRealProperty)
     EXPECT_EQ(editor->valueAsString(), "hello");
 }
 
+// Confirms the shared, real registry (not a local, isolated one like
+// TagRegistrationWinsOverTheTypeWildcard below) resolves "iconPath" (tagged "filepath") to the
+// real FilePathPropertyEditor - the actual production path PropertiesGrid uses - not just that
+// tag dispatch works in the abstract with a throwaway MarkerPathEditor.
+TEST_F(PropertyEditorTest, FilePathTaggedPropertyResolvesToTheRealFilePathEditor)
+{
+    const Property* prop = findProperty(widgetClass_, "iconPath");
+    ASSERT_NE(prop, nullptr);
+    auto editor = CodeToolsVsix::PropertyEditorRegistry::instance().createEditor(prop, widgetClass_, &widget_);
+    ASSERT_NE(editor, nullptr);
+    EXPECT_NE(dynamic_cast<CodeToolsVsix::FilePathPropertyEditor*>(editor.get()), nullptr);
+    EXPECT_EQ(editor->editStyle(), CodeToolsVsix::PropertyEditor::EditStyle::Dialog);
+
+    widget_.iconPath = "icons/x.png";
+    EXPECT_EQ(editor->valueAsString(), "icons/x.png");
+}
+
 TEST_F(PropertyEditorTest, ColorEditorRoundTripsThroughTheRealProperty)
 {
     const Property* prop = findProperty(widgetClass_, "tint");

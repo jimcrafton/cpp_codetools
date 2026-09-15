@@ -1,5 +1,9 @@
 #include "PropertyEditor.h"
+#include "ColorEditorDialog.h"
 #include "GradientEditorDialog.h"
+
+#include <newui/dialogs.h>
+#include <newui/rootview.h>
 
 #include <algorithm>
 #include <cctype>
@@ -160,9 +164,39 @@ namespace CodeToolsVsix
         return std::any(text);
     }
 
+    std::string FilePathPropertyEditor::valueAsString() const
+    {
+        return std::any_cast<std::string>(rawValue());
+    }
+
+    std::optional<std::any> FilePathPropertyEditor::parseValue(const std::string& text) const
+    {
+        return std::any(text);
+    }
+
+    void FilePathPropertyEditor::edit(newui::View* owner)
+    {
+        newui::FileDialogOptions options;
+        options.title = "Select File";
+        std::string outPath;
+        if (newui::Dialog::showOpenFile(owner->rootView()->windowHandle(), options, outPath)) {
+            commitValue(std::any(outPath));
+        }
+    }
+
     std::string ColorPropertyEditor::valueAsString() const
     {
         return std::any_cast<newui::Color>(rawValue()).toString();
+    }
+
+    void ColorPropertyEditor::edit(newui::View* owner)
+    {
+        newui::Color current = std::any_cast<newui::Color>(rawValue());
+        ColorEditorDialog dialog;
+        dialog.setColor(current);
+        if (dialog.showModal(owner) == newui::DialogResult::Ok) {
+            commitValue(std::any(dialog.color()));
+        }
     }
 
     std::optional<std::any> ColorPropertyEditor::parseValue(const std::string& text) const
@@ -687,6 +721,8 @@ namespace CodeToolsVsix
             [](const newui::reflection::Property* p, void* instance) { return std::make_unique<FloatPropertyEditor>(p, instance); });
         registerEditor(std::type_index(typeid(std::string)),
             [](const newui::reflection::Property* p, void* instance) { return std::make_unique<StringPropertyEditor>(p, instance); });
+        registerEditor(std::string("filepath"),
+            [](const newui::reflection::Property* p, void* instance) { return std::make_unique<FilePathPropertyEditor>(p, instance); });
         registerEditor(std::type_index(typeid(newui::Color)),
             [](const newui::reflection::Property* p, void* instance) { return std::make_unique<ColorPropertyEditor>(p, instance); });
         registerEditor(std::type_index(typeid(newui::Point)),
