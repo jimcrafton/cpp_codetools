@@ -1,0 +1,555 @@
+// Converted from D:\code\cpp_codetools\design\reference\color_editor_dialog.html
+// (the ".dialog" element only - the mockup's own decorative "Visual Form
+// Editor" canvas backdrop behind it is omitted, not part of the real UI).
+// See .claude/skills/newui-view-json5/references/html-mockup-conversion.md -
+// this is a one-time, approximate conversion, not a pixel-perfect one:
+// the SV square/alpha rail are solid-color placeholders (no 2-axis-blend or
+// checkerboard-alpha equivalent exists here), the hue rail is a real 7-stop
+// linear Gradient (fully supported), "RGB"/"HSL" format tabs and the
+// eyedropper are plain Buttons (native OS chrome, so the mockup's own flat
+// dark tab/icon styling doesn't carry over - only text/enabled state does),
+// and CSS's 9-column swatches grid is a plain horizontal row (fits exactly:
+// 9*32 + 8*7 = 344, this dialog's own inner content width).
+{
+  meta: { author: "", date: "2026-09-14", copyright: "", version: "0.1.0.900" },
+  type: "Frame",
+  title: "Edit color",
+  name: "coloreditordialog",
+  // Frame's own bounds are the outer window rect (title bar + borders
+  // included), taller than rootView's own 574 (the actual client-area
+  // content height below) so the title bar doesn't eat into the footer.
+  bounds: { type: "Rect", pos: { type: "Point", x: 500, y: 80 }, size: { type: "Size", width: 380, height: 612 } },
+  rootView: {
+    type: "RootView", visible: true,
+    bounds: { type: "Rect", pos: { type: "Point", x: 0, y: 0 }, size: { type: "Size", width: 380, height: 574 } },
+                desiredSize: { type: "Size", width: 380, height: 574 },
+    name: "rootview",
+    layout: { type: "FlexLayout", orientation: "Vertical", spacing: 0, padding: 0 },
+    style: {
+      type: "ViewStyle",
+      backgroundFill: { type: "Fill", kind: "Color", color: { type: "Color", foo: 0, r: 0.110, g: 0.114, b: 0.122, a: 1 } }
+    },
+    childViews: [
+      {
+        // ---- header: title/subtitle + close button ----
+        type: "SubView", visible: true,
+        name: "header",
+        bounds: { type: "Rect", pos: { type: "Point", x: 0, y: 0 }, size: { type: "Size", width: 380, height: 64 } },
+                desiredSize: { type: "Size", width: 380, height: 64 },
+        layout: { type: "FlexLayout", orientation: "Horizontal", mainAxisAlignment: "SpaceBetween", crossAxisAlignment: "Start", padding: 16 },
+        childViews: [
+          {
+            type: "SubView", visible: true,
+            name: "titleGroup",
+            bounds: { type: "Rect", pos: { type: "Point", x: 16, y: 12 }, size: { type: "Size", width: 260, height: 40 } },
+                desiredSize: { type: "Size", width: 260, height: 40 },
+            layout: { type: "FlexLayout", orientation: "Vertical", spacing: 2 },
+            childViews: [
+              {
+                type: "Label",
+                name: "dlgTitle",
+                text: "Edit color",
+                bounds: { type: "Rect", pos: { type: "Point", x: 0, y: 0 }, size: { type: "Size", width: 260, height: 18 } },
+                desiredSize: { type: "Size", width: 260, height: 18 },
+                style: {
+                  type: "LabelStyle",
+                  text: "Edit color",
+                  textColor: { type: "Color", foo: 0, r: 0.929, g: 0.929, b: 0.933, a: 1 },
+                  font: { type: "Font", name: "Segoe UI", size: 14, bold: true }
+                },
+                childViews: []
+              },
+              {
+                type: "Label",
+                name: "dlgSubtitle",
+                text: "Button background",
+                bounds: { type: "Rect", pos: { type: "Point", x: 0, y: 20 }, size: { type: "Size", width: 260, height: 16 } },
+                desiredSize: { type: "Size", width: 260, height: 16 },
+                style: {
+                  type: "LabelStyle",
+                  text: "Button background",
+                  textColor: { type: "Color", foo: 0, r: 0.561, g: 0.565, b: 0.580, a: 1 },
+                  font: { type: "Font", name: "Segoe UI", size: 12 }
+                },
+                childViews: []
+              }
+            ]
+          },
+          {
+            type: "Button",
+            name: "closeBtn",
+            text: "\u00d7",
+            bounds: { type: "Rect", pos: { type: "Point", x: 338, y: 14 }, size: { type: "Size", width: 26, height: 26 } },
+                desiredSize: { type: "Size", width: 26, height: 26 },
+            childViews: []
+          }
+        ]
+      },
+      {
+        // ---- body: SV/hue/alpha pickers, compare row, hex+format tabs, RGBA fields, swatches ----
+        type: "SubView", visible: true,
+        name: "body",
+        bounds: { type: "Rect", pos: { type: "Point", x: 0, y: 64 }, size: { type: "Size", width: 380, height: 438 } },
+                desiredSize: { type: "Size", width: 380, height: 438 },
+        layout: { type: "FlexLayout", orientation: "Vertical", spacing: 14, padding: 18 },
+        childViews: [
+          {
+            type: "SubView", visible: true,
+            name: "pickerRow",
+            bounds: { type: "Rect", pos: { type: "Point", x: 18, y: 18 }, size: { type: "Size", width: 344, height: 168 } },
+                desiredSize: { type: "Size", width: 344, height: 168 },
+            layout: { type: "FlexLayout", orientation: "Horizontal", spacing: 10 },
+            childViews: [
+              {
+                type: "SubView", visible: true,
+                name: "svSquare",
+                bounds: { type: "Rect", pos: { type: "Point", x: 0, y: 0 }, size: { type: "Size", width: 268, height: 168 } },
+                desiredSize: { type: "Size", width: 268, height: 168 },
+                style: {
+                  type: "ViewStyle",
+                  rectRadius: 6,
+                  backgroundFill: { type: "Fill", kind: "Color", color: { type: "Color", foo: 0, r: 0.35, g: 0.45, b: 0.6, a: 1 } }
+                },
+                childViews: []
+              },
+              {
+                type: "SubView", visible: true,
+                name: "hueRail",
+                bounds: { type: "Rect", pos: { type: "Point", x: 278, y: 0 }, size: { type: "Size", width: 18, height: 168 } },
+                desiredSize: { type: "Size", width: 18, height: 168 },
+                style: {
+                  type: "ViewStyle",
+                  rectRadius: 9,
+                  backgroundFill: {
+                    type: "Fill",
+                    kind: "Gradient",
+                    gradient: {
+                      type: "Gradient",
+                      kind: "Linear",
+                      linearStart: { type: "Point", x: 0, y: 0 },
+                      linearEnd: { type: "Point", x: 0, y: 168 },
+                      stops: [
+                        { type: "GradientStop", offset: 0, color: { type: "Color", foo: 0, r: 1, g: 0, b: 0, a: 1 } },
+                        { type: "GradientStop", offset: 0.1667, color: { type: "Color", foo: 0, r: 1, g: 1, b: 0, a: 1 } },
+                        { type: "GradientStop", offset: 0.3333, color: { type: "Color", foo: 0, r: 0, g: 1, b: 0, a: 1 } },
+                        { type: "GradientStop", offset: 0.5, color: { type: "Color", foo: 0, r: 0, g: 1, b: 1, a: 1 } },
+                        { type: "GradientStop", offset: 0.6667, color: { type: "Color", foo: 0, r: 0, g: 0, b: 1, a: 1 } },
+                        { type: "GradientStop", offset: 0.8333, color: { type: "Color", foo: 0, r: 1, g: 0, b: 1, a: 1 } },
+                        { type: "GradientStop", offset: 1, color: { type: "Color", foo: 0, r: 1, g: 0, b: 0, a: 1 } }
+                      ]
+                    }
+                  }
+                },
+                childViews: []
+              },
+              {
+                type: "SubView", visible: true,
+                name: "alphaRail",
+                bounds: { type: "Rect", pos: { type: "Point", x: 306, y: 0 }, size: { type: "Size", width: 18, height: 168 } },
+                desiredSize: { type: "Size", width: 18, height: 168 },
+                style: {
+                  type: "ViewStyle",
+                  rectRadius: 9,
+                  backgroundFill: {
+                    type: "Fill",
+                    kind: "Gradient",
+                    gradient: {
+                      type: "Gradient",
+                      kind: "Linear",
+                      linearStart: { type: "Point", x: 0, y: 0 },
+                      linearEnd: { type: "Point", x: 0, y: 168 },
+                      stops: [
+                        { type: "GradientStop", offset: 0, color: { type: "Color", foo: 0, r: 0.353, g: 0.486, b: 0.914, a: 1 } },
+                        { type: "GradientStop", offset: 1, color: { type: "Color", foo: 0, r: 0.353, g: 0.486, b: 0.914, a: 0 } }
+                      ]
+                    }
+                  }
+                },
+                childViews: []
+              }
+            ]
+          },
+          {
+            type: "SubView", visible: true,
+            name: "compareRow",
+            bounds: { type: "Rect", pos: { type: "Point", x: 18, y: 200 }, size: { type: "Size", width: 344, height: 40 } },
+                desiredSize: { type: "Size", width: 344, height: 40 },
+            layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 12 },
+            childViews: [
+              {
+                type: "SubView", visible: true,
+                name: "oldSwatch",
+                bounds: { type: "Rect", pos: { type: "Point", x: 0, y: 0 }, size: { type: "Size", width: 40, height: 40 } },
+                desiredSize: { type: "Size", width: 40, height: 40 },
+                style: {
+                  type: "ViewStyle",
+                  rectRadius: 8,
+                  backgroundFill: { type: "Fill", kind: "Color", color: { type: "Color", foo: 0, r: 0.604, g: 0.576, b: 0.494, a: 1 } }
+                },
+                childViews: []
+              },
+              {
+                type: "SubView", visible: true,
+                name: "newSwatch",
+                bounds: { type: "Rect", pos: { type: "Point", x: 52, y: 0 }, size: { type: "Size", width: 40, height: 40 } },
+                desiredSize: { type: "Size", width: 40, height: 40 },
+                style: {
+                  type: "ViewStyle",
+                  rectRadius: 8,
+                  backgroundFill: { type: "Fill", kind: "Color", color: { type: "Color", foo: 0, r: 0.353, g: 0.486, b: 0.914, a: 1 } }
+                },
+                childViews: []
+              },
+              {
+                type: "SubView", visible: true,
+                name: "compareLabels",
+                bounds: { type: "Rect", pos: { type: "Point", x: 104, y: 4 }, size: { type: "Size", width: 140, height: 32 } },
+                desiredSize: { type: "Size", width: 140, height: 32 },
+                layout: { type: "FlexLayout", orientation: "Vertical", spacing: 2 },
+                childViews: [
+                  {
+                    type: "Label",
+                    name: "compareCaption",
+                    text: "Previous \u2192 new",
+                    bounds: { type: "Rect", pos: { type: "Point", x: 0, y: 0 }, size: { type: "Size", width: 140, height: 14 } },
+                desiredSize: { type: "Size", width: 140, height: 14 },
+                    style: {
+                      type: "LabelStyle",
+                      text: "Previous \u2192 new",
+                      textColor: { type: "Color", foo: 0, r: 0.561, g: 0.565, b: 0.580, a: 1 },
+                      font: { type: "Font", name: "Segoe UI", size: 11 }
+                    },
+                    childViews: []
+                  },
+                  {
+                    type: "Label",
+                    name: "compareHex",
+                    text: "#5A7CE9",
+                    bounds: { type: "Rect", pos: { type: "Point", x: 0, y: 16 }, size: { type: "Size", width: 140, height: 16 } },
+                desiredSize: { type: "Size", width: 140, height: 16 },
+                    style: {
+                      type: "LabelStyle",
+                      text: "#5A7CE9",
+                      textColor: { type: "Color", foo: 0, r: 0.929, g: 0.929, b: 0.933, a: 1 },
+                      font: { type: "Font", name: "Consolas", size: 13, bold: true }
+                    },
+                    childViews: []
+                  }
+                ]
+              },
+              {
+                type: "Button",
+                name: "eyedropperBtn",
+                text: "Pick",
+                bounds: { type: "Rect", pos: { type: "Point", x: 256, y: 3 }, size: { type: "Size", width: 50, height: 34 } },
+                desiredSize: { type: "Size", width: 50, height: 34 },
+                childViews: []
+              }
+            ]
+          },
+          {
+            type: "SubView", visible: true,
+            name: "formatRow",
+            bounds: { type: "Rect", pos: { type: "Point", x: 18, y: 254 }, size: { type: "Size", width: 344, height: 32 } },
+                desiredSize: { type: "Size", width: 344, height: 32 },
+            layout: { type: "FlexLayout", orientation: "Horizontal", spacing: 8 },
+            childViews: [
+              {
+                type: "SubView", visible: true,
+                name: "hexField",
+                bounds: { type: "Rect", pos: { type: "Point", x: 0, y: 0 }, size: { type: "Size", width: 186, height: 32 } },
+                desiredSize: { type: "Size", width: 186, height: 32 },
+                layout: { type: "FlexLayout", orientation: "Horizontal", crossAxisAlignment: "Center", spacing: 4, padding: 8 },
+                style: {
+                  type: "ViewStyle",
+                  rectRadius: 7,
+                  borderWidth: 1,
+                  borderFill: { type: "Color", foo: 0, r: 0.200, g: 0.204, b: 0.216, a: 1 },
+                  backgroundFill: { type: "Fill", kind: "Color", color: { type: "Color", foo: 0, r: 0.137, g: 0.141, b: 0.153, a: 1 } }
+                },
+                childViews: [
+                  {
+                    type: "Label",
+                    name: "hexHash",
+                    text: "#",
+                    bounds: { type: "Rect", pos: { type: "Point", x: 8, y: 7 }, size: { type: "Size", width: 10, height: 18 } },
+                desiredSize: { type: "Size", width: 10, height: 18 },
+                    style: {
+                      type: "LabelStyle",
+                      text: "#",
+                      textColor: { type: "Color", foo: 0, r: 0.561, g: 0.565, b: 0.580, a: 1 },
+                      font: { type: "Font", name: "Consolas", size: 13 }
+                    },
+                    childViews: []
+                  },
+                  {
+                    type: "TextField",
+                    name: "hexInput",
+                    text: "5A7CE9",
+                    bounds: { type: "Rect", pos: { type: "Point", x: 22, y: 4 }, size: { type: "Size", width: 156, height: 24 } },
+                desiredSize: { type: "Size", width: 156, height: 24 },
+                    textColor: { type: "Color", foo: 0, r: 0.929, g: 0.929, b: 0.933, a: 1 },
+                    font: { type: "Font", name: "Consolas", size: 13 },
+                    childViews: []
+                  }
+                ]
+              },
+              {
+                type: "SubView", visible: true,
+                name: "tabsGroup",
+                bounds: { type: "Rect", pos: { type: "Point", x: 194, y: 0 }, size: { type: "Size", width: 150, height: 32 } },
+                desiredSize: { type: "Size", width: 150, height: 32 },
+                layout: { type: "FlexLayout", orientation: "Horizontal", spacing: 6, padding: 2 },
+                style: {
+                  type: "ViewStyle",
+                  rectRadius: 7,
+                  backgroundFill: { type: "Fill", kind: "Color", color: { type: "Color", foo: 0, r: 0.137, g: 0.141, b: 0.153, a: 1 } }
+                },
+                childViews: [
+                  {
+                    type: "Button",
+                    name: "rgbTab",
+                    text: "RGB",
+                    bounds: { type: "Rect", pos: { type: "Point", x: 0, y: 2 }, size: { type: "Size", width: 70, height: 28 } },
+                desiredSize: { type: "Size", width: 70, height: 28 },
+                    childViews: []
+                  },
+                  {
+                    type: "Button",
+                    name: "hslTab",
+                    text: "HSL",
+                    bounds: { type: "Rect", pos: { type: "Point", x: 76, y: 2 }, size: { type: "Size", width: 70, height: 28 } },
+                desiredSize: { type: "Size", width: 70, height: 28 },
+                    childViews: []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            type: "SubView", visible: true,
+            name: "valueGrid",
+            bounds: { type: "Rect", pos: { type: "Point", x: 18, y: 300 }, size: { type: "Size", width: 344, height: 50 } },
+                desiredSize: { type: "Size", width: 344, height: 50 },
+            layout: { type: "FlexLayout", orientation: "Horizontal", spacing: 8 },
+            childViews: [
+              {
+                type: "SubView", visible: true,
+                name: "rField",
+                bounds: { type: "Rect", pos: { type: "Point", x: 0, y: 0 }, size: { type: "Size", width: 80, height: 50 } },
+                desiredSize: { type: "Size", width: 80, height: 50 },
+                layout: { type: "FlexLayout", orientation: "Vertical", spacing: 4 },
+                childViews: [
+                  {
+                    type: "Label", name: "rFieldLabel", text: "R",
+                    bounds: { type: "Rect", pos: { type: "Point", x: 0, y: 0 }, size: { type: "Size", width: 80, height: 14 } },
+                desiredSize: { type: "Size", width: 80, height: 14 },
+                    style: { type: "LabelStyle", text: "R", textColor: { type: "Color", foo: 0, r: 0.561, g: 0.565, b: 0.580, a: 1 }, font: { type: "Font", name: "Segoe UI", size: 10 } },
+                    childViews: []
+                  },
+                  {
+                    type: "TextField", name: "rFieldValue", text: "90",
+                    bounds: { type: "Rect", pos: { type: "Point", x: 0, y: 18 }, size: { type: "Size", width: 80, height: 26 } },
+                desiredSize: { type: "Size", width: 80, height: 26 },
+                    textColor: { type: "Color", foo: 0, r: 0.929, g: 0.929, b: 0.933, a: 1 },
+                    font: { type: "Font", name: "Consolas", size: 13 },
+                    childViews: []
+                  }
+                ]
+              },
+              {
+                type: "SubView", visible: true,
+                name: "gField",
+                bounds: { type: "Rect", pos: { type: "Point", x: 88, y: 0 }, size: { type: "Size", width: 80, height: 50 } },
+                desiredSize: { type: "Size", width: 80, height: 50 },
+                layout: { type: "FlexLayout", orientation: "Vertical", spacing: 4 },
+                childViews: [
+                  {
+                    type: "Label", name: "gFieldLabel", text: "G",
+                    bounds: { type: "Rect", pos: { type: "Point", x: 0, y: 0 }, size: { type: "Size", width: 80, height: 14 } },
+                desiredSize: { type: "Size", width: 80, height: 14 },
+                    style: { type: "LabelStyle", text: "G", textColor: { type: "Color", foo: 0, r: 0.561, g: 0.565, b: 0.580, a: 1 }, font: { type: "Font", name: "Segoe UI", size: 10 } },
+                    childViews: []
+                  },
+                  {
+                    type: "TextField", name: "gFieldValue", text: "124",
+                    bounds: { type: "Rect", pos: { type: "Point", x: 0, y: 18 }, size: { type: "Size", width: 80, height: 26 } },
+                desiredSize: { type: "Size", width: 80, height: 26 },
+                    textColor: { type: "Color", foo: 0, r: 0.929, g: 0.929, b: 0.933, a: 1 },
+                    font: { type: "Font", name: "Consolas", size: 13 },
+                    childViews: []
+                  }
+                ]
+              },
+              {
+                type: "SubView", visible: true,
+                name: "bField",
+                bounds: { type: "Rect", pos: { type: "Point", x: 176, y: 0 }, size: { type: "Size", width: 80, height: 50 } },
+                desiredSize: { type: "Size", width: 80, height: 50 },
+                layout: { type: "FlexLayout", orientation: "Vertical", spacing: 4 },
+                childViews: [
+                  {
+                    type: "Label", name: "bFieldLabel", text: "B",
+                    bounds: { type: "Rect", pos: { type: "Point", x: 0, y: 0 }, size: { type: "Size", width: 80, height: 14 } },
+                desiredSize: { type: "Size", width: 80, height: 14 },
+                    style: { type: "LabelStyle", text: "B", textColor: { type: "Color", foo: 0, r: 0.561, g: 0.565, b: 0.580, a: 1 }, font: { type: "Font", name: "Segoe UI", size: 10 } },
+                    childViews: []
+                  },
+                  {
+                    type: "TextField", name: "bFieldValue", text: "233",
+                    bounds: { type: "Rect", pos: { type: "Point", x: 0, y: 18 }, size: { type: "Size", width: 80, height: 26 } },
+                desiredSize: { type: "Size", width: 80, height: 26 },
+                    textColor: { type: "Color", foo: 0, r: 0.929, g: 0.929, b: 0.933, a: 1 },
+                    font: { type: "Font", name: "Consolas", size: 13 },
+                    childViews: []
+                  }
+                ]
+              },
+              {
+                type: "SubView", visible: true,
+                name: "aField",
+                bounds: { type: "Rect", pos: { type: "Point", x: 264, y: 0 }, size: { type: "Size", width: 80, height: 50 } },
+                desiredSize: { type: "Size", width: 80, height: 50 },
+                layout: { type: "FlexLayout", orientation: "Vertical", spacing: 4 },
+                childViews: [
+                  {
+                    type: "Label", name: "aFieldLabel", text: "A",
+                    bounds: { type: "Rect", pos: { type: "Point", x: 0, y: 0 }, size: { type: "Size", width: 80, height: 14 } },
+                desiredSize: { type: "Size", width: 80, height: 14 },
+                    style: { type: "LabelStyle", text: "A", textColor: { type: "Color", foo: 0, r: 0.561, g: 0.565, b: 0.580, a: 1 }, font: { type: "Font", name: "Segoe UI", size: 10 } },
+                    childViews: []
+                  },
+                  {
+                    type: "TextField", name: "aFieldValue", text: "100",
+                    bounds: { type: "Rect", pos: { type: "Point", x: 0, y: 18 }, size: { type: "Size", width: 80, height: 26 } },
+                desiredSize: { type: "Size", width: 80, height: 26 },
+                    textColor: { type: "Color", foo: 0, r: 0.929, g: 0.929, b: 0.933, a: 1 },
+                    font: { type: "Font", name: "Consolas", size: 13 },
+                    childViews: []
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            type: "Label",
+            name: "swatchesLabel",
+            text: "Swatches",
+            bounds: { type: "Rect", pos: { type: "Point", x: 18, y: 364 }, size: { type: "Size", width: 150, height: 16 } },
+                desiredSize: { type: "Size", width: 150, height: 16 },
+            style: {
+              type: "LabelStyle",
+              text: "Swatches",
+              textColor: { type: "Color", foo: 0, r: 0.561, g: 0.565, b: 0.580, a: 1 },
+              font: { type: "Font", name: "Segoe UI", size: 11 }
+            },
+            childViews: []
+          },
+          {
+            type: "SubView", visible: true,
+            name: "swatchesRow",
+            bounds: { type: "Rect", pos: { type: "Point", x: 18, y: 388 }, size: { type: "Size", width: 344, height: 32 } },
+                desiredSize: { type: "Size", width: 344, height: 32 },
+            layout: { type: "FlexLayout", orientation: "Horizontal", spacing: 7 },
+            childViews: [
+              {
+                type: "SubView", visible: true, name: "swatch0",
+                bounds: { type: "Rect", pos: { type: "Point", x: 0, y: 0 }, size: { type: "Size", width: 32, height: 32 } },
+                desiredSize: { type: "Size", width: 32, height: 32 },
+                style: { type: "ViewStyle", rectRadius: 6, backgroundFill: { type: "Fill", kind: "Color", color: { type: "Color", foo: 0, r: 0.353, g: 0.486, b: 0.914, a: 1 } } },
+                childViews: []
+              },
+              {
+                type: "SubView", visible: true, name: "swatch1",
+                bounds: { type: "Rect", pos: { type: "Point", x: 39, y: 0 }, size: { type: "Size", width: 32, height: 32 } },
+                desiredSize: { type: "Size", width: 32, height: 32 },
+                style: { type: "ViewStyle", rectRadius: 6, backgroundFill: { type: "Fill", kind: "Color", color: { type: "Color", foo: 0, r: 0.914, g: 0.439, b: 0.353, a: 1 } } },
+                childViews: []
+              },
+              {
+                type: "SubView", visible: true, name: "swatch2",
+                bounds: { type: "Rect", pos: { type: "Point", x: 78, y: 0 }, size: { type: "Size", width: 32, height: 32 } },
+                desiredSize: { type: "Size", width: 32, height: 32 },
+                style: { type: "ViewStyle", rectRadius: 6, backgroundFill: { type: "Fill", kind: "Color", color: { type: "Color", foo: 0, r: 0.184, g: 0.749, b: 0.443, a: 1 } } },
+                childViews: []
+              },
+              {
+                type: "SubView", visible: true, name: "swatch3",
+                bounds: { type: "Rect", pos: { type: "Point", x: 117, y: 0 }, size: { type: "Size", width: 32, height: 32 } },
+                desiredSize: { type: "Size", width: 32, height: 32 },
+                style: { type: "ViewStyle", rectRadius: 6, backgroundFill: { type: "Fill", kind: "Color", color: { type: "Color", foo: 0, r: 0.949, g: 0.718, b: 0.020, a: 1 } } },
+                childViews: []
+              },
+              {
+                type: "SubView", visible: true, name: "swatch4",
+                bounds: { type: "Rect", pos: { type: "Point", x: 156, y: 0 }, size: { type: "Size", width: 32, height: 32 } },
+                desiredSize: { type: "Size", width: 32, height: 32 },
+                style: { type: "ViewStyle", rectRadius: 6, backgroundFill: { type: "Fill", kind: "Color", color: { type: "Color", foo: 0, r: 0.541, g: 0.361, b: 0.878, a: 1 } } },
+                childViews: []
+              },
+              {
+                type: "SubView", visible: true, name: "swatch5",
+                bounds: { type: "Rect", pos: { type: "Point", x: 195, y: 0 }, size: { type: "Size", width: 32, height: 32 } },
+                desiredSize: { type: "Size", width: 32, height: 32 },
+                style: { type: "ViewStyle", rectRadius: 6, backgroundFill: { type: "Fill", kind: "Color", color: { type: "Color", foo: 0, r: 0.133, g: 0.757, b: 0.839, a: 1 } } },
+                childViews: []
+              },
+              {
+                type: "SubView", visible: true, name: "swatch6",
+                bounds: { type: "Rect", pos: { type: "Point", x: 234, y: 0 }, size: { type: "Size", width: 32, height: 32 } },
+                desiredSize: { type: "Size", width: 32, height: 32 },
+                style: { type: "ViewStyle", rectRadius: 6, backgroundFill: { type: "Fill", kind: "Color", color: { type: "Color", foo: 0, r: 0.957, g: 0.357, b: 0.553, a: 1 } } },
+                childViews: []
+              },
+              {
+                type: "SubView", visible: true, name: "swatch7",
+                bounds: { type: "Rect", pos: { type: "Point", x: 273, y: 0 }, size: { type: "Size", width: 32, height: 32 } },
+                desiredSize: { type: "Size", width: 32, height: 32 },
+                style: { type: "ViewStyle", rectRadius: 6, backgroundFill: { type: "Fill", kind: "Color", color: { type: "Color", foo: 0, r: 0.294, g: 0.306, b: 0.322, a: 1 } } },
+                childViews: []
+              },
+              {
+                type: "Button",
+                name: "addSwatchBtn",
+                text: "+",
+                bounds: { type: "Rect", pos: { type: "Point", x: 312, y: 0 }, size: { type: "Size", width: 32, height: 32 } },
+                desiredSize: { type: "Size", width: 32, height: 32 },
+                childViews: []
+              }
+            ]
+          }
+        ]
+      },
+      {
+        // ---- footer: Cancel / Apply ----
+        type: "SubView", visible: true,
+        name: "footer",
+        bounds: { type: "Rect", pos: { type: "Point", x: 0, y: 502 }, size: { type: "Size", width: 380, height: 72 } },
+                desiredSize: { type: "Size", width: 380, height: 72 },
+        layout: { type: "FlexLayout", orientation: "Horizontal", mainAxisAlignment: "End", crossAxisAlignment: "Center", spacing: 8, padding: 14 },
+        style: {
+          type: "ViewStyle",
+          backgroundFill: { type: "Fill", kind: "Color", color: { type: "Color", foo: 0, r: 0.137, g: 0.141, b: 0.153, a: 1 } }
+        },
+        childViews: [
+          {
+            type: "Button",
+            name: "cancelBtn",
+            text: "Cancel",
+            bounds: { type: "Rect", pos: { type: "Point", x: 198, y: 18 }, size: { type: "Size", width: 80, height: 36 } },
+                desiredSize: { type: "Size", width: 80, height: 36 },
+            childViews: []
+          },
+          {
+            type: "Button",
+            name: "applyBtn",
+            text: "Apply",
+            bounds: { type: "Rect", pos: { type: "Point", x: 286, y: 18 }, size: { type: "Size", width: 80, height: 36 } },
+                desiredSize: { type: "Size", width: 80, height: 36 },
+            childViews: []
+          }
+        ]
+      }
+    ]
+  }
+}
