@@ -8,6 +8,7 @@
 #include <newui/viewbuilder.h>
 
 #include <cmath>
+#include <cstdio>
 #include <memory>
 #include <string>
 
@@ -19,9 +20,19 @@ namespace CodeToolsVsix
         constexpr float kAngleDialSize = 48.0f;  // 75% of the original 64
         constexpr float kAngleDialPadding = 4.0f;
         constexpr float kAngleLabelWidth = 44.0f;
+        // pointPage_'s own "Sharpness" row - Gradient::pointBlendPower()'s real range has no
+        // documented hard bounds (graphics.h's own doc comment just says "higher = sharper
+        // transitions"), so this dialog picks a UI-usable one: 0.5 visibly softens the blend
+        // toward a flat average, 8.0 makes it read as near-hard Voronoi cells well before that -
+        // both found by hand in testharness.exe, not derived from any formula.
+        constexpr float kPointBlendPowerMin = 0.5f;
+        constexpr float kPointBlendPowerMax = 8.0f;
+        constexpr float kPointBlendPowerStep = 0.1f;
+        constexpr float kPointBlendPowerValueWidth = 32.0f;
         // Tall enough for linearPage_'s own real angle dial (kAngleDialSize) plus a little
         // breathing room on both sides - Radial/Conic remain empty for now (no shape toggle
-        // built yet), Point's hint label easily fits too.
+        // built yet); Point's hint label + its own "Sharpness" slider row (2*kRowHeight + 4
+        // spacing = 52) fit comfortably within it too.
         constexpr float kPagesHeight = kAngleDialSize + kAngleDialPadding * 2.0f;
         // 24 (kind) + 96 (preview) + 28 (track) + 130 (selectedItemEditor) + kPagesHeight (pages) +
         // 24 (presetsLabel) + 32 (presetsRow) + 32 (footer) + 7*8 spacing + 2*12 padding -
@@ -712,6 +723,8 @@ namespace CodeToolsVsix
         buildChrome();
         showPageForKind(working_.kind());
         refreshLinearAngleLabel();
+        refreshRadialSizeControl();
+        refreshPointBlendPowerControl();
     }
 
     void GradientEditorDialog::setGradient(const newui::gfx::Gradient& gradient)
@@ -738,6 +751,8 @@ namespace CodeToolsVsix
         kindControl_->setSelectedIndex(static_cast<std::size_t>(working_.kind()));
         showPageForKind(working_.kind());
         refreshLinearAngleLabel();
+        refreshRadialSizeControl();
+        refreshPointBlendPowerControl();
     }
 
     void GradientEditorDialog::setKind(newui::gfx::GradientKind kind)
@@ -746,6 +761,11 @@ namespace CodeToolsVsix
         normalizePointStateForEditing();
         kindControl_->setSelectedIndex(static_cast<std::size_t>(kind));
         showPageForKind(kind);
+        // normalizePointStateForEditing() can silently change pointBlendPower() itself (0 to 2.0f)
+        // when switching *into* Point - unlike linearAngle()/radialSizeMode(), which never change
+        // on a kind switch alone, so only this path needs the refresh (see
+        // refreshPointBlendPowerControl()'s own doc comment).
+        refreshPointBlendPowerControl();
     }
 
     void GradientEditorDialog::normalizePointStateForEditing()
@@ -923,6 +943,44 @@ namespace CodeToolsVsix
         linearAngleLabel_->setText(std::to_string(static_cast<int>(degrees + 0.5f)) + "\xC2\xB0");
     }
 
+    GradientEditorDialog::RadialSizeMode GradientEditorDialog::radialSizeMode() const
+    {
+        if (shapeBounds_.width() <= 0.0f || shapeBounds_.height() <= 0.0f) {
+            return RadialSizeMode::ClosestSide;
+        }
+        float shortSide = shapeBounds_.width() < shapeBounds_.height() ? shapeBounds_.width() : shapeBounds_.height();
+        float diag = std::sqrt(shapeBounds_.width() * shapeBounds_.width() + shapeBounds_.height() * shapeBounds_.height());
+        float farthestCornerFraction = (diag * 0.5f) / shortSide;
+        return (std::fabs(working_.radialRadius() - farthestCornerFraction) < 0.01f)
+            ? RadialSizeMode::FarthestCorner : RadialSizeMode::ClosestSide;
+    }
+
+    void GradientEditorDialog::setRadialSizeMode(RadialSizeMode mode)
+    {
+        if (shapeBounds_.width() <= 0.0f || shapeBounds_.height() <= 0.0f) {
+            return;
+        }
+        float shortSide = shapeBounds_.width() < shapeBounds_.height() ? shapeBounds_.width() : shapeBounds_.height();
+        float fraction = 0.5f;  // ClosestSide - matches Gradient's own class default exactly
+        if (mode == RadialSizeMode::FarthestCorner) {
+            float diag = std::sqrt(shapeBounds_.width() * shapeBounds_.width() + shapeBounds_.height() * shapeBounds_.height());
+            fraction = (diag * 0.5f) / shortSide;
+        }
+        working_.setRadialRadius(fraction);
+        refreshPreview();
+        // Only fires onSelectionChanged if this actually changes the index (same
+        // no-op-when-unchanged contract every other setter here relies on) - safe to call
+        // unconditionally without risking a feedback loop back into this method.
+        refreshRadialSizeControl();
+    }
+
+    void GradientEditorDialog::refreshRadialSizeControl()
+    {
+        if (radialSizeControl_ != nullptr) {
+            radialSizeControl_->setSelectedIndex(static_cast<std::size_t>(radialSizeMode()));
+        }
+    }
+
     void GradientEditorDialog::selectPoint(std::size_t index)
     {
         std::size_t count = working_.points().size();
@@ -983,6 +1041,33 @@ namespace CodeToolsVsix
         points.erase(points.begin() + static_cast<std::ptrdiff_t>(selectedPointIndex_));
         selectPoint(0);
         refreshPreview();
+    }
+
+    void GradientEditorDialog::setPointBlendPower(float power)
+    {
+        if (power < kPointBlendPowerMin) {
+            power = kPointBlendPowerMin;
+        } else if (power > kPointBlendPowerMax) {
+            power = kPointBlendPowerMax;
+        }
+        working_.setPointBlendPower(power);
+        refreshPointBlendPowerControl();
+        refreshPreview();
+    }
+
+    void GradientEditorDialog::refreshPointBlendPowerControl()
+    {
+        float power = working_.pointBlendPower();
+        if (pointBlendPowerSlider_ != nullptr) {
+            // No-op if unchanged (Slider::setValue()'s own contract, controls.h) - safe to call
+            // unconditionally even when this power value originated from the slider's own drag.
+            pointBlendPowerSlider_->setValue(power);
+        }
+        if (pointBlendPowerLabel_ != nullptr) {
+            char buffer[16];
+            std::snprintf(buffer, sizeof(buffer), "%.1f", static_cast<double>(power));
+            pointBlendPowerLabel_->setText(buffer);
+        }
     }
 
     std::size_t GradientEditorDialog::presetCount()
@@ -1226,21 +1311,90 @@ namespace CodeToolsVsix
         linearAngleLabel_ = angleLabelBuilder.build();
         linearPage_->addChild(linearAngleLabel_);
 
+        // radialPage_ holds a real "Closest side" / "Farthest corner" size toggle - same
+        // SegmentedControl widget kindControl_ itself uses, reused here rather than a bespoke
+        // control since this is a genuine two-state toggle, not a continuous drag (unlike Linear's
+        // own AngleDial).
         radialPage_ = buildStopsPage("gradientRadialPage");
         pagesContainer_->addChild(radialPage_);
+
+        newui::ViewBuilder<newui::SegmentedControl> radialSizeBuilder;
+        radialSizeBuilder.name("gradientRadialSizeControl")
+            .visible(true)
+            .configure([](newui::SegmentedControl& control) {
+                control.setSegments({"Closest side", "Farthest corner"});
+            });
+        radialSizeControl_ = radialSizeBuilder.build();
+        radialSizeControl_->setDesiredSize(radialSizeControl_->naturalSize());
+        radialSizeControl_->onSelectionChanged.add([this](newui::SegmentedControl& sender) {
+            setRadialSizeMode(static_cast<RadialSizeMode>(sender.selectedIndex()));
+            return newui::SyncReturn::Handled;
+        });
+        radialPage_->addChild(radialSizeControl_);
+
         conicPage_ = buildStopsPage("gradientConicPage");
         pagesContainer_->addChild(conicPage_);
 
         // Point editing is real now (Phase 4) - previewBox_ itself is the real edit surface (click
-        // to add, drag to reposition), so this page just holds a usage hint rather than the old
-        // "not built yet" placeholder.
+        // to add, drag to reposition) - so pointPage_ is a real container (same shape as
+        // buildStopsPage()'s lambda above) holding a usage hint plus (Phase 6) a "Sharpness" row
+        // driving Gradient::pointBlendPower(), rather than being the hint Label itself.
+        newui::ViewBuilder<newui::SubView> pointPageBuilder;
+        pointPageBuilder.name("gradientPointPage")
+            .visible(true)
+            .layout<newui::FlexLayout>([](newui::FlexLayout& layout) {
+                layout.setOrientation(newui::Orientation::Vertical);
+                layout.setSpacing(4.0f);
+            });
+        pointPage_ = pointPageBuilder.build();
+        pagesContainer_->addChild(pointPage_);
+
         newui::ViewBuilder<newui::Label> pointHintBuilder;
         pointHintBuilder.name("gradientPointHint")
             .visible(true)
             .desiredSize(newui::Size(0.0f, kRowHeight))
             .configure([](newui::Label& label) { label.setText("Click the preview above to add a point - drag to reposition"); });
-        pointPage_ = pointHintBuilder.build();
-        pagesContainer_->addChild(pointPage_);
+        pointPage_->addChild(pointHintBuilder.build());
+
+        newui::ViewBuilder<newui::SubView> blendPowerRowBuilder;
+        blendPowerRowBuilder.name("gradientBlendPowerRow")
+            .visible(true)
+            .desiredSize(newui::Size(0.0f, kRowHeight))
+            .layout<newui::FlexLayout>([](newui::FlexLayout& layout) {
+                layout.setOrientation(newui::Orientation::Horizontal);
+                layout.setSpacing(6.0f);
+            });
+        newui::SubView* blendPowerRow = blendPowerRowBuilder.build();
+        pointPage_->addChild(blendPowerRow);
+
+        newui::ViewBuilder<newui::Label> blendPowerLabelBuilder;
+        blendPowerLabelBuilder.name("gradientBlendPowerLabel")
+            .visible(true)
+            .desiredSize(newui::Size(kLabelWidth, kRowHeight))
+            .configure([](newui::Label& label) { label.setText("Sharpness"); });
+        blendPowerRow->addChild(blendPowerLabelBuilder.build());
+
+        newui::ViewBuilder<newui::Slider> blendPowerSliderBuilder;
+        blendPowerSliderBuilder.name("gradientBlendPowerSlider")
+            .visible(true)
+            .layoutParams<newui::FlexLayoutParams>([](newui::FlexLayoutParams& params) { params.weight = 1.0f; })
+            .configure([](newui::Slider& slider) {
+                slider.setRange(kPointBlendPowerMin, kPointBlendPowerMax);
+                slider.setStep(kPointBlendPowerStep);
+            });
+        pointBlendPowerSlider_ = blendPowerSliderBuilder.build();
+        pointBlendPowerSlider_->onValueChanged.add([this](newui::Slider& sender) {
+            setPointBlendPower(sender.value());
+            return newui::SyncReturn::Handled;
+        });
+        blendPowerRow->addChild(pointBlendPowerSlider_);
+
+        newui::ViewBuilder<newui::Label> blendPowerValueBuilder;
+        blendPowerValueBuilder.name("gradientBlendPowerValue")
+            .visible(true)
+            .desiredSize(newui::Size(kPointBlendPowerValueWidth, kRowHeight));
+        pointBlendPowerLabel_ = blendPowerValueBuilder.build();
+        blendPowerRow->addChild(pointBlendPowerLabel_);
 
         // Presets (Phase 5) - a "Presets" label + a row of real, independently-clickable
         // PresetButton swatches, last content section before the footer, matching the mockup's own

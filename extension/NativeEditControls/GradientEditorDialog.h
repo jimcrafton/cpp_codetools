@@ -88,7 +88,8 @@ namespace CodeToolsVsix
     // Linear/Conic, a Circle/Ellipse shape toggle for Radial) - giving each kind a real, distinct
     // SubView means those land later without another structural rework. Linear/Radial/Conic's 3
     // pages are still empty today (none of those controls exist yet); pointPage_ now holds a real
-    // usage hint (not a placeholder anymore, now that Point editing is real).
+    // usage hint plus a "Sharpness" Slider driving Gradient::pointBlendPower() (not a placeholder
+    // anymore, now that Point editing is real).
     //
     // Deliberately separates "build/mutate the working Gradient value" (every method below) from
     // "actually show a native modal window" (the inherited showModal(), never called by anything
@@ -182,6 +183,35 @@ namespace CodeToolsVsix
         // calls.
         void setLinearAngle(float radians);
 
+        // --- Radial size (Radial kind only) ---
+
+        // How Radial's own single radius (radialRadius(), a fraction of the box's *shorter* side -
+        // graphics.h) is sized against shapeBounds(). Blend2D's own radial gradient is always a
+        // true circle (a single radius, no separate x/y radii - a real ellipse would need a
+        // non-uniform scale transform applied to the gradient itself, out of scope here), so this
+        // toggles *how far* that circle reaches, not its shape: ClosestSide is the class's own
+        // default (0.5 - the circle just touches the box's nearer edge); FarthestCorner reaches
+        // every corner instead (guaranteeing full box coverage, no flat unblended corner - CSS's
+        // own radial-gradient() default, "closest-side" vs "farthest-corner" in its own
+        // terminology).
+        enum class RadialSizeMode
+        {
+            ClosestSide,
+            FarthestCorner
+        };
+
+        // Derives the current mode from working_.radialRadius() against shapeBounds()'s own real
+        // aspect ratio (within a small tolerance) - ClosestSide if ambiguous/unset, matching the
+        // class default. No separate dialog-side state to drift out of sync, same "derive fresh
+        // from the real Gradient" convention linearAngle() above already uses.
+        RadialSizeMode radialSizeMode() const;
+
+        // Recomputes radialRadius() (still a fraction of the box's shorter side - graphics.h's own
+        // storage convention, unchanged) for mode against shapeBounds()'s real aspect ratio - a
+        // no-op if shapeBounds() is degenerate. The real path radialSizeControl()'s own
+        // onSelectionChanged calls.
+        void setRadialSizeMode(RadialSizeMode mode);
+
         // --- Points (Point kind only) ---
 
         // Selects which point the shared editor targets - clamped to [0, gradient().points().
@@ -207,6 +237,17 @@ namespace CodeToolsVsix
         // rasterizePoints() blends however many points there are - so 1 is the real floor, matching
         // the mockup's own `state.points.length <= 1` guard exactly, not stops' own 2).
         void deleteSelectedPoint();
+
+        // --- Point blend power (Point kind only) ---
+
+        // Gradient::pointBlendPower()'s own real inverse-distance exponent ("higher = sharper
+        // transitions between points" - graphics.h's own doc comment) - a single global knob, not
+        // per-point. Clamped to [kPointBlendPowerMin, kPointBlendPowerMax] (GradientEditorDialog.cpp)
+        // - Gradient's own class default (2.0f) has no documented hard bounds, so this dialog picks
+        // a UI-usable range rather than leaving it unbounded. The real path pointBlendPowerSlider_'s
+        // own onValueChanged calls; also directly testable per this project's "drive the real
+        // method" convention.
+        void setPointBlendPower(float power);
 
         // --- Presets ---
 
@@ -259,6 +300,9 @@ namespace CodeToolsVsix
         newui::SubView* presetsRow() const { return presetsRow_; }
         newui::SubView* linearAngleDial() const { return linearAngleDial_; }
         newui::Label* linearAngleLabel() const { return linearAngleLabel_; }
+        newui::SegmentedControl* radialSizeControl() const { return radialSizeControl_; }
+        newui::Slider* pointBlendPowerSlider() const { return pointBlendPowerSlider_; }
+        newui::Label* pointBlendPowerLabel() const { return pointBlendPowerLabel_; }
 
     private:
         // Builds the permanent chrome once (contentRoot_, kindControl_, pagesContainer_ and its 4
@@ -354,6 +398,23 @@ namespace CodeToolsVsix
         // the user ever touches the dial).
         void refreshLinearAngleLabel();
 
+        // Syncs radialSizeControl_'s own selected index to the current radialSizeMode() - called
+        // from setGradient() (so a freshly loaded gradient's own mode shows correctly before the
+        // user ever touches the toggle) and the constructor. setRadialSizeMode() keeps it in sync
+        // itself afterward (via the same setSelectedIndex() call, its own no-op-when-unchanged
+        // contract making that safe).
+        void refreshRadialSizeControl();
+
+        // Syncs pointBlendPowerSlider_'s own value and pointBlendPowerLabel_'s own text to the
+        // current working_.pointBlendPower() - called from setPointBlendPower() (every real drag or
+        // direct call), the constructor, setGradient() (a freshly loaded gradient's own value), and
+        // setKind() (normalizePointStateForEditing() can silently change pointBlendPower() itself -
+        // 0 to 2.0f - when switching *into* Point, unlike linearAngle()/radialSizeMode(), which
+        // never change on a kind switch alone). Slider::setValue()'s own no-op-when-unchanged
+        // contract (controls.h) makes the call from inside setPointBlendPower() itself safe against
+        // a feedback loop, same reasoning as refreshRadialSizeControl()'s own comment.
+        void refreshPointBlendPowerControl();
+
         newui::gfx::Gradient working_;
         newui::Rect shapeBounds_{0.0f, 0.0f, 200.0f, 140.0f};
         std::size_t selectedStopIndex_ = 0;
@@ -369,13 +430,17 @@ namespace CodeToolsVsix
         // pagesLayout_ directly off the enum value, no translation table).
         // linearPage_ now holds a real angle dial (linearAngleDial_ below) - Radial/Conic remain
         // empty (no shape toggle built yet), real, distinct pages ready for that later, not dead
-        // weight; pointPage_ holds a real usage hint, not a placeholder.
+        // weight; pointPage_ holds a real usage hint plus pointBlendPowerSlider_ below, not a
+        // placeholder.
         newui::SubView* linearPage_ = nullptr;
         newui::SubView* radialPage_ = nullptr;
         newui::SubView* conicPage_ = nullptr;
         newui::SubView* pointPage_ = nullptr;
         newui::SubView* linearAngleDial_ = nullptr;
         newui::Label* linearAngleLabel_ = nullptr;
+        newui::SegmentedControl* radialSizeControl_ = nullptr;
+        newui::Slider* pointBlendPowerSlider_ = nullptr;
+        newui::Label* pointBlendPowerLabel_ = nullptr;
 
         // PreviewBox/StopTrack (GradientEditorDialog.cpp, anonymous namespace) - own no state of
         // their own beyond drag tracking, always painting straight off gradient()/

@@ -150,6 +150,58 @@ TEST(GradientEditorDialogTest, SetLinearAngleUpdatesTheRealDegreesLabel)
     EXPECT_EQ(dialog.linearAngleLabel()->text(), "90\xC2\xB0");
 }
 
+// Blend2D's own radial gradient is always a true circle (a single radius) - radialSizeMode()
+// toggles how far that circle reaches against a deliberately non-square shapeBounds() (200x140),
+// so a bug that forgot to account for aspect ratio would show up as a wrong value, not just a
+// wrong sign.
+TEST(GradientEditorDialogTest, SetRadialSizeModeClosestSideMatchesTheShorterSide)
+{
+    CodeToolsVsix::GradientEditorDialog dialog;
+    dialog.setKind(newui::gfx::GradientKind::Radial);
+    dialog.setShapeBounds(newui::Rect(0.0f, 0.0f, 200.0f, 140.0f));
+
+    dialog.setRadialSizeMode(CodeToolsVsix::GradientEditorDialog::RadialSizeMode::ClosestSide);
+
+    EXPECT_NEAR(dialog.gradient().radialRadius(), 0.5f, 0.001f);
+    EXPECT_EQ(dialog.radialSizeMode(), CodeToolsVsix::GradientEditorDialog::RadialSizeMode::ClosestSide);
+}
+
+TEST(GradientEditorDialogTest, SetRadialSizeModeFarthestCornerReachesTheDiagonal)
+{
+    CodeToolsVsix::GradientEditorDialog dialog;
+    dialog.setKind(newui::gfx::GradientKind::Radial);
+    dialog.setShapeBounds(newui::Rect(0.0f, 0.0f, 200.0f, 140.0f));
+
+    dialog.setRadialSizeMode(CodeToolsVsix::GradientEditorDialog::RadialSizeMode::FarthestCorner);
+
+    // diag = sqrt(200^2 + 140^2) ~= 244.13; shortSide = 140; expected fraction ~= 0.8719
+    EXPECT_NEAR(dialog.gradient().radialRadius(), 0.8719f, 0.001f);
+    EXPECT_EQ(dialog.radialSizeMode(), CodeToolsVsix::GradientEditorDialog::RadialSizeMode::FarthestCorner);
+}
+
+// Drives the actual click path (SegmentedControl::onMouseDown -> segmentAt() hit-testing ->
+// setSelectedIndex()) rather than calling setRadialSizeMode()/setSelectedIndex() directly - same
+// "the tab buttons don't work at all" class of bug ClickingTheSegmentedControlActuallyChangesKind
+// (above) exists to catch, applied to this control instead.
+TEST(GradientEditorDialogTest, ClickingTheRealRadialSizeControlChangesTheMode)
+{
+    CodeToolsVsix::GradientEditorDialog dialog;
+    dialog.setKind(newui::gfx::GradientKind::Radial);
+    dialog.setShapeBounds(newui::Rect(0.0f, 0.0f, 200.0f, 140.0f));
+    ASSERT_NE(dialog.radialSizeControl(), nullptr);
+    ASSERT_EQ(dialog.radialSizeMode(), CodeToolsVsix::GradientEditorDialog::RadialSizeMode::ClosestSide);
+
+    newui::Size natural = dialog.radialSizeControl()->naturalSize();
+    ASSERT_GT(natural.width, 0.0f) << "test assumption: the control has a real, nonzero size to click within";
+
+    // Near the right edge - lands in the last segment ("Farthest corner").
+    newui::SyncReturn result = dialog.radialSizeControl()->onMouseDown.syncCallFirst(*dialog.radialSizeControl(),
+        newui::Point(natural.width - 2.0f, natural.height * 0.5f), 0, 0);
+
+    EXPECT_EQ(result, newui::SyncReturn::Handled);
+    EXPECT_EQ(dialog.radialSizeMode(), CodeToolsVsix::GradientEditorDialog::RadialSizeMode::FarthestCorner);
+}
+
 // gradient() must stay a real reference to working_, not a value-returning getter -
 // PreviewBox/StopTrack's own internal hit-testing binds a `const auto&` to
 // owner_.gradient().stops()/.points() and keeps using it after that statement; a value-returning
@@ -513,6 +565,76 @@ TEST(GradientEditorDialogTest, SetGradientNormalizesDegeneratePointBlendSettings
     // The real points themselves are untouched - only the degenerate scalars are normalized.
     ASSERT_EQ(dialog.gradient().points().size(), 2u);
     EXPECT_EQ(dialog.gradient().points()[0].color().toString(), degenerate.points()[0].color().toString());
+}
+
+TEST(GradientEditorDialogTest, SetPointBlendPowerClampsAndUpdatesTheWorkingGradient)
+{
+    CodeToolsVsix::GradientEditorDialog dialog;
+    dialog.setGradient(makeTwoPointGradient());
+
+    dialog.setPointBlendPower(5.0f);
+    EXPECT_FLOAT_EQ(dialog.gradient().pointBlendPower(), 5.0f);
+
+    // Below/above the dialog's own UI-usable range (0.5-8.0, GradientEditorDialog.cpp) clamp
+    // rather than pass through verbatim - Gradient::pointBlendPower() itself has no hard bounds,
+    // but a value outside this range has no real slider position to represent it at.
+    dialog.setPointBlendPower(-3.0f);
+    EXPECT_FLOAT_EQ(dialog.gradient().pointBlendPower(), 0.5f);
+
+    dialog.setPointBlendPower(100.0f);
+    EXPECT_FLOAT_EQ(dialog.gradient().pointBlendPower(), 8.0f);
+}
+
+// setPointBlendPower() must keep pointBlendPowerSlider()/pointBlendPowerLabel() in sync with the
+// real committed value regardless of caller (a direct call here, a real drag below) - same
+// "no separate UI state to drift out of sync" convention refreshLinearAngleLabel()/
+// refreshRadialSizeControl() already establish for their own controls.
+TEST(GradientEditorDialogTest, SetPointBlendPowerSyncsTheRealSliderAndLabel)
+{
+    CodeToolsVsix::GradientEditorDialog dialog;
+    dialog.setGradient(makeTwoPointGradient());
+    ASSERT_NE(dialog.pointBlendPowerSlider(), nullptr);
+    ASSERT_NE(dialog.pointBlendPowerLabel(), nullptr);
+
+    dialog.setPointBlendPower(3.5f);
+
+    EXPECT_FLOAT_EQ(dialog.pointBlendPowerSlider()->value(), 3.5f);
+    EXPECT_EQ(dialog.pointBlendPowerLabel()->text(), "3.5");
+}
+
+// Drives the actual click path (Slider::onMouseDown -> updateValueFromLocalPoint() ->
+// setValue() -> onValueChanged -> setPointBlendPower()) rather than calling
+// setPointBlendPower() directly - same "prove the rendered control itself is wired up, not just
+// the state-update logic" reasoning ClickingTheRealRadialSizeControlChangesTheMode above already
+// documents for radialSizeControl_. Sets a known real bounds directly on the slider first, same
+// as ClickingTheRealAngleDialSetsLinearAngle above - pointBlendPowerSlider_'s own real width is
+// weight-driven (FlexLayoutParams::weight, not a fixed desiredSize()/naturalSize() like
+// radialSizeControl_'s SegmentedControl), so its actual post-cascade layout size isn't a stable
+// value to click against in a test; a known, explicit bounds sidesteps that entirely.
+//
+// Fires the real multicast onMouseDown(sender, pt, mask, mask) - the same plain call operator
+// RootView::mouseDown() itself uses (rootview.cpp) - rather than onMouseDown.syncCallFirst(),
+// which every other "click the real control" test in this file uses successfully only because
+// AngleDial/SegmentedControl both derive from SubView directly with exactly one onMouseDown
+// subscriber. Slider derives from Control, whose own base constructor already registers
+// Control::handleTrackingMouseDown on onMouseDown *before* Slider's own handleDragStart -
+// unconditionally returns Handled (just sets tracking_ = true) whenever isEnabled(), so
+// syncCallFirst() (which stops at the first Handled responder) would silently short-circuit
+// there and never reach the real value-updating handler at all - confirmed live via a bare
+// Slider before writing this comment. syncCall()'s own multicast loop (delegate.h) only bails
+// early on an actual .error(), not on .handled(), so every real subscriber - tracking_ included -
+// runs, matching a real click exactly.
+TEST(GradientEditorDialogTest, DraggingTheRealBlendPowerSliderChangesPointBlendPower)
+{
+    CodeToolsVsix::GradientEditorDialog dialog;
+    dialog.setGradient(makeTwoPointGradient());
+    ASSERT_NE(dialog.pointBlendPowerSlider(), nullptr);
+    dialog.pointBlendPowerSlider()->setBounds(newui::Rect(0.0f, 0.0f, 200.0f, 24.0f));
+
+    // Near the right edge - should land at (or very near) the slider's own maxValue().
+    dialog.pointBlendPowerSlider()->onMouseDown(*dialog.pointBlendPowerSlider(), newui::Point(199.0f, 12.0f), 0, 0);
+
+    EXPECT_FLOAT_EQ(dialog.gradient().pointBlendPower(), dialog.pointBlendPowerSlider()->maxValue());
 }
 
 TEST(GradientEditorDialogTest, SelectPointClampsToTheLastValidIndex)
