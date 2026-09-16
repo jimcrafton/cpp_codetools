@@ -32,6 +32,8 @@ add_executable(nativeeditcontrols_tests
     test_canvas_well.cpp
     test_toolbox_registry.cpp
     test_toolbox.cpp
+    test_view_style_registry.cpp
+    test_callout_placement.cpp
     test_view_designer_controller.cpp
     test_view_designer_model.cpp
     test_properties_model.cpp
@@ -41,6 +43,8 @@ add_executable(nativeeditcontrols_tests
     test_selection_overlay.cpp
     test_layout_editing_policy.cpp
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/PropertyEditor.cpp"
+    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/CalloutPlacement.cpp"
+    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/ViewStyleRegistry.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/GradientEditorDialog.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/ColorPicker.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/ColorEditorDialog.cpp"

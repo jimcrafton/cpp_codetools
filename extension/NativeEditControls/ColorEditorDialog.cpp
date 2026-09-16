@@ -63,6 +63,9 @@ namespace CodeToolsVsix
             colorPicker_->setLayoutParams(std::make_unique<newui::FlexLayoutParams>(1.0f));
             pickerRow->addChild(colorPicker_);
             colorPicker_->onColorChanged.add([this](ColorPicker&) {
+                // See color()'s own comment (ColorEditorDialog.h) for why this can't just be a
+                // live colorPicker_->color() read at Apply time instead.
+                committedColor_ = colorPicker_->color();
                 refreshFromColor();
                 return newui::SyncReturn::Handled;
             });
@@ -145,6 +148,11 @@ namespace CodeToolsVsix
     void ColorEditorDialog::setColor(const newui::Color& color)
     {
         oldColor_ = color;
+        // Seeded here too, not just inside colorPicker_'s own onColorChanged (buildChrome()'s
+        // wiring) - setColor() below no-ops (fires no onColorChanged at all) if color already
+        // equals colorPicker_'s own current default state, which would otherwise leave
+        // committedColor_ at its own default-constructed value instead of this real seed.
+        committedColor_ = color;
         colorPicker_->setColor(color);
         // setColor() above no-ops (no onColorChanged) if color already equals colorPicker_'s own
         // current one - force the refresh unconditionally anyway, since this is a fresh seed and

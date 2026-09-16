@@ -1,9 +1,15 @@
 #include "PropertyEditor.h"
+#include "CalloutPlacement.h"
 #include "ColorEditorDialog.h"
 #include "GradientEditorDialog.h"
+#include "PaintUtils.h"
+#include "ViewStyleRegistry.h"
 
+#include <newui/application.h>
+#include <newui/controls.h>
 #include <newui/dialogs.h>
 #include <newui/rootview.h>
+#include <newui/uicolormanager.h>
 
 #include <algorithm>
 #include <cctype>
@@ -42,6 +48,171 @@ namespace CodeToolsVsix
             case newui::gfx::GradientKind::Conic: return "Conic";
             default: return "Point";
             }
+        }
+
+        constexpr float kTypePickerCellSize = 84.0f;
+        constexpr float kTypePickerGap = 10.0f;
+        constexpr float kTypePickerLabelHeight = 16.0f;
+        constexpr float kTypePickerTopReserve = 20.0f;  // clears CalloutTool's own top tail+margin
+
+        // One clickable option cell in the Layout/ViewStyle type-swap popup - plain SubView + its
+        // own click detection, same "custom control, own onMouseDown" shape PresetButton/
+        // AddPresetButton (GradientEditorDialog.cpp) already establish for a custom-painted
+        // popup/dialog cell. A real child newui::Label carries the display name (this codebase's
+        // "real control over hand-painted approximation" convention); the preview area above it is
+        // either drawn directly (paintPreview, Layout's own placeholder glyphs - see
+        // ViewStyleRegistry.h's own comment on why no icon assets exist yet) or filled by a real
+        // live-painted child SubView the caller adds itself (ViewStyle's own live preview, added as
+        // an ordinary child after construction) - paintPreview is only invoked when no such child
+        // was added, so the two approaches never fight over the same pixels.
+        //
+        // onSelected is invoked on click and nothing else - it captures property_/instance_/
+        // postCommitSync_ *by value*, never `this` (the PropertyEditor that created this cell,
+        // which PropertiesGrid resets right after showing the popup - see LayoutPropertyEditor::
+        // editAsync()'s own comment).
+        class TypePickerCell : public newui::SubView
+        {
+        public:
+            TypePickerCell(const std::string& label, std::function<void()> onSelected,
+                    std::function<void(BLContext&, const newui::Rect&)> paintPreview = nullptr)
+                : onSelected_(std::move(onSelected)), paintPreview_(std::move(paintPreview))
+            {
+                setVisible(true);
+                onMouseDown.add(this, &TypePickerCell::handleMouseDown);
+
+                auto* labelView = new newui::Label();
+                labelView->setText(label);
+                labelView_ = labelView;
+                addChild(labelView);
+            }
+
+            void setBounds(const newui::Rect& bounds) override
+            {
+                newui::SubView::setBounds(bounds);
+                newui::Rect local = getClientBounds();
+                labelView_->setBounds(newui::Rect(0.0f, local.height() - kTypePickerLabelHeight,
+                    local.width(), kTypePickerLabelHeight));
+            }
+
+            newui::Rect previewRect() const
+            {
+                newui::Rect local = getClientBounds();
+                return newui::Rect(4.0f, 4.0f, local.width() - 8.0f, local.height() - kTypePickerLabelHeight - 8.0f);
+            }
+
+            void paint(BLContext& ctx) override
+            {
+                newui::Rect bounds = getClientBounds();
+                if (bounds.width() <= 0.0f || bounds.height() <= 0.0f) {
+                    return;
+                }
+                ctx.save();
+                ctx.set_fill_style(newui::UIColorManager::colorFor(newui::UIColorRole::ControlBackground).toBLRgba32());
+                ctx.fill_round_rect(BLRect(bounds), 6.0);
+                ctx.set_stroke_style(newui::UIColorManager::colorFor(newui::UIColorRole::ControlBorder).toBLRgba32());
+                ctx.set_stroke_width(1.0);
+                ctx.stroke_round_rect(BLRect(bounds), 6.0);
+                ctx.restore();
+
+                if (paintPreview_) {
+                    paintPreview_(ctx, previewRect());
+                }
+            }
+
+        private:
+            newui::SyncReturn handleMouseDown(newui::View& /*sender*/, const newui::Point& /*pt*/,
+                    std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/)
+            {
+                if (onSelected_) {
+                    onSelected_();
+                }
+                return newui::SyncReturn::Handled;
+            }
+
+            std::function<void()> onSelected_;
+            std::function<void(BLContext&, const newui::Rect&)> paintPreview_;
+            newui::Label* labelView_ = nullptr;
+        };
+
+        // Simple placeholder glyphs for the 4 general-purpose Layout subclasses - no real icon
+        // assets exist yet (see ViewStyleRegistry.h's own comment); these are procedurally drawn
+        // rather than loaded from Resources/Images/icons/layout/ the way ToolboxRegistry's own
+        // table resolves an icon, purely to avoid needing new asset files for this pass. Swapping
+        // in real SVG assets later means changing this function's body, not any caller.
+        void paintLayoutGlyph(BLContext& ctx, const newui::Rect& r, const std::string& layoutClassName)
+        {
+            BLRgba32 stroke = newui::UIColorManager::colorFor(newui::UIColorRole::ControlText).toBLRgba32();
+            ctx.save();
+            ctx.set_stroke_style(stroke);
+            ctx.set_fill_style(stroke);
+            ctx.set_stroke_width(1.5);
+
+            if (layoutClassName == "FlexLayout") {
+                float barW = r.width() / 4.0f;
+                for (int i = 0; i < 3; ++i) {
+                    float x = r.left() + barW * 0.5f + float(i) * barW * 1.15f;
+                    ctx.fill_round_rect(BLRect(x, r.top(), barW * 0.7, r.height()), 2.0);
+                }
+            } else if (layoutClassName == "GridLayout") {
+                float cellW = r.width() / 2.0f;
+                float cellH = r.height() / 2.0f;
+                float gap = 3.0f;
+                for (int row = 0; row < 2; ++row) {
+                    for (int col = 0; col < 2; ++col) {
+                        ctx.stroke_rect(BLRect(r.left() + float(col) * cellW + gap * 0.5,
+                            r.top() + float(row) * cellH + gap * 0.5, cellW - gap, cellH - gap));
+                    }
+                }
+            } else if (layoutClassName == "CardLayout") {
+                float w = r.width() * 0.75f;
+                float h = r.height() * 0.75f;
+                for (int i = 0; i < 3; ++i) {
+                    float offset = float(i) * 6.0f;
+                    ctx.stroke_round_rect(BLRect(r.left() + offset, r.top() + offset, w, h), 4.0);
+                }
+            } else {
+                // AnchorLayout, and any future Layout with no dedicated glyph yet - a corner-pin
+                // mark in each of the 4 corners, evoking "anchored to an edge".
+                float len = r.width() * 0.18f;
+                for (int cx = 0; cx < 2; ++cx) {
+                    for (int cy = 0; cy < 2; ++cy) {
+                        float x = cx == 0 ? r.left() : r.right();
+                        float y = cy == 0 ? r.top() : r.bottom();
+                        float dx = cx == 0 ? len : -len;
+                        float dy = cy == 0 ? len : -len;
+                        ctx.stroke_line(x, y, x + dx, y);
+                        ctx.stroke_line(x, y, x, y + dy);
+                    }
+                }
+            }
+            ctx.restore();
+        }
+
+        // Lays out n square cells in a single centered row inside a popup of size popupSize,
+        // returning each cell's own local (popup-relative) rect - shared by LayoutPropertyEditor/
+        // ViewStylePropertyEditor's editAsync() below, which differ only in what each cell shows.
+        std::vector<newui::Rect> typePickerCellRects(std::size_t count, newui::Size popupSize)
+        {
+            std::vector<newui::Rect> rects;
+            rects.reserve(count);
+            float totalWidth = float(count) * kTypePickerCellSize + float(count > 0 ? count - 1 : 0) * kTypePickerGap;
+            float startX = (popupSize.width - totalWidth) * 0.5f;
+            for (std::size_t i = 0; i < count; ++i) {
+                float x = startX + float(i) * (kTypePickerCellSize + kTypePickerGap);
+                rects.emplace_back(x, kTypePickerTopReserve, kTypePickerCellSize, kTypePickerCellSize);
+            }
+            return rects;
+        }
+
+        // kTypePickerTopReserve reserved symmetrically on *every* edge (not just top) - this
+        // popup's own tail can now land on any of the 4 sides (placeCallout(), above), so its
+        // content can't assume the tail's own clearance only ever eats into the top margin the
+        // way it used to when the popup was always placed below its anchor.
+        newui::Size typePickerPopupSize(std::size_t optionCount)
+        {
+            return newui::Size(
+                float(optionCount) * (kTypePickerCellSize + kTypePickerGap) - kTypePickerGap + kTypePickerTopReserve * 2.0f,
+                kTypePickerCellSize + kTypePickerTopReserve * 2.0f);
         }
 
         // Whether a candidate Font would actually resolve to a real, loadable BLFont -
@@ -114,6 +285,13 @@ namespace CodeToolsVsix
             return std::any(false);
         }
         return std::nullopt;
+    }
+
+    void BoolPropertyEditor::paintValue(BLContext& ctx, const newui::Rect& rect, const newui::Color& textColor) const
+    {
+        newui::Rect box(rect.left(), rect.top() + (rect.size().height - kCheckboxSize) * 0.5f,
+            kCheckboxSize, kCheckboxSize);
+        paintCheckbox(ctx, box, valueAsString() == "true", textColor);
     }
 
     std::string IntPropertyEditor::valueAsString() const
@@ -206,6 +384,18 @@ namespace CodeToolsVsix
             return std::any(color);
         }
         return std::nullopt;
+    }
+
+    void ColorPropertyEditor::paintValue(BLContext& ctx, const newui::Rect& rect, const newui::Color& textColor) const
+    {
+        newui::Rect box(rect.left(), rect.top() + (rect.size().height - kSwatchSize) * 0.5f, kSwatchSize, kSwatchSize);
+        newui::Color parsed;
+        if (newui::Color::fromString(valueAsString(), parsed)) {
+            paintSwatch(ctx, box, parsed, textColor);
+        }
+        newui::Rect textRect(rect.left() + kSwatchSize + 6.0f, rect.top(),
+            rect.size().width - kSwatchSize - 6.0f, rect.size().height);
+        paintText(ctx, textRect, valueAsString(), textColor);
     }
 
     std::string PointPropertyEditor::valueAsString() const
@@ -473,6 +663,149 @@ namespace CodeToolsVsix
         }
     }
 
+    std::string LayoutPropertyEditor::valueAsString() const
+    {
+        // property_->addressableValue(instance_) - the raw pointer itself, nullptr when no
+        // Layout is attached - checked first: getClass() (below) never returns nullptr for this
+        // property even when the pointer is null, it falls back to classinfo(type()) (the
+        // declared Layout base, which is itself a real registered class - reflection.h's own
+        // TypedProperty::getClass() comment), which would otherwise misreport an unset Layout as
+        // "Layout" instead of "(none)".
+        if (property_->addressableValue(instance_) == nullptr) {
+            return "(none)";
+        }
+        // property_->getClass(instance_) - NOT rawValue() - see this class's own declaration
+        // comment (PropertyEditor.h) for why rawValue() would return an empty/sliced std::any for
+        // a PtrGetter property instead of the true runtime class name.
+        const newui::reflection::Class* clazz = property_->getClass(instance_);
+        return clazz != nullptr ? clazz->name() : std::string("(none)");
+    }
+
+    newui::PopupTool* LayoutPropertyEditor::editAsync(newui::View* owner, const newui::Rect& anchorScreenRect)
+    {
+        struct LayoutOption { std::string displayName; std::function<newui::Layout*()> factory; };
+        static const std::vector<LayoutOption> options = {
+            { "Anchor", [] { return new newui::AnchorLayout(); } },
+            { "Flex",   [] { return new newui::FlexLayout(newui::Orientation::Vertical); } },
+            { "Card",   [] { return new newui::CardLayout(); } },
+            { "Grid",   [] { return new newui::GridLayout(); } },
+        };
+
+        newui::Size popupSize = typePickerPopupSize(options.size());
+        CalloutPlacement placement = placeCallout(anchorScreenRect, popupSize, designerWindowScreenRect(owner));
+
+        auto* popup = new newui::CalloutTool(owner->rootView()->windowHandle(),
+            newui::Application::instance().instanceHandle(), placement.bounds, "layoutTypePicker");
+        if (!popup->initialize()) {
+            delete popup;
+            return nullptr;
+        }
+        popup->setTailSide(placement.tailSide);
+        popup->setTailPosition(placement.tailPosition);
+
+        // property_/instance_/postCommitSync_ captured by value in each cell's own onSelected
+        // lambda below - never `this`, which PropertiesGrid destroys (liveEditor_.reset()) right
+        // after this call returns, well before the user actually clicks a cell.
+        const newui::reflection::Property* property = property_;
+        void* instance = instance_;
+        PostCommitSync sync = postCommitSync_;
+
+        std::vector<newui::Rect> cellRects = typePickerCellRects(options.size(), placement.bounds.size());
+        for (std::size_t i = 0; i < options.size(); ++i) {
+            std::function<newui::Layout*()> factory = options[i].factory;
+            auto onSelected = [popup, property, instance, sync, factory]() {
+                property->set(instance, std::any(factory()));
+                if (sync) {
+                    sync();
+                }
+                popup->dismiss();
+            };
+            std::string className = options[i].displayName == "Anchor" ? "AnchorLayout"
+                : options[i].displayName == "Flex" ? "FlexLayout"
+                : options[i].displayName == "Card" ? "CardLayout" : "GridLayout";
+            auto* cell = new TypePickerCell(options[i].displayName, std::move(onSelected),
+                [className](BLContext& ctx, const newui::Rect& r) { paintLayoutGlyph(ctx, r, className); });
+            cell->setBounds(cellRects[i]);
+            popup->addChild(cell);
+        }
+
+        popup->present();
+        return popup;
+    }
+
+    std::string ViewStylePropertyEditor::valueAsString() const
+    {
+        // Unlike LayoutPropertyEditor's own layout() (a real, sometimes-null View::layout()),
+        // View::style() always returns a live reference (ClassBuilder::property()'s
+        // isOwningRefGetter case wraps it as `&std::invoke(getter, self)` - reflection.h - never
+        // null) - this null check is defensive only, kept for the same "(none)" fallback shape.
+        if (property_->addressableValue(instance_) == nullptr) {
+            return "(none)";
+        }
+        const newui::reflection::Class* clazz = property_->getClass(instance_);
+        return clazz != nullptr ? clazz->name() : std::string("(none)");
+    }
+
+    newui::PopupTool* ViewStylePropertyEditor::editAsync(newui::View* owner, const newui::Rect& anchorScreenRect)
+    {
+        std::vector<ViewStyleOption> options = ViewStyleRegistry::optionsFor(owner);
+
+        newui::Size popupSize = typePickerPopupSize(options.size());
+        CalloutPlacement placement = placeCallout(anchorScreenRect, popupSize, designerWindowScreenRect(owner));
+
+        auto* popup = new newui::CalloutTool(owner->rootView()->windowHandle(),
+            newui::Application::instance().instanceHandle(), placement.bounds, "viewStyleTypePicker");
+        if (!popup->initialize()) {
+            delete popup;
+            return nullptr;
+        }
+        popup->setTailSide(placement.tailSide);
+        popup->setTailPosition(placement.tailPosition);
+
+        const newui::reflection::Property* property = property_;
+        void* instance = instance_;
+        PostCommitSync sync = postCommitSync_;
+
+        std::vector<newui::Rect> cellRects = typePickerCellRects(options.size(), placement.bounds.size());
+        for (std::size_t i = 0; i < options.size(); ++i) {
+            std::function<newui::ViewStyle*()> factory = options[i].factory;
+            auto onSelected = [popup, property, instance, sync, factory]() {
+                property->set(instance, std::any(factory()));
+                if (sync) {
+                    sync();
+                }
+                popup->dismiss();
+            };
+            auto* cell = new TypePickerCell(options[i].displayName, onSelected);
+            cell->setBounds(cellRects[i]);
+
+            // A real, live-painted preview - a throwaway inert SubView with the candidate style
+            // installed, added as an ordinary popup child (matches this codebase's "real control
+            // over hand-painted approximation" convention - see this class's own header comment).
+            // Added as a *sibling* of cell, not a child of it - View::hitTestChildren() (view.cpp)
+            // walks to the single deepest/topmost SubView under the click point with no bubbling
+            // to whatever's underneath, so preview needs its own onMouseDown wired to the exact
+            // same onSelected (still a valid copy - never moved out of above) or a click landing
+            // on the live preview itself (most of the cell's area) would silently do nothing.
+            auto* preview = new newui::SubView();
+            preview->setVisible(true);
+            preview->setStyle(std::unique_ptr<newui::ViewStyle>(factory()));
+            newui::Rect previewLocal = cell->previewRect();
+            preview->setBounds(newui::Rect(cellRects[i].left() + previewLocal.left(),
+                cellRects[i].top() + previewLocal.top(), previewLocal.width(), previewLocal.height()));
+            preview->onMouseDown.add(std::function<newui::SyncReturn(newui::View&, const newui::Point&, std::uint32_t, std::uint32_t)>(
+                [onSelected](newui::View&, const newui::Point&, std::uint32_t, std::uint32_t) -> newui::SyncReturn {
+                    onSelected();
+                    return newui::SyncReturn::Handled;
+                }));
+            popup->addChild(cell);
+            popup->addChild(preview);
+        }
+
+        popup->present();
+        return popup;
+    }
+
     std::string EnumPropertyEditor::valueAsString() const
     {
         std::uint64_t value = enum_->toUInt64(rawValue());
@@ -596,6 +929,29 @@ namespace CodeToolsVsix
         if (newValue.has_value()) {
             commitValue(newValue);
         }
+    }
+
+    void PropertyEditor::paintValue(BLContext& ctx, const newui::Rect& rect, const newui::Color& textColor) const
+    {
+        paintText(ctx, rect, valueAsString(), textColor);
+    }
+
+    void PropertyEditor::paintSubPropertyValue(BLContext& ctx, const newui::Rect& rect, std::size_t index,
+        const newui::Color& textColor) const
+    {
+        // subPropertyIsBool() already exists precisely so a generic caller (this default, now the
+        // only caller PropertyItem::paint() itself used to be) can tell a flags-enum bit
+        // (FlagsEnumPropertyEditor, always true) or a Font bold/italic/underlined/strikeThrough
+        // row (FontPropertyEditor, true for index >= 2) apart from an ordinary text sub-property
+        // (Rect/Point/Size's own float components) without needing to know either concrete type -
+        // neither one needs its own paintSubPropertyValue() override at all as a result.
+        if (subPropertyIsBool(index)) {
+            newui::Rect box(rect.left(), rect.top() + (rect.size().height - kCheckboxSize) * 0.5f,
+                kCheckboxSize, kCheckboxSize);
+            paintCheckbox(ctx, box, subPropertyValueAsString(index) == "true", textColor);
+            return;
+        }
+        paintText(ctx, rect, subPropertyValueAsString(index), textColor);
     }
 
     void PropertyEditor::commitValue(const std::any& newValue) const
@@ -735,5 +1091,9 @@ namespace CodeToolsVsix
             [](const newui::reflection::Property* p, void* instance) { return std::make_unique<FontPropertyEditor>(p, instance); });
         registerEditor(std::type_index(typeid(newui::gfx::Gradient)),
             [](const newui::reflection::Property* p, void* instance) { return std::make_unique<GradientPropertyEditor>(p, instance); });
+        registerEditor(std::type_index(typeid(newui::Layout)),
+            [](const newui::reflection::Property* p, void* instance) { return std::make_unique<LayoutPropertyEditor>(p, instance); });
+        registerEditor(std::type_index(typeid(newui::ViewStyle)),
+            [](const newui::reflection::Property* p, void* instance) { return std::make_unique<ViewStylePropertyEditor>(p, instance); });
     }
 }

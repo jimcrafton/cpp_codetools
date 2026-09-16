@@ -13,9 +13,12 @@
 #include <newui/font.h>
 #include <newui/geometry.h>
 #include <newui/graphics.h>
+#include <newui/layout.h>
+#include <newui/popuptool.h>
 #include <newui/reflection.h>
 #include <newui/undostack.h>
 #include <newui/view.h>
+#include <newui/viewstyle.h>
 
 namespace CodeToolsVsix
 {
@@ -49,6 +52,34 @@ namespace CodeToolsVsix
 
         virtual std::vector<std::string> dropdownValues() const { return {}; }
         virtual void edit(newui::View* owner) {}  // EditStyle::Dialog
+
+        // Paints this leaf row's own *value* representation into rect (a PropertiesGrid row's own
+        // value column, already shrunk to make room for a Dialog editor's "..." button if this is
+        // one) - the rendering counterpart to valueAsString(), for a caller (PropertyItem::
+        // paint()) that wants to actually draw the value, not just read it as text. Each subclass
+        // now owns how its own value looks (BoolPropertyEditor draws a checkbox, ColorPropertyEditor
+        // a swatch+text, ...) instead of PropertyItem::paint() hardcoding a growing
+        // property()->type()-based if/else chain - see this project's own git history for the
+        // tangle that used to be. Default: plain text via valueAsString().
+        virtual void paintValue(BLContext& ctx, const newui::Rect& rect, const newui::Color& textColor) const;
+
+        // Same idea as paintValue() above, for one EditStyle::SubProperties row (index into
+        // subPropertyNames()/subPropertyValueAsString()) - default: plain text via
+        // subPropertyValueAsString(index). FlagsEnumPropertyEditor (below) overrides to draw a
+        // checkbox instead (one named flag bit) - replaces PropertyItem::paint()'s own
+        // subPropertyIsBool()-then-checkbox-else-text dispatch.
+        virtual void paintSubPropertyValue(BLContext& ctx, const newui::Rect& rect, std::size_t index,
+            const newui::Color& textColor) const;
+
+        // EditStyle::Dialog only, and only for an editor whose "dialog" is actually a non-modal
+        // newui::PopupTool (LayoutPropertyEditor/ViewStylePropertyEditor below) rather than a real
+        // blocking newui::Dialog::showModal() - edit() has no return value to hand such a popup
+        // back through, so PropertiesGrid calls this instead of edit() for every Dialog-style
+        // editor, and takes ownership of tracking (and dismissing) whatever non-null PopupTool*
+        // comes back. The default just forwards to edit() and returns nullptr - every existing
+        // Dialog editor (Color/Gradient/FilePath, all real blocking showModal()/showOpenFile()
+        // calls with nothing left open afterward) needs no change at all.
+        virtual newui::PopupTool* editAsync(newui::View* owner, const newui::Rect& /*anchorScreenRect*/) { edit(owner); return nullptr; }
 
         // EditStyle::SubProperties only (e.g. RectPropertyEditor) - the
         // whole value decomposed into named synthetic child rows (e.g.
@@ -130,6 +161,9 @@ namespace CodeToolsVsix
         std::string valueAsString() const override;
         std::optional<std::any> parseValue(const std::string& text) const override;
         std::vector<std::string> dropdownValues() const override { return { "false", "true" }; }
+        // A hand-drawn checkbox glyph, not literal "true"/"false" text - matches the real live
+        // newui::Toggle PropertiesGrid substitutes in once this row is actually being edited.
+        void paintValue(BLContext& ctx, const newui::Rect& rect, const newui::Color& textColor) const override;
     };
 
     class IntPropertyEditor : public PropertyEditor
@@ -194,6 +228,9 @@ namespace CodeToolsVsix
         std::string valueAsString() const override;
         std::optional<std::any> parseValue(const std::string& text) const override;
         void edit(newui::View* owner) override;
+        // A swatch + hex text, not just plain text - matches PropertyRow::build()'s own original
+        // swatch preview.
+        void paintValue(BLContext& ctx, const newui::Rect& rect, const newui::Color& textColor) const override;
     };
 
     // Compact comma-separated text ("x, y" / "width, height" / "x, y,
@@ -292,6 +329,64 @@ namespace CodeToolsVsix
         // GradientEditorDialog::setShapeBounds()); it's also passed straight to
         // newui::Dialog::showModal(View*) as the modal's real owner.
         void edit(newui::View* owner) override;
+    };
+
+    // Real, reported bug this comment exists to prevent recurring: the base PropertyEditor::
+    // editAsync(owner) signature originally had no way to say *where on screen* the popup should
+    // appear - LayoutPropertyEditor/ViewStylePropertyEditor (below) used to derive their own
+    // anchor from owner's own screen rect (ownerScreenRect(), PropertyEditor.cpp), which is the
+    // *selected canvas View being edited*, not the Properties grid row the user actually clicked -
+    // the popup ended up anchored next to the edited element on the design surface instead of
+    // near the "..." button that opened it. anchorScreenRect is that missing piece: real screen
+    // coordinates (not owner-local) of whatever the caller wants the popup to appear next to -
+    // PropertiesGrid::openDialogEditorFor() computes it from the actual clicked row/button (its
+    // own screenRectFor() helper - newui has no general View-to-screen mapper of its own, only
+    // RootView::localToScreen(), confirmed by grep). Every editAsync() override should anchor to
+    // this, never to owner's own bounds.
+
+    // View::layout()/style() "type swap" pickers - selecting which concrete Layout/ViewStyle
+    // subclass is installed on the selected View, via a non-modal newui::CalloutTool popup
+    // (editAsync() above) showing one preview cell per candidate, click-to-select. Both are
+    // registered at typeid(newui::Layout)/typeid(newui::ViewStyle) - classifyProperty()
+    // (PropertiesModel.cpp) checks PropertyEditorRegistry first, so this pre-empts the generic
+    // "addressable nested Class becomes an expandable PropertyGroup" path these two properties
+    // would otherwise take, same as every other EditStyle-registered type here.
+    //
+    // View::layout()/style() are real PtrGetter/PtrSetter-backed addressable properties
+    // (reflection.h's TypedProperty) - but NOT usable through the ordinary commitValue()/undo
+    // path every other editor here uses: get() returns either an empty std::any (a null pointer)
+    // or a *sliced copy* of whatever concrete subclass is currently installed (std::any(*p), the
+    // ValueT base-class slice - reflection.h's TypedProperty::get(), PtrGetter branch), while
+    // set() expects a raw ValueT* (ownership-transfer, not a copy-into-what's-there) - two
+    // incompatible std::any payload shapes for the same property, so valueAsString() below reads
+    // through property_->getClass(instance_) instead (the true *runtime* class, never sliced -
+    // see Property::getClass()'s own comment), and edit()/editAsync() commit via property_->set()
+    // directly, deliberately bypassing commitValue()/undoStack() entirely. A "type swap" is a
+    // rare, deliberate structural action - undo for the swap itself is out of scope for v1; every
+    // edit to the resulting object's own fields (e.g. a FlexLayout's spacing) still goes through
+    // the ordinary, fully undoable Property/commitValue() path once it becomes its own
+    // PropertyGroup subtree.
+    class LayoutPropertyEditor : public PropertyEditor
+    {
+    public:
+        using PropertyEditor::PropertyEditor;
+        EditStyle editStyle() const override { return EditStyle::Dialog; }
+        std::string valueAsString() const override;
+        std::optional<std::any> parseValue(const std::string& text) const override { return std::nullopt; }
+        newui::PopupTool* editAsync(newui::View* owner, const newui::Rect& anchorScreenRect) override;
+    };
+
+    // Same shape as LayoutPropertyEditor above, just against ViewStyleRegistry::optionsFor(owner)
+    // instead of a fixed 4-entry Layout list - see that class's own header comment for why the
+    // option set is curated per owner class rather than every registered ViewStyle subclass.
+    class ViewStylePropertyEditor : public PropertyEditor
+    {
+    public:
+        using PropertyEditor::PropertyEditor;
+        EditStyle editStyle() const override { return EditStyle::Dialog; }
+        std::string valueAsString() const override;
+        std::optional<std::any> parseValue(const std::string& text) const override { return std::nullopt; }
+        newui::PopupTool* editAsync(newui::View* owner, const newui::Rect& anchorScreenRect) override;
     };
 
     // A generic dropdown for *any* non-flags registered newui::reflection::Enum -

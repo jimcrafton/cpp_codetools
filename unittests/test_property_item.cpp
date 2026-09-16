@@ -133,6 +133,47 @@ TEST_F(PropertyItemTest, PropertyGroupRowWithNoLiveInstanceAttachedStillPaints)
     EXPECT_TRUE(paintPath({layoutIndex}));
 }
 
+// "style" is the same Layout-shaped case as "layout" above, just with a real, never-null live
+// instance (View::style() always returns a live reference - see ViewStylePropertyEditor::
+// valueAsString()'s own comment, PropertyEditor.cpp) - exercises PropertyItem::paint()'s new
+// group-header "..." button branch (this row has a registered ViewStylePropertyEditor,
+// EditStyle::Dialog) rather than crashing on the ellipsis geometry/paintEllipsisButton() call.
+TEST_F(PropertyItemTest, StyleGroupHeaderWithATypeSwapEditorStillPaintsItsEllipsisButton)
+{
+    std::vector<const newui::reflection::Property*> properties;
+    classinfo(typeid(newui::Button))->allProperties(properties);
+
+    std::size_t styleIndex = properties.size();
+    for (std::size_t i = 0; i < properties.size(); ++i) {
+        if (properties[i]->name() == "style") {
+            styleIndex = i;
+            break;
+        }
+    }
+    ASSERT_LT(styleIndex, properties.size());
+    ASSERT_EQ(model_.nodeAt({styleIndex}).kind, PropertiesModel::Kind::PropertyGroup);
+
+    EXPECT_TRUE(paintPath({styleIndex}));
+}
+
+TEST(PropertyItemEllipsisButtonRectFor, RightAlignedAndVerticallyCenteredWithinContentRect)
+{
+    newui::Rect contentRect(10.0f, 20.0f, 200.0f, 24.0f);
+    newui::Rect ellipsisRect = PropertyItem::ellipsisButtonRectFor(contentRect);
+
+    EXPECT_FLOAT_EQ(ellipsisRect.size().width, PropertyItem::kEllipsisButtonSize);
+    EXPECT_FLOAT_EQ(ellipsisRect.size().height, PropertyItem::kEllipsisButtonSize);
+    EXPECT_LT(ellipsisRect.right(), contentRect.right());
+    EXPECT_GT(ellipsisRect.left(), contentRect.left());
+    EXPECT_GE(ellipsisRect.top(), contentRect.top());
+    EXPECT_LE(ellipsisRect.bottom(), contentRect.bottom());
+
+    // Vertically centered.
+    float contentCenterY = contentRect.top() + contentRect.size().height * 0.5f;
+    float ellipsisCenterY = ellipsisRect.top() + ellipsisRect.size().height * 0.5f;
+    EXPECT_NEAR(contentCenterY, ellipsisCenterY, 0.01f);
+}
+
 TEST_F(PropertyItemTest, DelegatesHeaderRowForcesSelectedFalseAndPaints)
 {
     std::vector<const newui::reflection::Property*> properties;

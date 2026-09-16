@@ -182,6 +182,10 @@ add_library(NativeEditControls SHARED
     extension/NativeEditControls/DesignerEditor.cpp
     extension/NativeEditControls/PropertyEditor.h
     extension/NativeEditControls/PropertyEditor.cpp
+    extension/NativeEditControls/CalloutPlacement.h
+    extension/NativeEditControls/CalloutPlacement.cpp
+    extension/NativeEditControls/ViewStyleRegistry.h
+    extension/NativeEditControls/ViewStyleRegistry.cpp
     extension/NativeEditControls/GradientEditorDialog.h
     extension/NativeEditControls/GradientEditorDialog.cpp
     extension/NativeEditControls/ColorPicker.h
@@ -257,6 +261,8 @@ add_executable(testharness
     extension/NativeEditControls/CppEditor.cpp
     extension/NativeEditControls/DesignerEditor.cpp
     extension/NativeEditControls/PropertyEditor.cpp
+    extension/NativeEditControls/CalloutPlacement.cpp
+    extension/NativeEditControls/ViewStyleRegistry.cpp
     extension/NativeEditControls/GradientEditorDialog.cpp
     extension/NativeEditControls/ColorPicker.cpp
     extension/NativeEditControls/ColorEditorDialog.cpp

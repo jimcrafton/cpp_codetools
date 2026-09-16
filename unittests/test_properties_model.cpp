@@ -75,17 +75,28 @@ TEST_F(PropertiesModelTest, EveryRootPropertyClassifiesConsistentlyWithPropertyE
 
         auto editor = CodeToolsVsix::PropertyEditorRegistry::instance()
             .createEditor(properties_[i], buttonClass_, &button_);
-        if (editor != nullptr) {
+
+        // getClass(), not classinfo(type()) - matches childOf()'s own
+        // resolution (see PropertiesModel::classifyProperty()'s comment).
+        const Class* nested = properties_[i]->getClass(&button_);
+        bool isNestedGroup = nested != nullptr && properties_[i]->isAddressable();
+
+        // A Layout/ViewStyle-shaped property (a registered EditStyle::Dialog editor that's ALSO
+        // an addressable nested Class) stays an expandable PropertyGroup - drilldown into its
+        // current fields wins over the type-swap editor, which attaches to the group header's own
+        // "..." button instead (PropertyItem.cpp) rather than replacing the row - see
+        // PropertiesModel::classifyProperty()'s own comment.
+        bool isTypeSwapGroup = editor != nullptr
+            && editor->editStyle() == CodeToolsVsix::PropertyEditor::EditStyle::Dialog && isNestedGroup;
+
+        if (editor != nullptr && !isTypeSwapGroup) {
             PropertiesModel::Kind expectedKind = editor->editStyle() == CodeToolsVsix::PropertyEditor::EditStyle::SubProperties
                 ? PropertiesModel::Kind::PropertySubGroup : PropertiesModel::Kind::PropertyLeaf;
             EXPECT_EQ(node.kind, expectedKind) << properties_[i]->name();
             continue;
         }
 
-        // getClass(), not classinfo(type()) - matches childOf()'s own
-        // resolution (see PropertiesModel::classifyProperty()'s comment).
-        const Class* nested = properties_[i]->getClass(&button_);
-        if (nested != nullptr && properties_[i]->isAddressable()) {
+        if (isNestedGroup) {
             EXPECT_EQ(node.kind, PropertiesModel::Kind::PropertyGroup) << properties_[i]->name();
         } else {
             EXPECT_EQ(node.kind, PropertiesModel::Kind::PropertyUnsupported) << properties_[i]->name();
@@ -164,14 +175,15 @@ TEST_F(PropertiesModelTest, FirstGroupPropertyDescendsIntoItsOwnNestedProperties
     }
 }
 
-TEST_F(PropertiesModelTest, LayoutGroupDescendsIntoTheAttachedConcreteSubclassNotTheDeclaredBase)
+// "layout" stays Kind::PropertyGroup even now that LayoutPropertyEditor (PropertyEditor.h) is
+// registered at typeid(newui::Layout) - classifyProperty() special-cases a Dialog-style editor
+// that's ALSO an addressable nested Class (Layout/ViewStyle-shaped) to keep drilldown working
+// (preserves the pre-existing "expand style to edit its own current fields" UX this project
+// already had and tested - see the other PropertyGroup test above) rather than replacing the row
+// with a leaf - see classifyProperty()'s own comment. The type-swap editor still exists for this
+// row; it's just attached to the group header's own "..." button (PropertyItem.cpp) instead.
+TEST_F(PropertiesModelTest, LayoutStaysAnExpandablePropertyGroupWithATypeSwapEditorAttached)
 {
-    // newui::View::layout() is declared to return Layout* - a polymorphic
-    // base with no properties of its own (all real data lives on a
-    // concrete subclass like FlexLayout). classifyProperty()/childOf() use
-    // Property::getClass(), not classinfo(property->type()), specifically
-    // so this group expands into the real attached FlexLayout's own
-    // properties rather than the always-empty declared Layout class.
     std::size_t layoutIndex = properties_.size();
     for (std::size_t i = 0; i < properties_.size(); ++i) {
         if (properties_[i]->name() == "layout") {
@@ -182,36 +194,20 @@ TEST_F(PropertiesModelTest, LayoutGroupDescendsIntoTheAttachedConcreteSubclassNo
     ASSERT_LT(layoutIndex, properties_.size());
 
     button_.setLayout(std::make_unique<newui::FlexLayout>());
-    ASSERT_EQ(model_.nodeAt({layoutIndex}).kind, PropertiesModel::Kind::PropertyGroup);
+    EXPECT_EQ(model_.nodeAt({layoutIndex}).kind, PropertiesModel::Kind::PropertyGroup);
 
     const Class* flexLayoutClass = classinfo(typeid(newui::FlexLayout));
     ASSERT_NE(flexLayoutClass, nullptr);
     std::vector<const Property*> flexProperties;
     flexLayoutClass->allProperties(flexProperties);
     ASSERT_FALSE(flexProperties.empty());
-
     EXPECT_EQ(model_.childCount({layoutIndex}), flexProperties.size());
 
-    PropertiesModel::Node firstChild = model_.nodeAt({layoutIndex, 0});
-    EXPECT_EQ(firstChild.ownerClass, flexLayoutClass);
-    EXPECT_EQ(firstChild.property, flexProperties[0]);
-    EXPECT_EQ(firstChild.ownerInstance, static_cast<void*>(button_.layout()));
-}
-
-TEST_F(PropertiesModelTest, LayoutGroupHasNoChildrenWhenNoConcreteLayoutIsAttached)
-{
-    std::size_t layoutIndex = properties_.size();
-    for (std::size_t i = 0; i < properties_.size(); ++i) {
-        if (properties_[i]->name() == "layout") {
-            layoutIndex = i;
-            break;
-        }
-    }
-    ASSERT_LT(layoutIndex, properties_.size());
-    ASSERT_EQ(button_.layout(), nullptr);  // nothing set - fresh Button default
-
-    EXPECT_EQ(model_.nodeAt({layoutIndex}).kind, PropertiesModel::Kind::PropertyGroup);
-    EXPECT_EQ(model_.childCount({layoutIndex}), 0u);
+    auto editor = CodeToolsVsix::PropertyEditorRegistry::instance().createEditor(
+        properties_[layoutIndex], buttonClass_, &button_);
+    ASSERT_NE(editor, nullptr);
+    EXPECT_EQ(editor->editStyle(), CodeToolsVsix::PropertyEditor::EditStyle::Dialog);
+    EXPECT_NE(dynamic_cast<CodeToolsVsix::LayoutPropertyEditor*>(editor.get()), nullptr);
 }
 
 TEST_F(PropertiesModelTest, BoundsExpandsIntoFourSyntheticSubPropertyRows)

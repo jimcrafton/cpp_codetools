@@ -83,8 +83,7 @@ namespace CodeToolsVsix
     public:
         static constexpr float kDefaultKeyColumnFraction = PropertiesTreeController::kDefaultKeyColumnFraction;
         static constexpr float kRowPadding = 8.0f;
-        static constexpr float kSwatchSize = 14.0f;
-        static constexpr float kCheckboxSize = 14.0f;
+        static constexpr float kEllipsisButtonSize = 18.0f;
 
         void paint(BLContext& ctx, const newui::Rect& rect, const std::vector<std::size_t>& path,
             newui::TreeController& controller) override;
@@ -101,5 +100,18 @@ namespace CodeToolsVsix
         // space, so this is valid for any path, not leaf rows only.
         static newui::Rect keyRectFor(const newui::Rect& rowRect, const std::vector<std::size_t>& path, float keyColumnFraction);
         static newui::Rect valueRectFor(const newui::Rect& rowRect, const std::vector<std::size_t>& path, float keyColumnFraction);
+
+        // The small "..." affordance a row with a registered PropertyEditor::EditStyle::Dialog
+        // editor shows - a leaf's own valueRectFor(), or a PropertyGroup header's full-width
+        // label rect for a Layout/ViewStyle-shaped group (see PropertiesModel::classifyProperty()'s
+        // own comment on why those two specifically stay expandable groups with an attached
+        // Dialog editor, unlike Color/Gradient/FilePath's plain leaves). Right-aligned, vertically
+        // centered within contentRect. This is now the *only* way such a row opens its real
+        // dialog/popup editor from a single click - PropertiesGrid::handleTreeMouseDown() no
+        // longer opens one just from a plain click anywhere else in the row (a double-click
+        // anywhere in the row still does, via handleTreeMouseDblClick() - see its own comment for
+        // why: an accidental slow double-click on Color/Gradient used to be indistinguishable from
+        // two intentional single clicks before this changed).
+        static newui::Rect ellipsisButtonRectFor(const newui::Rect& contentRect);
     };
 }

@@ -57,11 +57,7 @@ namespace CodeToolsVsix
         node.ownerClass = ownerClass;
         node.ownerInstance = ownerInstance;
 
-        if (auto editor = PropertyEditorRegistry::instance().createEditor(property, ownerClass, ownerInstance)) {
-            node.kind = editor->editStyle() == PropertyEditor::EditStyle::SubProperties
-                ? Kind::PropertySubGroup : Kind::PropertyLeaf;
-            return node;
-        }
+        auto editor = PropertyEditorRegistry::instance().createEditor(property, ownerClass, ownerInstance);
 
         // getClass(), not classinfo(type()) - a property whose declared
         // type is a polymorphic base with no data of its own (Layout/
@@ -72,7 +68,27 @@ namespace CodeToolsVsix
         // property (ViewStyle, etc.) - see newui::reflection::Property::
         // getClass()'s own comment.
         const Class* nested = property->getClass(ownerInstance);
-        if (nested != nullptr && property->isAddressable()) {
+        bool isNestedGroup = nested != nullptr && property->isAddressable();
+
+        // A Layout/ViewStyle-shaped property (LayoutPropertyEditor/ViewStylePropertyEditor,
+        // PropertyEditor.h) is BOTH a registered EditStyle::Dialog editor (a "swap the concrete
+        // subclass" type-swap popup) AND an addressable nested Class with real properties worth
+        // expanding into (e.g. style -> font) - unlike every other Dialog editor (Color/Gradient/
+        // FilePath, none of which are ever addressable nested classes), drilldown wins here: the
+        // group still expands exactly as before (preserves the existing, tested "expand style to
+        // edit its own current fields" UX), and PropertyItem's own group-header paint() attaches
+        // the type-swap popup's "..." affordance to the header row instead of replacing the whole
+        // row with a leaf - see that file's own comment.
+        bool isTypeSwapGroup = editor != nullptr
+            && editor->editStyle() == PropertyEditor::EditStyle::Dialog && isNestedGroup;
+
+        if (editor != nullptr && !isTypeSwapGroup) {
+            node.kind = editor->editStyle() == PropertyEditor::EditStyle::SubProperties
+                ? Kind::PropertySubGroup : Kind::PropertyLeaf;
+            return node;
+        }
+
+        if (isNestedGroup) {
             node.kind = Kind::PropertyGroup;
             return node;
         }

@@ -1,5 +1,6 @@
 #include "PropertiesGrid.h"
 #include "LayoutEditingPolicy.h"
+#include "PaintUtils.h"
 #include "TextEncoding.h"
 
 #include <newui/rootview.h>
@@ -10,6 +11,35 @@
 
 namespace CodeToolsVsix
 {
+    namespace
+    {
+        // localRect (in view's own local coordinate space) converted to real screen coordinates -
+        // walks view's parent chain summing each ancestor's own bounds().pos() (bounds() is
+        // parent-relative) up to (but not including) the RootView itself, then RootView::
+        // localToScreen() for the real screen origin. Same technique PropertyEditor.cpp's own
+        // ownerScreenRect() uses for the *selected canvas View* being edited - newui has no
+        // general View-to-screen/View-to-View coordinate mapper of its own (only RootView::
+        // localToScreen(), confirmed by grepping the whole include tree), so this is hand-rolled
+        // the same way there too. This is the equivalent for treeView_ itself, needed so a
+        // type-swap popup anchors to the actual "..." button the user clicked in the Properties
+        // grid - a real, reported positioning bug otherwise: the popup used to anchor to whatever
+        // the selected canvas View's own screen position happened to be instead, since editAsync()
+        // was computing its anchor from `owner` (the edited View), not from where the click that
+        // opened it actually was.
+        newui::Rect screenRectFor(newui::View* view, const newui::Rect& localRect)
+        {
+            float x = localRect.left();
+            float y = localRect.top();
+            for (newui::View* v = view; v != nullptr && v->parent() != nullptr; v = v->parent()) {
+                x += v->bounds().left();
+                y += v->bounds().top();
+            }
+            newui::RootView* root = view != nullptr ? view->rootView() : nullptr;
+            newui::Point topLeft = root != nullptr ? root->localToScreen(newui::Point(x, y)) : newui::Point(x, y);
+            return newui::Rect(topLeft.x, topLeft.y, localRect.width(), localRect.height());
+        }
+    }
+
     std::any PropertiesGrid::StringListModel::value(const std::any& key)
     {
         if (const std::size_t* index = std::any_cast<std::size_t>(&key)) {
@@ -34,6 +64,7 @@ namespace CodeToolsVsix
         treeView_->onMouseDown.add(this, &PropertiesGrid::handleTreeMouseDown);
         treeView_->onMouseMove.add(this, &PropertiesGrid::handleTreeMouseMove);
         treeView_->onMouseUp.add(this, &PropertiesGrid::handleTreeMouseUp);
+        treeView_->onMouseDblClick.add(this, &PropertiesGrid::handleTreeMouseDblClick);
 
         // ScrollView::addChild() redirects into its own viewport - not a
         // second, separate wrapping layer, same convention Toolbox's own
@@ -45,6 +76,24 @@ namespace CodeToolsVsix
         // either one never reaches handleTreeMouseDown()/handleSelectionChanged() at all.
         vBar()->onMouseDown.add(this, &PropertiesGrid::handleScrollBarMouseDown);
         hBar()->onMouseDown.add(this, &PropertiesGrid::handleScrollBarMouseDown);
+    }
+
+    PropertiesGrid::~PropertiesGrid()
+    {
+        *aliveFlag_ = false;
+
+        if (openTypePicker_ != nullptr) {
+            // Removes our own onDismissed listener *before* dismiss() - dismiss() defers its real
+            // teardown (and onDismissed firing) one tick via RunLoop::post() while a RunLoop is
+            // current (PopupTool::dismiss()'s own doc comment), which would otherwise fire
+            // handleTypePickerDismissed() against this PropertiesGrid well after this destructor
+            // has already finished running - a real dangling-`this` callback, not just a
+            // theoretical one (see this class's own openTypePicker_ comment, PropertiesGrid.h).
+            // dismiss() itself only needs the popup, never this, so it's still safe to call here.
+            openTypePicker_->onDismissed.remove(openTypePickerDismissConnection_);
+            openTypePicker_->dismiss();
+            openTypePicker_ = nullptr;
+        }
     }
 
     void PropertiesGrid::setSelection(newui::SubView* selected)
@@ -86,6 +135,22 @@ namespace CodeToolsVsix
         liveEditorSubIndex_.reset();
         liveEditorIsParentPicker_ = false;
         parentPickerCandidates_.clear();
+
+        // An ordinary teardown path (this class is still alive throughout, unlike the destructor
+        // - see openTypePicker_'s own comment for why that one needs the extra Connection-removal
+        // care this doesn't) - selecting something else, or closing/reloading the document, should
+        // close whatever type-swap popup was left open the same way it already discards
+        // liveEditor_ itself.
+        if (openTypePicker_ != nullptr) {
+            openTypePicker_->dismiss();
+            openTypePicker_ = nullptr;
+        }
+    }
+
+    newui::SyncReturn PropertiesGrid::handleTypePickerDismissed(newui::PopupTool& /*sender*/)
+    {
+        openTypePicker_ = nullptr;
+        return newui::SyncReturn::Handled;
     }
 
     void PropertiesGrid::markSelectedViewDirty()
@@ -139,19 +204,11 @@ namespace CodeToolsVsix
         liveEditor_->setUndoStack(undoStack_);
         liveEditorSubIndex_ = isSubProperty ? std::optional<std::size_t>(node.subPropertyIndex) : std::nullopt;
 
-        // EditStyle::Dialog (e.g. GradientPropertyEditor) never fits SubProperties' fixed-row
-        // shape at all (variable-length stops()/points()) - there's no inline live editor widget
-        // to build here. edit() itself blocks (a real modal newui::Dialog), commits internally
-        // (PropertyEditor::commitValue(), same undo-aware path every other editor already uses)
-        // and returns once the user closes it - only a display refresh is needed afterward, same
-        // as every other commit path below.
-        if (!isSubProperty && liveEditor_->editStyle() == PropertyEditor::EditStyle::Dialog) {
-            liveEditor_->edit(model_.selected());
-            markSelectedViewDirty();
-            treeView_->style().markDirty();
-            liveEditor_.reset();
-            return;
-        }
+        // EditStyle::Dialog (Color/Gradient/FilePath) never reaches here at all anymore -
+        // activateLiveEditorIfClickedOnValueColumn() routes those straight to
+        // openDialogEditorFor() (its own "..." button / handleTreeMouseDblClick()'s double-click)
+        // without ever calling this method, so there's nothing to special-case in this function
+        // for it - see that method's own comment.
 
         // "bounds" specifically (see Node::readOnly's own comment, PropertiesModel.h - this row
         // is only ever reachable here at all once that gating has already confirmed the owning
@@ -188,7 +245,7 @@ namespace CodeToolsVsix
             auto* toggle = new newui::Toggle();
             toggle->setVisible(true);
             toggle->setChecked(initialText == "true");
-            float box = PropertyItem::kCheckboxSize;
+            float box = kCheckboxSize;
             toggle->setBounds(newui::Rect(valueRect.left(), valueRect.top() + (valueRect.size().height - box) * 0.5f, box, box));
             toggle->onCheckedChanged.add(this, &PropertiesGrid::handleLiveToggleChanged);
             toggle->onLostFocus.add(this, &PropertiesGrid::handleLiveEditorLostFocus);
@@ -228,23 +285,16 @@ namespace CodeToolsVsix
             return;
         }
 
-        // EditStyle::None (Int/Float/String/Color today) or a
-        // SubPropertyEntry - plain editable text, same fallback
-        // PropertyRow::build() uses. A Color property leaves its swatch
-        // preview to PropertyItem's own inactive painting underneath
-        // (unobscured - the live TextField only covers the text portion
-        // of valueRect, matching the same swatch+text offset
-        // PropertyItem::paint() draws), not reimplemented here.
-        newui::Rect textRect = valueRect;
-        if (!isSubProperty && node.property->type() == std::type_index(typeid(newui::Color))) {
-            textRect = newui::Rect(valueRect.left() + PropertyItem::kSwatchSize + 6.0f, valueRect.top(),
-                valueRect.size().width - PropertyItem::kSwatchSize - 6.0f, valueRect.size().height);
-        }
-
+        // EditStyle::None (Int/Float/String today) or a SubPropertyEntry - plain editable text,
+        // same fallback PropertyRow::build() used to. Color used to need a special text-offset
+        // branch here (its live TextField only covering the text portion of valueRect, leaving
+        // its swatch preview to PropertyItem's own inactive painting underneath) - removed, since
+        // Color is EditStyle::Dialog now and never reaches this function at all
+        // (activateLiveEditorIfClickedOnValueColumn() routes it to openDialogEditorFor() instead).
         auto* textField = new newui::TextField();
         textField->setVisible(true);
         textField->setText(utf8ToWide(initialText));
-        textField->setBounds(textRect);
+        textField->setBounds(valueRect);
         textField->onLostFocus.add(this, &PropertiesGrid::handleLiveTextCommit);
         textField->onReturnPressed.add(this, &PropertiesGrid::handleLiveTextReturnPressed);
         textField->onKeyDown.add(this, &PropertiesGrid::handleLiveEditorKeyDown);
@@ -314,15 +364,34 @@ namespace CodeToolsVsix
         }
 
         PropertiesModel::Node node = model_.nodeAt(*path);
-        bool isEditable = (node.kind == PropertiesModel::Kind::PropertyLeaf
-            || node.kind == PropertiesModel::Kind::SubPropertyEntry
-            || node.kind == PropertiesModel::Kind::ParentPicker) && !node.readOnly;
-        if (!isEditable) {
+        if (node.readOnly) {
             return;
         }
 
         std::optional<newui::Rect> rowRect = treeView_->rectForPath(*path);
         if (!rowRect.has_value()) {
+            return;
+        }
+
+        // A Layout/ViewStyle-shaped PropertyGroup header row (see PropertiesModel::
+        // classifyProperty()'s own comment) - the only PropertyGroup kind with its own
+        // registered Dialog editor. Its own "..." button (right edge of the full-width header
+        // row - see PropertyItem's own group-header paint()) opens the type-swap popup; a click
+        // anywhere else on the row just expands/collapses, exactly as before (TreeView's own
+        // internal mouse-down handler, registered before this one, already did that for this same
+        // click - nothing further to do here for it).
+        if (node.kind == PropertiesModel::Kind::PropertyGroup) {
+            newui::Rect ellipsisRect = PropertyItem::ellipsisButtonRectFor(*rowRect);
+            if (ellipsisRect.contains(pt)) {
+                openDialogEditorFor(node, screenRectFor(treeView_, ellipsisRect));
+            }
+            return;
+        }
+
+        bool isEditable = (node.kind == PropertiesModel::Kind::PropertyLeaf
+            || node.kind == PropertiesModel::Kind::SubPropertyEntry
+            || node.kind == PropertiesModel::Kind::ParentPicker);
+        if (!isEditable) {
             return;
         }
 
@@ -334,7 +403,142 @@ namespace CodeToolsVsix
             return;
         }
 
+        // A Dialog-style leaf (Color/Gradient/FilePath/...) only opens from its own "..." button
+        // now, not a plain click anywhere else in valueRect - see PropertyItem::
+        // ellipsisButtonRectFor()'s own comment (PropertyItem.h) for why. SubPropertyEntry/
+        // ParentPicker are never Dialog-styled (SubProperties editors, and ParentPicker isn't a
+        // real PropertyEditor at all), so this check only ever applies to a PropertyLeaf.
+        if (node.kind == PropertiesModel::Kind::PropertyLeaf) {
+            auto editor = PropertyEditorRegistry::instance()
+                .createEditor(node.property, node.ownerClass, node.ownerInstance);
+            if (editor != nullptr && editor->editStyle() == PropertyEditor::EditStyle::Dialog) {
+                newui::Rect ellipsisRect = PropertyItem::ellipsisButtonRectFor(valueRect);
+                if (ellipsisRect.contains(pt)) {
+                    openDialogEditorFor(node, screenRectFor(treeView_, ellipsisRect));
+                }
+                return;
+            }
+        }
+
         rebuildLiveEditor();
+    }
+
+    void PropertiesGrid::openDialogEditorFor(const PropertiesModel::Node& node, const newui::Rect& anchorScreenRect)
+    {
+        destroyLiveEditor();
+
+        std::unique_ptr<PropertyEditor> editor = PropertyEditorRegistry::instance()
+            .createEditor(node.property, node.ownerClass, node.ownerInstance);
+        if (editor == nullptr || editor->editStyle() != PropertyEditor::EditStyle::Dialog) {
+            return;
+        }
+        editor->setUndoStack(undoStack_);
+        // Needed for the async case (LayoutPropertyEditor/ViewStylePropertyEditor, whose real
+        // commit happens later from a popup cell's own click handler, well after editor itself
+        // goes out of scope at the end of this method) - harmless no-op timing-wise for a real
+        // blocking showModal()/showOpenFile() editor (Color/Gradient/FilePath), which already
+        // commits (if at all) before editAsync() returns below.
+        editor->setPostCommitSync([this] { markSelectedViewDirty(); treeView_->style().markDirty(); });
+
+        // Deferred via RunLoop::post(), never called inline here - a real, reproduced Win32
+        // focus-stealing bug otherwise: this method's own callers (activateLiveEditorIfClicked
+        // OnValueColumn()/handleTreeMouseDblClick()) both run from *inside*
+        // RootView::mouseDown()/mouseDblClick()'s own dispatch, and that same RootView's
+        // WM_LBUTTONDOWN handler (rootview.cpp) unconditionally re-steals OS focus+capture back
+        // onto *this* window right after mouseDown() returns - a tail fixup written for the
+        // opposite case (a nested popup RootView tearing *itself* down mid-click, e.g.
+        // DropDownList's own PopupFrame - see that handler's own comment), which doesn't account
+        // for a *new* popup being created and focused mid-dispatch instead. Calling editAsync()
+        // synchronously here let that tail fixup steal focus right back before the click even
+        // finished, firing WM_KILLFOCUS on the brand-new CalloutTool - PopupTool::
+        // dismissOnFocusLost() (the default) then closed it again immediately: "opens for one
+        // frame, then instantly closes", confirmed live via testharness.exe. Posting instead runs
+        // this once the current mouseDown/mouseDblClick dispatch (tail fixup included) has fully
+        // unwound back to the message loop, so nothing is left to steal focus back from the popup
+        // once it actually shows. Harmless timing-wise for a blocking editor (Color/Gradient/
+        // FilePath's real showModal()/showOpenFile(), reached via the base editAsync() -> edit()
+        // wrapper) - opening one tick later than the click that requested it is unobservable.
+        newui::SubView* owner = model_.selected();
+        std::shared_ptr<PropertyEditor> sharedEditor = std::move(editor);
+        std::shared_ptr<bool> alive = aliveFlag_;
+        auto openNow = [this, alive, sharedEditor, owner, anchorScreenRect] {
+            // this PropertiesGrid could have been destroyed between the click that requested
+            // this and the posted task actually running (e.g. the document/tab closing in the
+            // same input burst) - same aliveFlag_ guard PopupTool's own postCreate() already uses
+            // for its own posted first-repaint task, for the identical reason.
+            if (!*alive) {
+                return;
+            }
+            newui::PopupTool* popup = sharedEditor->editAsync(owner, anchorScreenRect);
+            if (popup != nullptr) {
+                // Tracked for lifetime only - the popup commits through its own captured
+                // property_/instance_/postCommitSync_ copies (see LayoutPropertyEditor::
+                // editAsync()'s own comment), never back through sharedEditor itself.
+                openTypePicker_ = popup;
+                openTypePickerDismissConnection_ = popup->onDismissed.add(this, &PropertiesGrid::handleTypePickerDismissed);
+            }
+            markSelectedViewDirty();
+            treeView_->style().markDirty();
+        };
+        if (newui::RunLoop::current()) {
+            newui::RunLoop::current().post(std::move(openNow));
+        } else {
+            openNow();
+        }
+    }
+
+    newui::SyncReturn PropertiesGrid::handleTreeMouseDblClick(newui::View& /*sender*/, const newui::Point& pt,
+        std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/)
+    {
+        std::optional<std::vector<std::size_t>> path = treeView_->selectedPath();
+        if (!path.has_value()) {
+            return newui::SyncReturn::Ignored;
+        }
+
+        PropertiesModel::Node node = model_.nodeAt(*path);
+        if (node.readOnly) {
+            return newui::SyncReturn::Ignored;
+        }
+
+        std::optional<newui::Rect> rowRect = treeView_->rectForPath(*path);
+        if (!rowRect.has_value()) {
+            return newui::SyncReturn::Ignored;
+        }
+
+        // The same ellipsis rect activateLiveEditorIfClickedOnValueColumn() anchors to - a
+        // double-click doesn't need to land exactly on it (any point in the row's own value/label
+        // area is enough, checked below), but the popup itself should still appear next to the
+        // same "..." button regardless of which gesture opened it.
+        newui::Rect ellipsisRect;
+        if (node.kind == PropertiesModel::Kind::PropertyGroup) {
+            // No key/value split on a header row - the whole row is this group's own "value"
+            // area, same as its "..." button already treats it (activateLiveEditorIfClicked
+            // OnValueColumn() above).
+            if (!rowRect->contains(pt)) {
+                return newui::SyncReturn::Ignored;
+            }
+            ellipsisRect = PropertyItem::ellipsisButtonRectFor(*rowRect);
+        } else if (node.kind == PropertiesModel::Kind::PropertyLeaf) {
+            auto* propsController = dynamic_cast<PropertiesTreeController*>(&treeView_->controller());
+            float keyColumnFraction = propsController != nullptr
+                ? propsController->keyColumnFraction() : PropertiesTreeController::kDefaultKeyColumnFraction;
+            newui::Rect valueRect = PropertyItem::valueRectFor(*rowRect, *path, keyColumnFraction);
+            if (!valueRect.contains(pt)) {
+                return newui::SyncReturn::Ignored;
+            }
+            ellipsisRect = PropertyItem::ellipsisButtonRectFor(valueRect);
+        } else {
+            return newui::SyncReturn::Ignored;
+        }
+
+        auto editor = PropertyEditorRegistry::instance()
+            .createEditor(node.property, node.ownerClass, node.ownerInstance);
+        if (editor == nullptr || editor->editStyle() != PropertyEditor::EditStyle::Dialog) {
+            return newui::SyncReturn::Ignored;
+        }
+
+        openDialogEditorFor(node, screenRectFor(treeView_, ellipsisRect));
+        return newui::SyncReturn::Handled;
     }
 
     void PropertiesGrid::repositionLiveEditor()
@@ -355,7 +559,7 @@ namespace CodeToolsVsix
         newui::Rect valueRect = PropertyItem::valueRectFor(*rowRect, *path, keyColumnFraction);
 
         if (auto* toggle = dynamic_cast<newui::Toggle*>(liveEditorView_)) {
-            float box = PropertyItem::kCheckboxSize;
+            float box = kCheckboxSize;
             toggle->setBounds(newui::Rect(valueRect.left(), valueRect.top() + (valueRect.size().height - box) * 0.5f, box, box));
             return;
         }
@@ -364,14 +568,9 @@ namespace CodeToolsVsix
             return;
         }
         if (auto* textField = dynamic_cast<newui::TextField*>(liveEditorView_)) {
-            newui::Rect textRect = valueRect;
-            PropertiesModel::Node node = model_.nodeAt(*path);
-            if (!liveEditorSubIndex_.has_value() && node.property != nullptr
-                    && node.property->type() == std::type_index(typeid(newui::Color))) {
-                textRect = newui::Rect(valueRect.left() + PropertyItem::kSwatchSize + 6.0f, valueRect.top(),
-                    valueRect.size().width - PropertyItem::kSwatchSize - 6.0f, valueRect.size().height);
-            }
-            textField->setBounds(textRect);
+            // Color's own swatch-offset branch removed here too - see rebuildLiveEditor()'s own
+            // comment; Color is EditStyle::Dialog now and never builds a live TextField at all.
+            textField->setBounds(valueRect);
         }
     }
 

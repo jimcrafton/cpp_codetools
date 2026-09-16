@@ -1,7 +1,7 @@
 #include "PropertyItem.h"
+#include "PaintUtils.h"
 
 #include <newui/color.h>
-#include <newui/fontmanager.h>
 #include <newui/uicolormanager.h>
 
 #include <algorithm>
@@ -31,12 +31,12 @@ namespace CodeToolsVsix
         // Same priority (disabled beats selected beats normal) items.cpp's
         // own file-local itemTextColor() uses - reimplemented here since
         // that one isn't exported.
-        BLRgba32 rowTextColor(const newui::Item& item)
+        newui::Color rowTextColor(const newui::Item& item)
         {
             newui::UIColorRole role = !item.isEnabled() ? newui::UIColorRole::DisabledText
                 : item.isSelected() ? newui::UIColorRole::HighlightText
                 : newui::UIColorRole::ControlText;
-            return newui::UIColorManager::colorFor(role).toBLRgba32();
+            return newui::UIColorManager::colorFor(role);
         }
 
         // The key column and group/section labels (Main.dc.html's own
@@ -49,98 +49,17 @@ namespace CodeToolsVsix
         // comment already follows, and the same role ToolboxItem/
         // PropertyRow's own header treatment already reused for exactly
         // this "muted label" purpose.
-        BLRgba32 dimTextColor(const newui::Item& item)
+        newui::Color dimTextColor(const newui::Item& item)
         {
             newui::UIColorRole role = !item.isEnabled() ? newui::UIColorRole::DisabledText
                 : item.isSelected() ? newui::UIColorRole::HighlightText
                 : newui::UIColorRole::DisabledText;
-            return newui::UIColorManager::colorFor(role).toBLRgba32();
-        }
-
-        double measureTextWidth(BLFont& font, const std::string& text)
-        {
-            if (text.empty()) {
-                return 0.0;
-            }
-            BLGlyphBuffer glyphBuffer;
-            glyphBuffer.set_utf8_text(text.c_str(), text.size());
-            font.shape(glyphBuffer);
-            BLTextMetrics textMetrics;
-            font.get_text_metrics(glyphBuffer, textMetrics);
-            return textMetrics.advance.x;
-        }
-
-        // Truncates text to fit within maxWidth, appending "..." - plain
-        // byte-offset truncation (every string this Item ever paints is a
-        // C++ identifier/English word, never multi-byte UTF-8), same
-        // binary-search-the-longest-fit shape a real text-measuring
-        // truncation needs. Returns text unchanged if it already fits, or
-        // an empty string if even "..." alone doesn't fit.
-        std::string truncateWithEllipsis(BLFont& font, const std::string& text, double maxWidth)
-        {
-            if (measureTextWidth(font, text) <= maxWidth) {
-                return text;
-            }
-
-            static const std::string kEllipsis = "...";
-            if (measureTextWidth(font, kEllipsis) > maxWidth) {
-                return std::string();
-            }
-
-            std::size_t lo = 0;
-            std::size_t hi = text.size();
-            while (lo < hi) {
-                std::size_t mid = lo + (hi - lo + 1) / 2;
-                std::string candidate = text.substr(0, mid) + kEllipsis;
-                if (measureTextWidth(font, candidate) <= maxWidth) {
-                    lo = mid;
-                } else {
-                    hi = mid - 1;
-                }
-            }
-            return text.substr(0, lo) + kEllipsis;
-        }
-
-        // Same BLFont/glyph-buffer/fill_utf8_text idiom items.cpp's own
-        // file-local paintItemText() uses - reimplemented here (not
-        // exported from there), same as ToolboxItem's own local
-        // paintRowText() already does. Clips to rect and ellipsizes text
-        // too wide for it - fill_utf8_text() itself never wraps/truncates,
-        // and a long key name (e.g. "desiredSizeOverride") drawn unclipped
-        // otherwise runs straight into the value column, a real collision
-        // caught live in the testharness.
-        void paintText(BLContext& ctx, const newui::Rect& rect, const std::string& text, BLRgba32 color,
-            newui::SystemUIFont fontRole = newui::SystemUIFont::Message)
-        {
-            if (text.empty() || rect.size().width <= 0.0f || rect.size().height <= 0.0f) {
-                return;
-            }
-
-            newui::Font font = newui::FontManager::getSystemFont(fontRole);
-            BLFont* blFont = font.blFont();
-            if (blFont == nullptr || !blFont->is_valid()) {
-                return;
-            }
-
-            std::string display = truncateWithEllipsis(*blFont, text, rect.size().width);
-            if (display.empty()) {
-                return;
-            }
-
-            const BLFontMetrics& fontMetrics = blFont->metrics();
-            double textHeight = fontMetrics.ascent + fontMetrics.descent;
-            double y = rect.top() + (rect.size().height - textHeight) * 0.5 + fontMetrics.ascent;
-
-            ctx.save();
-            ctx.clip_to_rect(BLRect(rect.left(), rect.top(), rect.size().width, rect.size().height));
-            ctx.set_fill_style(color);
-            ctx.fill_utf8_text(BLPoint(rect.left(), y), *blFont, display.c_str(), display.size());
-            ctx.restore();
+            return newui::UIColorManager::colorFor(role);
         }
 
         // Same hand-drawn triangle items.cpp's own file-local
         // paintExpandGlyph() uses - reimplemented here, not exported.
-        void paintExpandGlyph(BLContext& ctx, double centerX, double centerY, double size, bool expanded, BLRgba32 color)
+        void paintExpandGlyph(BLContext& ctx, double centerX, double centerY, double size, bool expanded, const newui::Color& color)
         {
             double half = size * 0.5;
             BLPath path;
@@ -156,41 +75,31 @@ namespace CodeToolsVsix
             path.close();
 
             ctx.save();
-            ctx.set_fill_style(color);
+            ctx.set_fill_style(color.toBLRgba32());
             ctx.fill_path(path);
             ctx.restore();
         }
 
-        // Inactive-row rendering of a bool property - no live newui::Toggle
-        // (Items aren't Views, see items.h's own class comment), just a
-        // hand-drawn checkbox glyph reflecting the current value.
-        void paintCheckbox(BLContext& ctx, const newui::Rect& box, bool checked, BLRgba32 color)
+        // The small "..." affordance a Dialog-style editor's row shows - see PropertyItem::
+        // ellipsisButtonRectFor()'s own comment (PropertyItem.h) for why this exists at all and
+        // what opens it. A plain bordered square (matches PaintUtils' own paintCheckbox()
+        // "hand-drawn control chrome" weight) with 3 small dots, not real text - avoids a second
+        // BLFont/glyph-buffer round trip just for three periods.
+        void paintEllipsisButton(BLContext& ctx, const newui::Rect& box, const newui::Color& color)
         {
+            BLRgba32 rgba = color.toBLRgba32();
             ctx.save();
-            ctx.set_stroke_style(color);
+            ctx.set_stroke_style(rgba);
             ctx.set_stroke_width(1.0);
-            ctx.stroke_rect(BLRect(box.left(), box.top(), box.size().width, box.size().height));
-            if (checked) {
-                BLPath check;
-                check.move_to(box.left() + box.size().width * 0.2, box.top() + box.size().height * 0.55);
-                check.line_to(box.left() + box.size().width * 0.42, box.top() + box.size().height * 0.78);
-                check.line_to(box.left() + box.size().width * 0.82, box.top() + box.size().height * 0.22);
-                ctx.set_stroke_width(1.6);
-                ctx.stroke_path(check);
-            }
-            ctx.restore();
-        }
+            ctx.stroke_round_rect(BLRect(box.left(), box.top(), box.size().width, box.size().height), 3.0);
 
-        // Inactive-row rendering of a Color property - matches
-        // PropertyRow::build()'s own swatch preview.
-        void paintSwatch(BLContext& ctx, const newui::Rect& box, BLRgba32 fill, BLRgba32 border)
-        {
-            ctx.save();
-            ctx.set_fill_style(fill);
-            ctx.fill_rect(BLRect(box.left(), box.top(), box.size().width, box.size().height));
-            ctx.set_stroke_style(border);
-            ctx.set_stroke_width(1.0);
-            ctx.stroke_rect(BLRect(box.left(), box.top(), box.size().width, box.size().height));
+            ctx.set_fill_style(rgba);
+            double cy = double(box.top() + box.size().height * 0.5f);
+            double spacing = double(box.size().width) * 0.22;
+            double cx = double(box.left() + box.size().width * 0.5f);
+            for (int i = -1; i <= 1; ++i) {
+                ctx.fill_circle(cx + double(i) * spacing, cy, 1.3);
+            }
             ctx.restore();
         }
     }
@@ -308,7 +217,27 @@ namespace CodeToolsVsix
             for (char& c : name) {
                 c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
             }
-            paintText(ctx, labelRect, name + typeSuffix, dimTextColor(*this), newui::SystemUIFont::Status);
+
+            // A Layout/ViewStyle-shaped PropertyGroup (a registered EditStyle::Dialog editor
+            // that's *also* an addressable nested Class - see PropertiesModel::
+            // classifyProperty()'s own comment) gets the same "..." affordance a Dialog leaf row
+            // does, at the header row's own right edge - the type-swap popup, not the drilldown
+            // into this group's own current fields, which single-clicking/expanding the row
+            // itself still does exactly as before. Every other group-like row (DelegatesHeader,
+            // an ordinary nested-Class PropertyGroup with no registered editor at all) never has
+            // one, so this is a no-op for those.
+            newui::Rect labelValueRect = labelRect;
+            if (node.kind == PropertiesModel::Kind::PropertyGroup) {
+                auto groupEditor = PropertyEditorRegistry::instance()
+                    .createEditor(node.property, node.ownerClass, node.ownerInstance);
+                if (groupEditor != nullptr && groupEditor->editStyle() == PropertyEditor::EditStyle::Dialog) {
+                    newui::Rect ellipsisRect = ellipsisButtonRectFor(labelRect);
+                    paintEllipsisButton(ctx, ellipsisRect, dimTextColor(*this));
+                    labelValueRect = newui::Rect(labelRect.left(), labelRect.top(),
+                        ellipsisRect.left() - labelRect.left() - 4.0f, labelRect.size().height);
+                }
+            }
+            paintText(ctx, labelValueRect, name + typeSuffix, dimTextColor(*this), newui::SystemUIFont::Status);
             return;
         }
 
@@ -395,6 +324,21 @@ namespace CodeToolsVsix
             return;
         }
 
+        // The "..." affordance for a Dialog-style leaf (Color/Gradient/FilePath/...) - see
+        // PropertyItem::ellipsisButtonRectFor()'s own comment (PropertyItem.h) for why a plain
+        // click on the rest of valueRect no longer opens it. Never true for SubPropertyEntry
+        // (editor here is still the *parent* compound property's own editor, e.g. "bounds" -
+        // SubProperties editors are never EditStyle::Dialog by construction) or for bool
+        // (BoolPropertyEditor is EditStyle::Dropdown), so both those branches below keep using
+        // the full, unshrunk valueRect exactly as before.
+        if (node.kind != PropertiesModel::Kind::SubPropertyEntry
+                && editor->editStyle() == PropertyEditor::EditStyle::Dialog) {
+            newui::Rect ellipsisRect = ellipsisButtonRectFor(valueRect);
+            paintEllipsisButton(ctx, ellipsisRect, dimTextColor(*this));
+            valueRect = newui::Rect(valueRect.left(), valueRect.top(),
+                ellipsisRect.left() - valueRect.left() - 4.0f, valueRect.size().height);
+        }
+
         if (node.kind == PropertiesModel::Kind::SubPropertyEntry) {
             std::vector<std::string> subNames = editor->subPropertyNames();
             std::string subName = node.subPropertyIndex < subNames.size() ? subNames[node.subPropertyIndex] : std::string();
@@ -402,42 +346,20 @@ namespace CodeToolsVsix
             // Read-only (governed by a Layout other than FreePosition, see Node::readOnly's own
             // comment) shows dimmed, same visual language as a disabled control elsewhere in this
             // codebase - the group header line above already spells out why.
-            BLRgba32 valueColor = node.readOnly ? dimTextColor(*this) : rowTextColor(*this);
-            // A flags-enum sub-property (FlagsEnumPropertyEditor - one checkbox per named bit,
-            // e.g. AnchorLayoutParams::anchors) paints the same checkbox glyph a whole-value bool
-            // leaf already does below, rather than the literal "true"/"false" text every other
-            // SubPropertyEntry (Rect/Point/Size's own float components) uses.
-            if (editor->subPropertyIsBool(node.subPropertyIndex)) {
-                newui::Rect box(valueRect.left(), valueRect.top() + (valueRect.size().height - kCheckboxSize) * 0.5f,
-                    kCheckboxSize, kCheckboxSize);
-                paintCheckbox(ctx, box, editor->subPropertyValueAsString(node.subPropertyIndex) == "true", valueColor);
-                return;
-            }
-            paintText(ctx, valueRect, editor->subPropertyValueAsString(node.subPropertyIndex), valueColor);
+            newui::Color valueColor = node.readOnly ? dimTextColor(*this) : rowTextColor(*this);
+            // The editor itself now owns how this sub-property's value looks (a checkbox for a
+            // flags-enum bit, plain text for everything else - PropertyEditor::
+            // paintSubPropertyValue()/PropertyEditor.h) rather than this method hardcoding an
+            // isBool()-then-checkbox-else-text dispatch.
+            editor->paintSubPropertyValue(ctx, valueRect, node.subPropertyIndex, valueColor);
             return;
         }
 
-        if (node.property->type() == std::type_index(typeid(bool))) {
-            newui::Rect box(valueRect.left(), valueRect.top() + (valueRect.size().height - kCheckboxSize) * 0.5f,
-                kCheckboxSize, kCheckboxSize);
-            paintCheckbox(ctx, box, editor->valueAsString() == "true", rowTextColor(*this));
-            return;
-        }
-
-        if (node.property->type() == std::type_index(typeid(newui::Color))) {
-            newui::Rect box(valueRect.left(), valueRect.top() + (valueRect.size().height - kSwatchSize) * 0.5f,
-                kSwatchSize, kSwatchSize);
-            newui::Color parsed;
-            if (newui::Color::fromString(editor->valueAsString(), parsed)) {
-                paintSwatch(ctx, box, parsed.toBLRgba32(), rowTextColor(*this));
-            }
-            newui::Rect textRect(valueRect.left() + kSwatchSize + 6.0f, valueRect.top(),
-                valueRect.size().width - kSwatchSize - 6.0f, valueRect.size().height);
-            paintText(ctx, textRect, editor->valueAsString(), rowTextColor(*this));
-            return;
-        }
-
-        paintText(ctx, valueRect, editor->valueAsString(), rowTextColor(*this));
+        // The editor itself now owns how its own value looks (BoolPropertyEditor paints a
+        // checkbox, ColorPropertyEditor a swatch+text, everything else plain text -
+        // PropertyEditor::paintValue()/PropertyEditor.h) rather than this method hardcoding a
+        // growing property->type()-based if/else chain.
+        editor->paintValue(ctx, valueRect, rowTextColor(*this));
     }
 
     newui::Rect PropertyItem::keyRectFor(const newui::Rect& rowRect, const std::vector<std::size_t>& path, float keyColumnFraction)
@@ -459,5 +381,13 @@ namespace CodeToolsVsix
         float keyWidth = rowRect.size().width * keyColumnFraction;
         return newui::Rect(rowRect.left() + keyWidth + kRowPadding, rowRect.top(),
             rowRect.size().width - keyWidth - kRowPadding, rowRect.size().height);
+    }
+
+    newui::Rect PropertyItem::ellipsisButtonRectFor(const newui::Rect& contentRect)
+    {
+        float margin = 3.0f;
+        float size = kEllipsisButtonSize;
+        return newui::Rect(contentRect.right() - size - margin,
+            contentRect.top() + (contentRect.size().height - size) * 0.5f, size, size);
     }
 }

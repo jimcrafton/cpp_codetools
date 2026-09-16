@@ -1,8 +1,12 @@
 #pragma once
 
+#include <newui/color.h>
+#include <newui/font.h>
 #include <newui/geometry.h>
 
 #include <blend2d/blend2d.h>
+
+#include <string>
 
 namespace CodeToolsVsix
 {
@@ -24,4 +28,44 @@ namespace CodeToolsVsix
     // language across GradientEditorDialog.cpp and ColorPicker.cpp rather than each picking its
     // own value independently.
     constexpr double kCornerRadius = 6.0;
+
+    // Shared inactive-row/value glyph sizes - a PropertyEditor's own paintValue()/
+    // paintSubPropertyValue() override (PropertyEditor.h) and PropertiesGrid's live-editor-widget
+    // placement (a real Toggle sized to match, so the switch from inactive glyph to live widget
+    // is seamless) both need the exact same numbers, not two independently-drifting copies.
+    constexpr float kSwatchSize = 14.0f;
+    constexpr float kCheckboxSize = 14.0f;
+
+    // Measures text's rendered width under font - shared by truncateWithEllipsis() below and any
+    // caller that needs to lay out space around a piece of text before painting it.
+    double measureTextWidth(BLFont& font, const std::string& text);
+
+    // Truncates text to fit within maxWidth, appending "..." - plain byte-offset truncation
+    // (every string this codebase paints through here is a C++ identifier/English word, never
+    // multi-byte UTF-8), a binary-search-the-longest-fit shape. Returns text unchanged if it
+    // already fits, or an empty string if even "..." alone doesn't fit.
+    std::string truncateWithEllipsis(BLFont& font, const std::string& text, double maxWidth);
+
+    // Same BLFont/glyph-buffer/fill_utf8_text idiom items.cpp's own file-local paintItemText()
+    // uses (not exported from there) - the one shared way every PropertyItem row and
+    // PropertyEditor::paintValue()/paintSubPropertyValue() override paints a line of text. Clips
+    // to rect and ellipsizes text too wide for it - fill_utf8_text() itself never wraps/truncates,
+    // and an unclipped long value can otherwise run straight into whatever's next to it (a real,
+    // caught collision in testharness.exe). Takes newui::Color, not BLRgba32 - the codebase's own
+    // higher-level color type (real HSV/HSL conversions, CSS-hex round-trip, ...), converted to
+    // BLRgba32 only right at the ctx.set_fill_style() call site that actually needs it - same
+    // reasoning callers already apply everywhere a Color-typed property flows through this code.
+    void paintText(BLContext& ctx, const newui::Rect& rect, const std::string& text, const newui::Color& color,
+        newui::SystemUIFont fontRole = newui::SystemUIFont::Message);
+
+    // Inactive-row rendering of a bool-shaped value - no live newui::Toggle (a paint-only
+    // PropertyItem isn't a View, see items.h's own class comment; a PropertyEditor's own
+    // paintValue() override isn't one either), just a hand-drawn checkbox glyph reflecting the
+    // current value. Shared by BoolPropertyEditor::paintValue() and FlagsEnumPropertyEditor::
+    // paintSubPropertyValue() (PropertyEditor.h/.cpp).
+    void paintCheckbox(BLContext& ctx, const newui::Rect& box, bool checked, const newui::Color& color);
+
+    // Inactive-row rendering of a Color value - matches PropertyRow::build()'s own original
+    // swatch preview. Shared by ColorPropertyEditor::paintValue() (PropertyEditor.h/.cpp).
+    void paintSwatch(BLContext& ctx, const newui::Rect& box, const newui::Color& fill, const newui::Color& border);
 }

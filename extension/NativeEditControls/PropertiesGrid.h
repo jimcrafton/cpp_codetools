@@ -5,6 +5,8 @@
 
 #include <newui/controllers.h>
 #include <newui/controls.h>
+#include <newui/popuptool.h>
+#include <newui/runloop.h>
 #include <newui/undostack.h>
 
 #include <any>
@@ -38,6 +40,9 @@ namespace CodeToolsVsix
     {
     public:
         PropertiesGrid();
+        // Dismisses openTypePicker_ if still open - see that member's own comment for why this
+        // can't just rely on destroyLiveEditor()'s ordinary dismiss() path.
+        ~PropertiesGrid() override;
 
         // Rebuilds the tree against selected's real properties/delegates
         // (classinfo(typeid(*selected))) - nullptr clears it. Always
@@ -206,6 +211,25 @@ namespace CodeToolsVsix
         newui::SyncReturn handleTreeMouseUp(newui::View& sender, const newui::Point& pt,
             std::uint32_t btnMask, std::uint32_t keyMask);
 
+        // A Dialog-style editor (Color/Gradient/FilePath's own leaf row, or Layout/ViewStyle's
+        // own PropertyGroup header row - see PropertiesModel::classifyProperty()'s own comment on
+        // why those two stay groups) now only ever opens from its row's own "..." button
+        // (activateLiveEditorIfClickedOnValueColumn(), via handleTreeMouseDown()) or a real
+        // double-click anywhere on that same row - never a plain single click on the rest of it.
+        // See PropertyItem::ellipsisButtonRectFor()'s own comment (PropertyItem.h) for why.
+        newui::SyncReturn handleTreeMouseDblClick(newui::View& sender, const newui::Point& pt,
+            std::uint32_t btnMask, std::uint32_t keyMask);
+
+        // Resolves node's own real PropertyEditor (via node.property/ownerClass/ownerInstance,
+        // same as every other PropertyEditorRegistry::createEditor() call site here) and, if it's
+        // EditStyle::Dialog, opens it - a real blocking newui::Dialog::showModal() (Color/
+        // Gradient/FilePath, commits synchronously and returns) or a non-modal newui::PopupTool
+        // (Layout/ViewStyle's editAsync(), tracked via openTypePicker_ below - its own real commit
+        // happens later, from a popup cell's own click handler). A no-op if node has no registered
+        // editor, or one that isn't EditStyle::Dialog - callers (the "..." button and double-click
+        // handlers above) only ever call this once they've already confirmed one exists.
+        void openDialogEditorFor(const PropertiesModel::Node& node, const newui::Rect& anchorScreenRect);
+
         // Real, live-reported bug: vBar()/hBar() (inherited from ScrollView) are siblings of
         // treeView_, not part of it, so a click on either one never reaches handleTreeMouseDown()/
         // handleSelectionChanged() at all - the live editor widget (still positioned against the
@@ -217,6 +241,11 @@ namespace CodeToolsVsix
         // proceeds unaffected.
         newui::SyncReturn handleScrollBarMouseDown(newui::View& sender, const newui::Point& pt,
             std::uint32_t btnMask, std::uint32_t keyMask);
+
+        // openTypePicker_'s own onDismissed handler - clears openTypePicker_ back to nullptr
+        // (the popup itself is already gone/going by the time this fires, see PopupTool::
+        // dismiss()'s own doc comment) - never called directly.
+        newui::SyncReturn handleTypePickerDismissed(newui::PopupTool& sender);
 
         PropertiesModel model_;
         newui::TreeView* treeView_ = nullptr;
@@ -251,5 +280,23 @@ namespace CodeToolsVsix
         // ...) (just this one synthetic component) - std::nullopt means
         // "not editing a sub-property", not "index 0".
         std::optional<std::size_t> liveEditorSubIndex_;
+
+        // The non-modal newui::CalloutTool popup a LayoutPropertyEditor/ViewStylePropertyEditor's
+        // editAsync() spawns (rebuildLiveEditor()'s EditStyle::Dialog branch), tracked here purely
+        // for lifetime - its real commit happens later, from one of its own cell's click handlers,
+        // through captured property_/instance_/postCommitSync_ copies, never back through this
+        // class or the now-destroyed liveEditor_ that created it. Dismissed from
+        // destroyLiveEditor() (an ordinary "something else is happening now" teardown, same as
+        // liveEditor_ itself) and from the destructor (see its own comment for why that path needs
+        // extra care) - cleared back to nullptr by handleTypePickerDismissed(), the popup's own
+        // onDismissed handler, in the ordinary (non-destructor) case.
+        newui::PopupTool* openTypePicker_ = nullptr;
+        newui::Connection openTypePickerDismissConnection_;
+
+        // Set false in the destructor, checked by openDialogEditorFor()'s own posted task before
+        // it touches this PropertiesGrid - same reasoning, same pattern as newui::PopupTool's own
+        // aliveFlag_ (popuptool.h): that posted task can still be sitting in RunLoop's queue after
+        // this PropertiesGrid itself is destroyed (the document/tab closing) in the meantime.
+        std::shared_ptr<bool> aliveFlag_ = std::make_shared<bool>(true);
     };
 }

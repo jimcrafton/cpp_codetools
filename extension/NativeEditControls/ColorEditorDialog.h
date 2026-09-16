@@ -48,7 +48,26 @@ namespace CodeToolsVsix
         // second, separately-tracked copy) and the "old" compare color (revertToOld()'s own
         // target) - call before showModal().
         void setColor(const newui::Color& color);
-        newui::Color color() const { return colorPicker_->color(); }
+
+        // Returns committedColor_, a plain member kept in sync with colorPicker_->color() on
+        // every colorPicker_->onColorChanged (buildChrome()'s own wiring, same place
+        // refreshFromColor() already runs) - NOT a live read through colorPicker_ itself (the
+        // original shape). That distinction matters: newui::Dialog's own WM_CLOSE handler
+        // (frame.cpp) synchronously calls DestroyWindow(), which synchronously fires WM_DESTROY
+        // -> Frame::destroy() -> `delete rootView_` - the *entire* child tree, colorPicker_
+        // included, is gone before showModal() ever returns control to whoever called it. Reading
+        // colorPicker_->color() here read already-freed memory the whole time (confirmed live in
+        // the debugger: hue_/sat_/val_/alpha_ all showing MSVC's 0xdd debug-heap fill pattern) -
+        // never caught since showModal() is never called from an automated test (a real blocking
+        // native dialog), only from manually clicking Apply in testharness.exe. This is arguably
+        // a real newui::Dialog bug (a caller has no safe way to read a child widget's state after
+        // showModal() returns at all) worth cleaning up in the user's own D:\code\newui checkout
+        // eventually - not fixed here, since this vendored 3rdparty/newui copy tracks that repo
+        // via git (see this project's own "no manual newui vendor copy" convention). oldColor_
+        // (below) never had this problem, since setColor() already captured it into a plain
+        // member eagerly, before the dialog ever closes - committedColor_ just applies that same
+        // pattern to the *current* color too.
+        newui::Color color() const { return committedColor_; }
 
         // Which 4-field value grid is showing - R/G/B/A (the default, matching the mockup's own
         // default "rgb" tab) or H/S/L/A. Purely a display/edit-target choice - working_'s own
@@ -129,6 +148,10 @@ namespace CodeToolsVsix
         void refreshValueGrid();
 
         newui::Color oldColor_;
+        // See color()'s own comment above for why this exists at all - kept in sync with
+        // colorPicker_->color() on every real change, never read lazily through colorPicker_
+        // itself once the dialog might have already closed.
+        newui::Color committedColor_;
         Format formatTab_ = Format::Rgb;
 
         ColorPicker* colorPicker_ = nullptr;

@@ -1,11 +1,17 @@
 #include "../extension/NativeEditControls/PropertyEditor.h"
 
+#include <newui/controls.h>
 #include <newui/graphics.h>
+#include <newui/layout.h>
 #include <newui/reflection.h>
+#include <newui/subview.h>
+#include <newui/viewstyle.h>
 
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <memory>
+#include <typeindex>
 
 using namespace newui::reflection;
 
@@ -800,4 +806,101 @@ TEST_F(PropertyEditorTest, PushedActionDescriptionNamesTheProperty)
 
     editor->setValueFromString("hello");
     EXPECT_EQ(undoStack.undoDescription(), "Change label");
+}
+
+// LayoutPropertyEditor/ViewStylePropertyEditor tests - against real newui::View subclasses (not
+// the isolated Widget fixture above), since these two editors are registered at
+// typeid(newui::Layout)/typeid(newui::ViewStyle) and only reachable through newui's own real,
+// generated reflection data for View::layout()/style() (registerReflectionData(), already run
+// once globally for this whole binary - see test_component_editor.cpp's own ::testing::
+// Environment). editAsync() itself is never called here - same untestable-by-design contract
+// every other EditStyle::Dialog editor's real UI has (it creates a real WS_POPUP window; see
+// PropertyEditor.h's plan notes on why - verify visually via testharness.exe instead).
+namespace
+{
+    const Property* findViewProperty(const newui::View& view, const std::string& name)
+    {
+        const Class* clazz = classinfo(std::type_index(typeid(view)));
+        if (clazz == nullptr) {
+            return nullptr;
+        }
+        std::vector<const Property*> props;
+        clazz->allProperties(props);
+        for (const Property* p : props) {
+            if (p->name() == name) {
+                return p;
+            }
+        }
+        return nullptr;
+    }
+}
+
+TEST(LayoutPropertyEditorTest, RegistryResolvesTheRealLayoutPropertyToThisEditor)
+{
+    // Unlike PropertyEditorTest's TEST_F fixture (SetUp() below), a plain TEST() never calls
+    // this - and since PropertyEditorRegistry::instance() is a shared, whole-binary singleton
+    // guarded by its own builtinsRegistered_ (harmless/no-op on a repeat call), this can't be
+    // skipped just because some other test in the binary happened to call it first.
+    CodeToolsVsix::PropertyEditorRegistry::instance().registerBuiltinEditors();
+
+    newui::SubView view;
+    const Property* prop = findViewProperty(view, "layout");
+    ASSERT_NE(prop, nullptr);
+
+    auto editor = CodeToolsVsix::PropertyEditorRegistry::instance().createEditor(
+        prop, classinfo(std::type_index(typeid(view))), &view);
+    ASSERT_NE(editor, nullptr);
+    EXPECT_NE(dynamic_cast<CodeToolsVsix::LayoutPropertyEditor*>(editor.get()), nullptr);
+    EXPECT_EQ(editor->editStyle(), CodeToolsVsix::PropertyEditor::EditStyle::Dialog);
+}
+
+TEST(LayoutPropertyEditorTest, ValueAsStringIsNoneForAViewWithNoLayoutAttached)
+{
+    newui::SubView view;
+    const Property* prop = findViewProperty(view, "layout");
+    ASSERT_NE(prop, nullptr);
+    CodeToolsVsix::LayoutPropertyEditor editor(prop, &view);
+    EXPECT_EQ(editor.valueAsString(), "(none)");
+}
+
+// The real regression this guards against - see this editor's own class comment
+// (PropertyEditor.h): reading through rawValue()/property_->get() instead of getClass() would
+// either throw (Layout isn't copy-constructible, so TypedProperty::get()'s PtrGetter branch is
+// compiled out entirely - always returns an empty std::any) or, for a copyable PtrGetter
+// property, silently show the sliced *base* class name instead of the true runtime subclass.
+TEST(LayoutPropertyEditorTest, ValueAsStringReflectsTheTrueRuntimeSubclassNotTheDeclaredBase)
+{
+    newui::SubView view;
+    view.setLayout(std::make_unique<newui::FlexLayout>(newui::Orientation::Vertical));
+    const Property* prop = findViewProperty(view, "layout");
+    ASSERT_NE(prop, nullptr);
+    CodeToolsVsix::LayoutPropertyEditor editor(prop, &view);
+    EXPECT_EQ(editor.valueAsString(), "FlexLayout");
+}
+
+TEST(ViewStylePropertyEditorTest, RegistryResolvesTheRealStylePropertyToThisEditor)
+{
+    CodeToolsVsix::PropertyEditorRegistry::instance().registerBuiltinEditors();
+
+    newui::SubView view;
+    const Property* prop = findViewProperty(view, "style");
+    ASSERT_NE(prop, nullptr);
+
+    auto editor = CodeToolsVsix::PropertyEditorRegistry::instance().createEditor(
+        prop, classinfo(std::type_index(typeid(view))), &view);
+    ASSERT_NE(editor, nullptr);
+    EXPECT_NE(dynamic_cast<CodeToolsVsix::ViewStylePropertyEditor*>(editor.get()), nullptr);
+    EXPECT_EQ(editor->editStyle(), CodeToolsVsix::PropertyEditor::EditStyle::Dialog);
+}
+
+// Button::Button() installs a real ThemedButtonStyle (controls.cpp), not the plain declared
+// ViewStyle base - same "true runtime class, not the sliced declared type" regression
+// LayoutPropertyEditor's own equivalent test above guards against.
+TEST(ViewStylePropertyEditorTest, ValueAsStringReflectsTheTrueRuntimeSubclassNotTheDeclaredBase)
+{
+    newui::Button button;
+    const Property* prop = findViewProperty(button, "style");
+    ASSERT_NE(prop, nullptr);
+    CodeToolsVsix::ViewStylePropertyEditor editor(prop, &button);
+    EXPECT_EQ(editor.valueAsString(), "ThemedButtonStyle");
 }
