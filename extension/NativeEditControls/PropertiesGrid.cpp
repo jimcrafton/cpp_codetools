@@ -11,35 +11,6 @@
 
 namespace CodeToolsVsix
 {
-    namespace
-    {
-        // localRect (in view's own local coordinate space) converted to real screen coordinates -
-        // walks view's parent chain summing each ancestor's own bounds().pos() (bounds() is
-        // parent-relative) up to (but not including) the RootView itself, then RootView::
-        // localToScreen() for the real screen origin. Same technique PropertyEditor.cpp's own
-        // ownerScreenRect() uses for the *selected canvas View* being edited - newui has no
-        // general View-to-screen/View-to-View coordinate mapper of its own (only RootView::
-        // localToScreen(), confirmed by grepping the whole include tree), so this is hand-rolled
-        // the same way there too. This is the equivalent for treeView_ itself, needed so a
-        // type-swap popup anchors to the actual "..." button the user clicked in the Properties
-        // grid - a real, reported positioning bug otherwise: the popup used to anchor to whatever
-        // the selected canvas View's own screen position happened to be instead, since editAsync()
-        // was computing its anchor from `owner` (the edited View), not from where the click that
-        // opened it actually was.
-        newui::Rect screenRectFor(newui::View* view, const newui::Rect& localRect)
-        {
-            float x = localRect.left();
-            float y = localRect.top();
-            for (newui::View* v = view; v != nullptr && v->parent() != nullptr; v = v->parent()) {
-                x += v->bounds().left();
-                y += v->bounds().top();
-            }
-            newui::RootView* root = view != nullptr ? view->rootView() : nullptr;
-            newui::Point topLeft = root != nullptr ? root->localToScreen(newui::Point(x, y)) : newui::Point(x, y);
-            return newui::Rect(topLeft.x, topLeft.y, localRect.width(), localRect.height());
-        }
-    }
-
     std::any PropertiesGrid::StringListModel::value(const std::any& key)
     {
         if (const std::size_t* index = std::any_cast<std::size_t>(&key)) {
@@ -383,7 +354,7 @@ namespace CodeToolsVsix
         if (node.kind == PropertiesModel::Kind::PropertyGroup) {
             newui::Rect ellipsisRect = PropertyItem::ellipsisButtonRectFor(*rowRect);
             if (ellipsisRect.contains(pt)) {
-                openDialogEditorFor(node, screenRectFor(treeView_, ellipsisRect));
+                openDialogEditorFor(node, treeView_->localToScreen(ellipsisRect));
             }
             return;
         }
@@ -414,7 +385,7 @@ namespace CodeToolsVsix
             if (editor != nullptr && editor->editStyle() == PropertyEditor::EditStyle::Dialog) {
                 newui::Rect ellipsisRect = PropertyItem::ellipsisButtonRectFor(valueRect);
                 if (ellipsisRect.contains(pt)) {
-                    openDialogEditorFor(node, screenRectFor(treeView_, ellipsisRect));
+                    openDialogEditorFor(node, treeView_->localToScreen(ellipsisRect));
                 }
                 return;
             }
@@ -537,7 +508,7 @@ namespace CodeToolsVsix
             return newui::SyncReturn::Ignored;
         }
 
-        openDialogEditorFor(node, screenRectFor(treeView_, ellipsisRect));
+        openDialogEditorFor(node, treeView_->localToScreen(ellipsisRect));
         return newui::SyncReturn::Handled;
     }
 

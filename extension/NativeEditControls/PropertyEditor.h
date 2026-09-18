@@ -334,15 +334,14 @@ namespace CodeToolsVsix
     // Real, reported bug this comment exists to prevent recurring: the base PropertyEditor::
     // editAsync(owner) signature originally had no way to say *where on screen* the popup should
     // appear - LayoutPropertyEditor/ViewStylePropertyEditor (below) used to derive their own
-    // anchor from owner's own screen rect (ownerScreenRect(), PropertyEditor.cpp), which is the
+    // anchor from owner's own screen rect, which is the
     // *selected canvas View being edited*, not the Properties grid row the user actually clicked -
     // the popup ended up anchored next to the edited element on the design surface instead of
     // near the "..." button that opened it. anchorScreenRect is that missing piece: real screen
     // coordinates (not owner-local) of whatever the caller wants the popup to appear next to -
-    // PropertiesGrid::openDialogEditorFor() computes it from the actual clicked row/button (its
-    // own screenRectFor() helper - newui has no general View-to-screen mapper of its own, only
-    // RootView::localToScreen(), confirmed by grep). Every editAsync() override should anchor to
-    // this, never to owner's own bounds.
+    // PropertiesGrid::openDialogEditorFor() computes it from the actual clicked row/button (via
+    // View::localToScreen()). Every editAsync() override should anchor to this, never to owner's
+    // own bounds.
 
     // View::layout()/style() "type swap" pickers - selecting which concrete Layout/ViewStyle
     // subclass is installed on the selected View, via a non-modal newui::CalloutTool popup

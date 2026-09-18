@@ -73,7 +73,6 @@ namespace CodeToolsVsix
         if (root == nullptr) {
             return newui::Rect();
         }
-        newui::Point topLeft = root->localToScreen(newui::Point(0.0f, 0.0f));
-        return newui::Rect(topLeft.x, topLeft.y, root->bounds().width(), root->bounds().height());
+        return root->screenBounds();
     }
 }
