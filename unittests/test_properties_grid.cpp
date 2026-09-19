@@ -1,3 +1,4 @@
+#include "../extension/NativeEditControls/ColorChoices.h"
 #include "../extension/NativeEditControls/PropertiesGrid.h"
 
 #include <newui/controls.h>
@@ -239,6 +240,28 @@ TEST_F(PropertiesGridTest, ClickingTheFontNameSubPropertyValueCreatesALiveDropdo
     EXPECT_GT(dropdown->model()->size(), 0u) << "expected at least one real installed system font";
 }
 
+// A Color row's value cell opens a live dropdown of system + named colors (its "..." button keeps
+// the dialog). Real bug this guards: customizeDropdown() installs a custom ListController, which
+// replaces the dropdown's model with it - installed after setModel(), the dropdown came up empty
+// and its popup silently refused to open (openPopup() bails on a null/empty model).
+TEST_F(PropertiesGridTest, ClickingAColorValueCellCreatesALiveDropdownWithEveryColorChoiceAndSwatchRows)
+{
+    grid_->setSelection(&button_);
+    std::size_t styleIdx = indexOfChildNamed({}, "style");
+    grid_->treeView()->controller().setExpanded(std::vector<std::size_t>{styleIdx}, true);
+    std::size_t colorIdx = indexOfChildNamed({styleIdx}, "borderFill");
+    ASSERT_LT(colorIdx, grid_->model().childCount({styleIdx})) << "expected ViewStyle::borderFill (a Color)";
+
+    selectAndClickValueColumn(std::vector<std::size_t>{styleIdx, colorIdx});
+
+    ASSERT_EQ(grid_->treeView()->childViews().size(), 1u);
+    auto* dropdown = dynamic_cast<newui::DropDownList*>(grid_->treeView()->childViews()[0]);
+    ASSERT_NE(dropdown, nullptr);
+    ASSERT_NE(dropdown->model(), nullptr);
+    EXPECT_EQ(dropdown->model()->size(), CodeToolsVsix::colorChoices().size());
+    EXPECT_NE(dynamic_cast<CodeToolsVsix::ColorListController*>(&dropdown->controller()), nullptr);
+}
+
 // Real, live-reported bug: vBar()/hBar() (inherited from ScrollView) are siblings of treeView_,
 // not part of it, so a click on either one never reached handleTreeMouseDown()/
 // handleSelectionChanged() at all - the live editor stayed on screen, positioned against the
@@ -378,6 +401,51 @@ TEST_F(PropertiesGridTest, DraggingTheDividerChangesTheSharedKeyColumnFraction)
     EXPECT_NEAR(propsController->keyColumnFraction(), 0.6f, 0.01f);
 }
 
+// Real, live-reported bug: resizing the Properties pane (its splitter) left the active live editor
+// at its old size/position while everything else re-laid-out - repositionLiveEditor() only ever
+// ran for a divider drag, never for the grid itself being resized.
+TEST_F(PropertiesGridTest, ResizingTheGridRepositionsTheLiveEditorToTheNewValueColumn)
+{
+    grid_->setSelection(&button_);
+    std::size_t leafIndex = firstLeafIndexOfType(std::type_index(typeid(std::string)));
+    ASSERT_LT(leafIndex, properties_.size());
+    selectAndClickValueColumn(std::vector<std::size_t>{leafIndex});
+    ASSERT_EQ(grid_->treeView()->childViews().size(), 1u);
+    newui::SubView* editor = grid_->treeView()->childViews()[0];
+    float widthBefore = editor->bounds().width();
+
+    grid_->setBounds(newui::Rect(0.0f, 0.0f, 640.0f, 400.0f));
+
+    ASSERT_EQ(grid_->treeView()->childViews().size(), 1u) << "resizing must not drop the live editor";
+    EXPECT_GT(editor->bounds().width(), widthBefore);
+}
+
+// A Color row's live dropdown leaves room for the "..." button - a resize (or divider drag) must
+// keep it that way instead of growing the dropdown over the button.
+TEST_F(PropertiesGridTest, ResizingTheGridKeepsAColorDropdownClearOfItsEllipsisButton)
+{
+    grid_->setSelection(&button_);
+    std::size_t styleIdx = indexOfChildNamed({}, "style");
+    grid_->treeView()->controller().setExpanded(std::vector<std::size_t>{styleIdx}, true);
+    std::size_t colorIdx = indexOfChildNamed({styleIdx}, "borderFill");
+    ASSERT_LT(colorIdx, grid_->model().childCount({styleIdx}));
+    std::vector<std::size_t> path{styleIdx, colorIdx};
+    selectAndClickValueColumn(path);
+    ASSERT_EQ(grid_->treeView()->childViews().size(), 1u);
+    newui::SubView* dropdown = grid_->treeView()->childViews()[0];
+
+    grid_->setBounds(newui::Rect(0.0f, 0.0f, 640.0f, 400.0f));
+
+    std::optional<newui::Rect> rowRect = grid_->treeView()->rectForPath(path);
+    ASSERT_TRUE(rowRect.has_value());
+    auto* propsController = dynamic_cast<PropertiesTreeController*>(&grid_->treeView()->controller());
+    ASSERT_NE(propsController, nullptr);
+    newui::Rect valueRect = CodeToolsVsix::PropertyItem::valueRectFor(*rowRect, path, propsController->keyColumnFraction());
+    newui::Rect ellipsis = CodeToolsVsix::PropertyItem::ellipsisButtonRectFor(valueRect);
+    EXPECT_LE(dropdown->bounds().right(), ellipsis.left());
+    EXPECT_FLOAT_EQ(dropdown->bounds().left(), valueRect.left());
+}
+
 TEST_F(PropertiesGridTest, DraggingTheDividerRepositionsTheLiveEditorWithoutLosingTypedText)
 {
     grid_->setSelection(&button_);
@@ -441,6 +509,53 @@ TEST_F(PropertiesGridTest, ClickingBoundsValueColumnCreatesNoLiveEditorWhenThePa
 
     EXPECT_EQ(grid_->treeView()->childViews().size(), 0u)
         << "a read-only row must never spawn a live editor, even on a real click";
+
+    container.removeChild(&button_);
+}
+
+// Real, live-reported bug: editing Desired Size (height) and pressing Enter changed nothing on
+// screen until the window was resized - View::setDesiredSize() only stores the override, and it's
+// the *parent's* layout that reads it (FlexLayout::arrange()), which nothing re-ran after the
+// commit. Any commit (and undo/redo of it) has to re-arrange the parent and repaint.
+TEST_F(PropertiesGridTest, EditingDesiredSizeReArrangesTheParentLayoutImmediatelyAndUndoDoesToo)
+{
+    newui::SubView container;
+    container.setName("container");
+    container.setLayout(std::make_unique<newui::FlexLayout>(newui::Orientation::Vertical));
+    container.setBounds(newui::Rect(0.0f, 0.0f, 300.0f, 400.0f));
+    container.addChild(&button_);
+    button_.setDesiredSize(newui::Size(100.0f, 30.0f));
+    container.updateLayout();
+    ASSERT_FLOAT_EQ(button_.bounds().height(), 30.0f);
+
+    newui::UndoStack undoStack;
+    grid_->setUndoStack(&undoStack);
+    grid_->setSelection(&button_);
+
+    std::size_t desiredIndex = properties_.size();
+    for (std::size_t i = 0; i < properties_.size(); ++i) {
+        if (properties_[i]->name() == "desiredSize") {
+            desiredIndex = i;
+            break;
+        }
+    }
+    ASSERT_LT(desiredIndex, properties_.size());
+    desiredIndex += 1;  // same offset the bounds tests above use for this model's leading row
+
+    grid_->treeView()->controller().setExpanded(std::vector<std::size_t>{desiredIndex}, true);
+    selectAndClickValueColumn(std::vector<std::size_t>{desiredIndex, 1});  // "height"
+    auto* textField = dynamic_cast<newui::TextField*>(grid_->treeView()->childViews()[0]);
+    ASSERT_NE(textField, nullptr);
+    textField->setText(L"60");
+    textField->onLostFocus(*textField);  // same public commit path the neighbouring bounds test uses
+
+    EXPECT_FLOAT_EQ(button_.desiredSize().height, 60.0f);
+    EXPECT_FLOAT_EQ(button_.bounds().height(), 60.0f) << "the parent's layout must have re-run on commit";
+
+    ASSERT_TRUE(undoStack.canUndo());
+    undoStack.undo();
+    EXPECT_FLOAT_EQ(button_.desiredSize().height, 30.0f);
+    EXPECT_FLOAT_EQ(button_.bounds().height(), 30.0f) << "and again on undo";
 
     container.removeChild(&button_);
 }

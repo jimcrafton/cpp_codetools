@@ -1,6 +1,7 @@
 #include "../extension/NativeEditControls/DesignerEditor.h"
 
 #include <newui/bundle.h>
+#include <newui/dragndrop.h>
 #include <newui/controls.h>
 #include <newui/frame.h>
 #include <newui/keyboard_constants.h>
@@ -10,11 +11,13 @@
 #include <newui/rootview.h>
 #include <newui/rootviewproxy.h>
 #include <newui/subview.h>
+#include <newui/controls.h>
 
 #include <gtest/gtest.h>
 
 #include <any>
 #include <fstream>
+#include <iterator>
 #include <memory>
 #include <string>
 
@@ -1022,6 +1025,192 @@ TEST_F(DesignerEditorFileFixture, LoadPopulatesTheRootViewFromARealFrameShapedFi
     EXPECT_TRUE(editor.workspace()->rootViewProxy()->childViews()[0]->isDesignTime());
 }
 
+TEST_F(DesignerEditorFileFixture, LoadingASecondFileCompletelyReplacesTheFirstDocument)
+{
+    writeFile(R"({
+        type: "Frame",
+        title: "First Title",
+        rootView: {
+            type: "RootView",
+            childViews: [
+                { type: "SubView", name: "firstA" },
+                { type: "SubView", name: "firstB" },
+                { type: "SubView", name: "firstC" },
+            ],
+        },
+    })");
+
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+
+    std::wstring path = filePath();
+    ASSERT_TRUE(editor.load(path.c_str(), path.size()));
+    ASSERT_EQ(editor.workspace()->rootViewProxy()->childViews().size(), 3u);
+    editor.viewDesignerController().selectExclusive(editor.workspace()->rootViewProxy()->childViews()[2]);
+
+    // Second file: fewer children, no title.
+    writeFile(R"({
+        type: "Frame",
+        rootView: {
+            type: "RootView",
+            childViews: [
+                { type: "SubView", name: "secondOnly" },
+            ],
+        },
+    })");
+    ASSERT_TRUE(editor.load(path.c_str(), path.size()));
+
+    ASSERT_EQ(editor.workspace()->rootViewProxy()->childViews().size(), 1u);
+    EXPECT_EQ(editor.workspace()->rootViewProxy()->childViews()[0]->name(), "secondOnly");
+    EXPECT_EQ(editor.workspace()->frameProxy()->title(), "");
+    EXPECT_EQ(editor.viewDesignerController().primary(), nullptr);
+}
+
+TEST_F(DesignerEditorFileFixture, LoadSizesTheFrameProxyAroundTheFilesRootViewClientSize)
+{
+    writeFile(R"({
+        type: "Frame",
+        title: "Sized",
+        bounds: { type: "Rect", pos: { type: "Point", x: 0, y: 0 }, size: { type: "Size", width: 380, height: 612 } },
+        rootView: {
+            type: "RootView", visible: true,
+            bounds: { type: "Rect", pos: { type: "Point", x: 0, y: 0 }, size: { type: "Size", width: 380, height: 574 } },
+        },
+    })");
+
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+
+    std::wstring path = filePath();
+    ASSERT_TRUE(editor.load(path.c_str(), path.size()));
+
+    // Client area (below the mock title bar) matches the file's rootView; the frame adds the bar.
+    EXPECT_FLOAT_EQ(editor.workspace()->frameProxy()->bounds().width(), 380.0f);
+    EXPECT_FLOAT_EQ(editor.workspace()->frameProxy()->bounds().height(), 574.0f + newui::FrameProxy::kTitleBarHeight);
+    EXPECT_FLOAT_EQ(editor.workspace()->rootViewProxy()->bounds().width(), 380.0f);
+    EXPECT_FLOAT_EQ(editor.workspace()->rootViewProxy()->bounds().height(), 574.0f);
+
+    // New goes back to the default blank-document size.
+    editor.workspace()->newButton()->onClick(*editor.workspace()->newButton());
+    EXPECT_FLOAT_EQ(editor.workspace()->frameProxy()->bounds().width(), CodeToolsVsix::Workspace::kDefaultCanvasWidth);
+    EXPECT_FLOAT_EQ(editor.workspace()->frameProxy()->bounds().height(), CodeToolsVsix::Workspace::kDefaultCanvasHeight);
+}
+
+TEST_F(DesignerEditorFileFixture, LoadingAnUnreadableFileLeavesTheOpenDocumentUntouched)
+{
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+    editor.workspace()->rootViewProxy()->addChild(new newui::SubView());
+
+    writeFile("{ this is not valid json5 ");
+    std::wstring path = filePath();
+    EXPECT_FALSE(editor.load(path.c_str(), path.size()));
+
+    EXPECT_EQ(editor.workspace()->rootViewProxy()->childViews().size(), 1u);
+}
+
+TEST_F(DesignerEditorFileFixture, LoadAdoptsThePathAndLeavesTheDocumentCleanThenNewResetsBoth)
+{
+    writeFile(R"({ type: "Frame", rootView: { type: "RootView", childViews: [ { type: "SubView", name: "c" } ] } })");
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+
+    std::wstring path = filePath();
+    ASSERT_TRUE(editor.load(path.c_str(), path.size()));
+    EXPECT_EQ(editor.document().filePath(), path_);
+    EXPECT_FALSE(editor.isDirty());
+
+    editor.markDirty();
+    EXPECT_TRUE(editor.isDirty());
+    EXPECT_TRUE(editor.document().isModified());
+
+    // Dirty, so New prompts - answer Discard (the default prompt is a blocking message box).
+    editor.documentController().setUnsavedChangesHandler([](newui::Document&) {
+        return newui::UnsavedChangesChoice::Discard;
+    });
+    editor.workspace()->newButton()->onClick(*editor.workspace()->newButton());
+    EXPECT_FALSE(editor.document().hasFilePath());
+    EXPECT_FALSE(editor.isDirty());
+}
+
+TEST_F(DesignerEditorFileFixture, NewOverAModifiedDocumentKeepsItWhenTheUserCancels)
+{
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+    int prompts = 0;
+    editor.documentController().setUnsavedChangesHandler([&](newui::Document&) {
+        ++prompts;
+        return newui::UnsavedChangesChoice::Cancel;
+    });
+    editor.workspace()->rootViewProxy()->addChild(new newui::SubView());
+    editor.markDirty();
+
+    editor.workspace()->newButton()->onClick(*editor.workspace()->newButton());
+
+    EXPECT_EQ(prompts, 1);
+    EXPECT_EQ(editor.workspace()->rootViewProxy()->childViews().size(), 1u);
+    EXPECT_TRUE(editor.isDirty());
+}
+
+TEST_F(DesignerEditorFileFixture, NewOverAModifiedDocumentClearsItWhenTheUserDiscards)
+{
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+    editor.documentController().setUnsavedChangesHandler([](newui::Document&) {
+        return newui::UnsavedChangesChoice::Discard;
+    });
+    editor.workspace()->rootViewProxy()->addChild(new newui::SubView());
+    editor.markDirty();
+
+    editor.workspace()->newButton()->onClick(*editor.workspace()->newButton());
+
+    EXPECT_TRUE(editor.workspace()->rootViewProxy()->childViews().empty());
+    EXPECT_FALSE(editor.isDirty());
+    EXPECT_FALSE(editor.document().hasFilePath());
+}
+
+TEST_F(DesignerEditorFileFixture, NewOverAModifiedDocumentSavesFirstWhenTheUserChoosesSave)
+{
+    writeFile(R"({ type: "Frame", rootView: { type: "RootView" } })");
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+    std::wstring path = filePath();
+    ASSERT_TRUE(editor.load(path.c_str(), path.size()));
+
+    editor.workspace()->rootViewProxy()->addChild(new newui::SubView());
+    editor.markDirty();
+    editor.documentController().setUnsavedChangesHandler([](newui::Document&) {
+        return newui::UnsavedChangesChoice::Save;
+    });
+
+    editor.workspace()->newButton()->onClick(*editor.workspace()->newButton());
+
+    EXPECT_TRUE(editor.workspace()->rootViewProxy()->childViews().empty());
+    newui::Frame reloaded;
+    ASSERT_TRUE(newui::Bundle::instance().loadFrameFromFile(reloaded, path_));
+    EXPECT_EQ(reloaded.rootView().childViews().size(), 1u);  // the child added before New was saved
+}
+
+TEST_F(DesignerEditorFileFixture, FirstSaveOverAnExistingFileKeepsTheOriginalAsABakCopy)
+{
+    const std::string original = R"(// hand-written header comment
+{ type: "Frame", rootView: { type: "RootView" } })";
+    writeFile(original);
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+    std::wstring path = filePath();
+    ASSERT_TRUE(editor.load(path.c_str(), path.size()));
+
+    ASSERT_TRUE(editor.save(path.c_str(), path.size()));
+
+    std::ifstream bak(path_ + ".bak", std::ios::binary);
+    ASSERT_TRUE(bak.is_open());
+    std::string bakText((std::istreambuf_iterator<char>(bak)), std::istreambuf_iterator<char>());
+    bak.close();
+    EXPECT_EQ(bakText, original);
+    ::DeleteFileA((path_ + ".bak").c_str());
+}
+
 TEST_F(DesignerEditorFileFixture, SaveFailsWhenTheContainingDirectoryDoesNotExist)
 {
     newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
@@ -1480,4 +1669,480 @@ TEST(DesignerEditor, PropertiesParentPickerNeverOffersTheSelectedViewsOwnDescend
     const std::string* text = std::any_cast<std::string>(&value);
     ASSERT_NE(text, nullptr);
     EXPECT_EQ(*text, surface->name());
+}
+
+// ---------------------------------------------------------------------------
+// Toolbox drag-and-drop onto the design surface: dropToolboxEntryAt() is what the surface's
+// DropTarget calls (after reading the cursor) - driven directly here, no real OLE drag.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+    std::wstring toolboxPayload(const std::string& displayName)
+    {
+        const auto& categories = CodeToolsVsix::ToolboxRegistry::categories();
+        for (std::size_t c = 0; c < categories.size(); ++c) {
+            for (std::size_t e = 0; e < categories[c].entries.size(); ++e) {
+                if (categories[c].entries[e].displayName == displayName) {
+                    return CodeToolsVsix::Toolbox::dragPayloadFor(c, e);
+                }
+            }
+        }
+        return std::wstring();
+    }
+}
+
+TEST(DesignerEditorToolboxDrop, DroppingOntoAContainerNestsItThereAtTheDropPointAndIsUndoable)
+{
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&root);
+    root.setBounds(newui::Rect(0, 0, 1400, 700));
+    newui::RootViewProxy* surface = editor.workspace()->rootViewProxy();
+
+    auto* container = new newui::SubView();
+    container->setVisible(true);
+    container->setBounds(newui::Rect(10, 10, 300, 200));
+    container->setLayout(std::make_unique<newui::AnchorLayout>());
+    surface->addChild(container);
+    ASSERT_FALSE(editor.isDirty());
+
+    newui::Rect containerRoot = CodeToolsVsix::SelectionOverlay::boundsInRootView(container);
+    newui::Point dropPt(containerRoot.left() + 40.0f, containerRoot.top() + 25.0f);
+    ASSERT_TRUE(editor.dropToolboxEntryAt(toolboxPayload("Button"), dropPt));
+
+    ASSERT_EQ(container->childViews().size(), 1u);
+    newui::SubView* created = container->childViews()[0];
+    EXPECT_TRUE(created->isDesignTime());
+    EXPECT_TRUE(created->isVisible());
+    EXPECT_FLOAT_EQ(created->bounds().left(), 40.0f);   // container-local, top-left at the drop point
+    EXPECT_FLOAT_EQ(created->bounds().top(), 25.0f);
+    EXPECT_FLOAT_EQ(created->bounds().width(), CodeToolsVsix::Workspace::kNewControlDefaultWidth);
+    EXPECT_FLOAT_EQ(created->bounds().height(), CodeToolsVsix::Workspace::kNewControlDefaultHeight);
+    EXPECT_TRUE(editor.isDirty());
+    EXPECT_EQ(editor.viewDesignerModel().childCount({0, 0}), 1u);  // Outline refreshed
+
+    ASSERT_TRUE(editor.undoStack().canUndo());
+    EXPECT_EQ(editor.undoStack().undoDescription(), "Add Button");
+    editor.undoStack().undo();
+    EXPECT_TRUE(container->childViews().empty());
+    EXPECT_EQ(editor.viewDesignerModel().childCount({0, 0}), 0u);
+
+    editor.undoStack().redo();
+    ASSERT_EQ(container->childViews().size(), 1u);
+    EXPECT_EQ(container->childViews()[0], created);
+}
+
+TEST(DesignerEditorToolboxDrop, DroppingOnEmptySurfaceAddsToTheRootViewProxyAtTheDropPoint)
+{
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&root);
+    root.setBounds(newui::Rect(0, 0, 1400, 700));
+    newui::RootViewProxy* surface = editor.workspace()->rootViewProxy();
+
+    newui::Rect surfaceRoot = CodeToolsVsix::SelectionOverlay::boundsInRootView(surface);
+    newui::Point dropPt(surfaceRoot.left() + 60.0f, surfaceRoot.top() + 70.0f);
+    ASSERT_TRUE(editor.dropToolboxEntryAt(toolboxPayload("Button"), dropPt));
+
+    ASSERT_EQ(surface->childViews().size(), 1u);
+    EXPECT_FLOAT_EQ(surface->childViews()[0]->bounds().left(), 60.0f);
+    EXPECT_FLOAT_EQ(surface->childViews()[0]->bounds().top(), 70.0f);
+}
+
+TEST(DesignerEditorToolboxDrop, DroppingIntoAFlexContainerInsertsAtTheIndexTheDropPointFallsAt)
+{
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&root);
+    root.setBounds(newui::Rect(0, 0, 1400, 700));
+    newui::RootViewProxy* surface = editor.workspace()->rootViewProxy();
+
+    auto* column = new newui::SubView();
+    column->setVisible(true);
+    column->setBounds(newui::Rect(10, 10, 100, 300));
+    column->setLayout(std::make_unique<newui::FlexLayout>(newui::Orientation::Vertical));
+    surface->addChild(column);
+    auto* first = new newui::SubView();
+    first->setVisible(true);
+    first->setBounds(newui::Rect(0, 0, 100, 30));
+    column->addChild(first);
+    auto* second = new newui::SubView();
+    second->setVisible(true);
+    second->setBounds(newui::Rect(0, 30, 100, 30));
+    column->addChild(second);
+
+    newui::Rect columnRoot = CodeToolsVsix::SelectionOverlay::boundsInRootView(column);
+    // Dropped control's own center (drop y + half its default height) lands between the two
+    // existing children's centers -> insertion index 1.
+    newui::Point dropPt(columnRoot.left() + 10.0f, columnRoot.top() + 14.0f);
+    ASSERT_TRUE(editor.dropToolboxEntryAt(toolboxPayload("Button"), dropPt));
+
+    ASSERT_EQ(column->childViews().size(), 3u);
+    EXPECT_EQ(column->childViews()[0], first);
+    EXPECT_EQ(column->childViews()[2], second);
+    EXPECT_NE(column->childViews()[1], first);
+    EXPECT_NE(column->childViews()[1], second);
+}
+
+TEST(DesignerEditorToolboxDrop, ADropOffTheSurfaceOrOfForeignTextChangesNothing)
+{
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&root);
+    root.setBounds(newui::Rect(0, 0, 1400, 700));
+    newui::RootViewProxy* surface = editor.workspace()->rootViewProxy();
+    newui::Rect surfaceRoot = CodeToolsVsix::SelectionOverlay::boundsInRootView(surface);
+
+    // Off the design surface entirely (well left of it, in the toolbox's own area).
+    EXPECT_FALSE(editor.dropToolboxEntryAt(toolboxPayload("Button"), newui::Point(2.0f, 2.0f)));
+    // On the surface, but not a Toolbox payload.
+    newui::Point onSurface(surfaceRoot.left() + 30.0f, surfaceRoot.top() + 30.0f);
+    EXPECT_FALSE(editor.dropToolboxEntryAt(L"some other text", onSurface));
+
+    EXPECT_TRUE(surface->childViews().empty());
+    EXPECT_FALSE(editor.undoStack().canUndo());
+    EXPECT_FALSE(editor.isDirty());
+}
+
+TEST(DesignerEditorToolboxDrop, TheDesignSurfaceHasATextDropTargetWired)
+{
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&root);
+
+    newui::DropTarget* target = editor.workspace()->rootViewProxy()->dropTarget();
+    ASSERT_NE(target, nullptr);
+    EXPECT_FALSE(target->onTextDroppedAt.empty());
+    EXPECT_FALSE(target->onTextDragOver.empty());
+    EXPECT_FALSE(target->onDragLeave.empty());
+}
+
+// ---- Hover feedback while a Toolbox drag is over the surface ----
+
+namespace
+{
+    // A designer with an AnchorLayout container at (10,10) 300x200 and a vertical FlexLayout column
+    // at (400,10) 100x300 holding two 30px-tall children; root-space points computed from them.
+    struct HoverFixture
+    {
+        newui::RootView root{nullptr, newui::Rect(0, 0, 10, 10), "designerRoot"};
+        CodeToolsVsix::DesignerEditor editor{&root};
+        newui::RootViewProxy* surface = nullptr;
+        newui::SubView* anchorBox = nullptr;
+        newui::SubView* column = nullptr;
+
+        HoverFixture()
+        {
+            root.setBounds(newui::Rect(0, 0, 1400, 700));
+            surface = editor.workspace()->rootViewProxy();
+
+            anchorBox = new newui::SubView();
+            anchorBox->setVisible(true);
+            anchorBox->setBounds(newui::Rect(10, 10, 300, 200));
+            anchorBox->setLayout(std::make_unique<newui::AnchorLayout>());
+            surface->addChild(anchorBox);
+
+            column = new newui::SubView();
+            column->setVisible(true);
+            column->setBounds(newui::Rect(400, 10, 100, 300));
+            column->setLayout(std::make_unique<newui::FlexLayout>(newui::Orientation::Vertical));
+            surface->addChild(column);
+            for (float y : { 0.0f, 30.0f }) {
+                auto* child = new newui::SubView();
+                child->setVisible(true);
+                child->setBounds(newui::Rect(0, y, 100, 30));
+                column->addChild(child);
+            }
+        }
+
+        newui::Point inAnchorBox(float x, float y) const
+        {
+            newui::Rect r = CodeToolsVsix::SelectionOverlay::boundsInRootView(anchorBox);
+            return newui::Point(r.left() + x, r.top() + y);
+        }
+        newui::Point inColumn(float x, float y) const
+        {
+            newui::Rect r = CodeToolsVsix::SelectionOverlay::boundsInRootView(column);
+            return newui::Point(r.left() + x, r.top() + y);
+        }
+    };
+}
+
+TEST(DesignerEditorToolboxHover, OverAFreePositionContainerHighlightsItAndShowsAGhostAtTheDropPoint)
+{
+    HoverFixture f;
+    ASSERT_TRUE(f.editor.hoverToolboxEntryAt(toolboxPayload("Button"), f.inAnchorBox(40, 25)));
+
+    EXPECT_EQ(f.editor.toolboxHoverTarget(), f.anchorBox);
+    std::optional<newui::Rect> ghost = f.editor.toolboxHoverGhostRect();
+    ASSERT_TRUE(ghost.has_value());
+    newui::Rect boxRoot = CodeToolsVsix::SelectionOverlay::boundsInRootView(f.anchorBox);
+    EXPECT_FLOAT_EQ(ghost->left(), boxRoot.left() + 40.0f);
+    EXPECT_FLOAT_EQ(ghost->top(), boxRoot.top() + 25.0f);
+    EXPECT_FLOAT_EQ(ghost->size().width, CodeToolsVsix::Workspace::kNewControlDefaultWidth);
+
+    // Hovering creates nothing and pushes no undo step.
+    EXPECT_EQ(f.anchorBox->childViews().size(), 0u);
+    EXPECT_FALSE(f.editor.undoStack().canUndo());
+
+    f.editor.endToolboxHover();
+    EXPECT_EQ(f.editor.toolboxHoverTarget(), nullptr);
+    EXPECT_FALSE(f.editor.toolboxHoverGhostRect().has_value());
+}
+
+TEST(DesignerEditorToolboxHover, OverAFlexContainerResolvesTheInsertionIndexAndNeedsNoGhost)
+{
+    HoverFixture f;
+    ASSERT_TRUE(f.editor.hoverToolboxEntryAt(toolboxPayload("Button"), f.inColumn(10, 14)));
+
+    EXPECT_EQ(f.editor.toolboxHoverTarget(), f.column);
+    EXPECT_FALSE(f.editor.toolboxHoverGhostRect().has_value());  // the insertion line is the cue
+    const CodeToolsVsix::GeometryEditResult* result = f.editor.toolboxHoverResult();
+    ASSERT_NE(result, nullptr);
+    EXPECT_EQ(result->kind, CodeToolsVsix::GeometryEditKind::LinearReorder);
+    EXPECT_EQ(result->targetSiblingIndex, 1u);  // same point the drop test above inserts at
+}
+
+TEST(DesignerEditorToolboxHover, ForeignTextOrOffTheSurfaceIsRefusedAndClearsEarlierFeedback)
+{
+    HoverFixture f;
+    ASSERT_TRUE(f.editor.hoverToolboxEntryAt(toolboxPayload("Button"), f.inAnchorBox(40, 25)));
+    ASSERT_NE(f.editor.toolboxHoverTarget(), nullptr);
+
+    EXPECT_FALSE(f.editor.hoverToolboxEntryAt(L"some other text", f.inAnchorBox(40, 25)));
+    EXPECT_EQ(f.editor.toolboxHoverTarget(), nullptr);
+
+    ASSERT_TRUE(f.editor.hoverToolboxEntryAt(toolboxPayload("Button"), f.inAnchorBox(40, 25)));
+    EXPECT_FALSE(f.editor.hoverToolboxEntryAt(toolboxPayload("Button"), newui::Point(2.0f, 2.0f)));
+    EXPECT_EQ(f.editor.toolboxHoverTarget(), nullptr);
+}
+
+// The whole path a real drag takes, minus only the OS's DoDragDrop loop: newui's COMDropTarget
+// negotiating the cursor effect, feeding hover positions, and delivering leave/drop.
+TEST(DesignerEditorToolboxHover, ThroughARealCOMDropTargetTheHoverNegotiatesEffectsAndAdropCreatesTheControl)
+{
+    HoverFixture f;
+    auto comDropTarget = Microsoft::WRL::Make<newui::COMDropTarget>(f.root);
+    auto payload = Microsoft::WRL::Make<newui::TextDataObject>(toolboxPayload("Button"));
+    auto foreign = Microsoft::WRL::Make<newui::TextDataObject>(L"just some text");
+
+    DWORD effect = DROPEFFECT_COPY;
+    comDropTarget->dragEnterAt(payload.Get(), f.inAnchorBox(40, 25), &effect);
+    EXPECT_EQ(effect, static_cast<DWORD>(DROPEFFECT_COPY));
+    EXPECT_EQ(f.editor.toolboxHoverTarget(), f.anchorBox);
+
+    effect = DROPEFFECT_COPY;
+    comDropTarget->dragOverAt(f.inColumn(10, 14), &effect);  // moved into the flex column
+    EXPECT_EQ(effect, static_cast<DWORD>(DROPEFFECT_COPY));
+    EXPECT_EQ(f.editor.toolboxHoverTarget(), f.column);
+
+    effect = DROPEFFECT_COPY;
+    comDropTarget->dragOverAt(newui::Point(2.0f, 2.0f), &effect);  // off the surface entirely
+    EXPECT_EQ(effect, static_cast<DWORD>(DROPEFFECT_NONE));
+    EXPECT_EQ(f.editor.toolboxHoverTarget(), nullptr);
+
+    effect = DROPEFFECT_COPY;
+    comDropTarget->dragOverAt(f.inAnchorBox(40, 25), &effect);
+    ASSERT_EQ(f.editor.toolboxHoverTarget(), f.anchorBox);
+    comDropTarget->DragLeave();  // e.g. Escape
+    EXPECT_EQ(f.editor.toolboxHoverTarget(), nullptr);
+
+    // Foreign text over the surface: the surface accepts text, but its hover handler refuses.
+    effect = DROPEFFECT_COPY;
+    comDropTarget->dragEnterAt(foreign.Get(), f.inAnchorBox(40, 25), &effect);
+    EXPECT_EQ(effect, static_cast<DWORD>(DROPEFFECT_NONE));
+    EXPECT_EQ(f.editor.toolboxHoverTarget(), nullptr);
+    comDropTarget->DragLeave();
+
+    // A real drop: ends the hover and creates the control at the drop point.
+    effect = DROPEFFECT_COPY;
+    comDropTarget->dragEnterAt(payload.Get(), f.inAnchorBox(40, 25), &effect);
+    ASSERT_EQ(f.editor.toolboxHoverTarget(), f.anchorBox);
+    effect = DROPEFFECT_COPY;
+    comDropTarget->dropAt(payload.Get(), f.inAnchorBox(40, 25), &effect);
+    EXPECT_EQ(f.editor.toolboxHoverTarget(), nullptr);
+    ASSERT_EQ(f.anchorBox->childViews().size(), 1u);
+    EXPECT_FLOAT_EQ(f.anchorBox->childViews()[0]->bounds().left(), 40.0f);
+    EXPECT_FLOAT_EQ(f.anchorBox->childViews()[0]->bounds().top(), 25.0f);
+}
+
+// Real bug: during a real drag Windows runs its own modal loop (DoDragDrop), and RootView::
+// markDirty() only *schedules* the repaint on the app's RunLoop idle queue - which doesn't run until
+// that loop ends. So every hover change has to repaint synchronously, or the cues only show up
+// after the drag is already over. Unchanged hovers (DragOver also fires on a timer) must not
+// repaint the whole window each time.
+TEST(DesignerEditorToolboxHover, HoverChangesRepaintSynchronouslyAndAnUnchangedHoverDoesNot)
+{
+    HoverFixture f;
+    int redraws = 0;
+    f.root.onRedrawNeeded.add([&redraws](newui::RootView&) {
+        ++redraws;
+        return newui::SyncReturn::Ignored;
+    });
+
+    ASSERT_TRUE(f.editor.hoverToolboxEntryAt(toolboxPayload("Button"), f.inAnchorBox(40, 25)));
+    EXPECT_EQ(redraws, 1);  // entering repaints right now, not "later on idle"
+
+    ASSERT_TRUE(f.editor.hoverToolboxEntryAt(toolboxPayload("Button"), f.inAnchorBox(40, 25)));
+    EXPECT_EQ(redraws, 1);  // same spot again (the periodic DragOver): nothing changed
+
+    ASSERT_TRUE(f.editor.hoverToolboxEntryAt(toolboxPayload("Button"), f.inAnchorBox(80, 60)));
+    EXPECT_EQ(redraws, 2);  // the ghost moved
+
+    ASSERT_TRUE(f.editor.hoverToolboxEntryAt(toolboxPayload("Button"), f.inColumn(10, 14)));
+    EXPECT_EQ(redraws, 3);  // different container
+
+    f.editor.endToolboxHover();
+    EXPECT_EQ(redraws, 4);  // leaving repaints right now too, so the cues actually disappear
+    f.editor.endToolboxHover();
+    EXPECT_EQ(redraws, 4);  // nothing was showing
+}
+
+// Real pixels: the hover's ghost has to actually be painted by the overlay - including with
+// nothing selected, which SelectionOverlay::paint() used to bail out on.
+TEST(DesignerEditorToolboxHover, TheGhostOutlineIsActuallyPaintedByTheOverlayWithNothingSelected)
+{
+    HoverFixture f;
+    ASSERT_EQ(f.editor.viewDesignerController().primary(), nullptr);
+    ASSERT_NE(f.root.overlay(), nullptr);
+    ASSERT_TRUE(f.editor.hoverToolboxEntryAt(toolboxPayload("Button"), f.inAnchorBox(40, 25)));
+    newui::Rect ghost = *f.editor.toolboxHoverGhostRect();
+
+    BLImage image(1400, 700, BL_FORMAT_PRGB32);
+    {
+        BLContext ctx(image);
+        ctx.clear_all();
+        f.root.overlay()->paint(ctx, newui::Rect(0, 0, 1400, 700));
+        ctx.end();
+    }
+    BLImageData data{};
+    ASSERT_EQ(image.get_data(&data), BL_SUCCESS);
+
+    // Some pixel in a small band around the ghost's left edge mid-height must be the green
+    // "valid drop" stroke (G clearly above R and B).
+    bool foundGreen = false;
+    int y = static_cast<int>(ghost.top() + ghost.size().height * 0.5f);
+    for (int x = static_cast<int>(ghost.left()) - 2; x <= static_cast<int>(ghost.left()) + 2; ++x) {
+        const auto* row = static_cast<const std::uint8_t*>(data.pixel_data) + y * data.stride;
+        std::uint32_t px = reinterpret_cast<const std::uint32_t*>(row)[x];
+        std::uint32_t g = (px >> 8) & 0xFF, r = (px >> 16) & 0xFF, b = px & 0xFF;
+        if (g > r + 40 && g > b + 20) {
+            foundGreen = true;
+        }
+    }
+    EXPECT_TRUE(foundGreen);
+
+    // ...and once the hover ends, the same paint leaves no ghost behind.
+    f.editor.endToolboxHover();
+    BLImage after(1400, 700, BL_FORMAT_PRGB32);
+    {
+        BLContext ctx(after);
+        ctx.clear_all();
+        f.root.overlay()->paint(ctx, newui::Rect(0, 0, 1400, 700));
+        ctx.end();
+    }
+    BLImageData afterData{};
+    ASSERT_EQ(after.get_data(&afterData), BL_SUCCESS);
+    const auto* afterRow = static_cast<const std::uint8_t*>(afterData.pixel_data) + y * afterData.stride;
+    for (int x = static_cast<int>(ghost.left()) - 2; x <= static_cast<int>(ghost.left()) + 2; ++x) {
+        EXPECT_EQ(reinterpret_cast<const std::uint32_t*>(afterRow)[x] >> 24, 0u) << "x=" << x;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ComponentEditor verbs (right-click context menu) - the native popup itself blocks on real
+// input, so the tests drive createComponentEditorFor() directly, which is everything the menu's
+// items call.
+// ---------------------------------------------------------------------------
+
+TEST(DesignerEditorComponentEditor, ATabControlsAddTabVerbIsUndoableRefreshesTheOutlineAndMarksDirty)
+{
+    CodeToolsVsix::ComponentEditorRegistry::instance().registerBuiltinEditors();
+
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&root);
+    root.setBounds(newui::Rect(0, 0, 1400, 700));
+    newui::RootViewProxy* surface = editor.workspace()->rootViewProxy();
+
+    auto* tabs = new newui::TabControl();
+    tabs->setBounds(newui::Rect(10, 10, 300, 200));
+    surface->addChild(tabs);
+    editor.viewDesignerModel().refresh();
+    ASSERT_FALSE(editor.isDirty());
+
+    auto verbs = editor.createComponentEditorFor(tabs);
+    ASSERT_NE(verbs, nullptr);
+    verbs->executeVerb(0);
+
+    EXPECT_EQ(tabs->tabCount(), 1u);
+    EXPECT_TRUE(editor.isDirty());
+    ASSERT_TRUE(editor.undoStack().canUndo());
+    EXPECT_EQ(editor.undoStack().undoDescription(), "Add Tab");
+    editor.undoStack().undo();
+    EXPECT_EQ(tabs->tabCount(), 0u);
+}
+
+TEST(DesignerEditorComponentEditor, AClassWithNoRegisteredEditorYieldsNone)
+{
+    CodeToolsVsix::ComponentEditorRegistry::instance().registerBuiltinEditors();
+
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&root);
+    newui::SubView plain;
+
+    EXPECT_EQ(editor.createComponentEditorFor(&plain), nullptr);
+    EXPECT_EQ(editor.createComponentEditorFor(nullptr), nullptr);
+}
+
+TEST(DesignerEditorComponentEditor, InternalAndReadOnlyViewsGetNoComponentEditor)
+{
+    CodeToolsVsix::ComponentEditorRegistry::instance().registerBuiltinEditors();
+
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&root);
+    auto* tabs = new newui::TabControl();
+
+    ASSERT_NE(editor.createComponentEditorFor(tabs), nullptr);
+    tabs->setDesignTimeFlag(newui::DesignTimeFlags::ReadOnly);
+    EXPECT_EQ(editor.createComponentEditorFor(tabs), nullptr);
+    tabs->setDesignTimeFlags(newui::DesignTimeFlags::Internal);
+    EXPECT_EQ(editor.createComponentEditorFor(tabs), nullptr);
+
+    tabs->destroy();
+    delete tabs;
+}
+
+// Tabs added through the designer's "Add Tab" verb come back, with their labels, after Save + reopen.
+TEST_F(DesignerEditorFileFixture, TabsAddedInTheDesignerSurviveSaveAndReopen)
+{
+    CodeToolsVsix::ComponentEditorRegistry::instance().registerBuiltinEditors();
+    std::wstring path = filePath();
+    {
+        newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+        CodeToolsVsix::DesignerEditor editor(&root);
+        root.setBounds(newui::Rect(0, 0, 1400, 700));
+        auto* tabs = new newui::TabControl();
+        tabs->setBounds(newui::Rect(10, 10, 300, 200));
+        editor.workspace()->rootViewProxy()->addChild(tabs);
+        auto verbs = editor.createComponentEditorFor(tabs);
+        verbs->executeVerb(0);
+        verbs->executeVerb(0);
+        static_cast<newui::TabPage*>(tabs->page(1))->setTitle("Second");
+        ASSERT_EQ(tabs->tabCount(), 2u);
+        ASSERT_TRUE(editor.save(path.c_str(), path.size()));
+    }
+
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&root);
+    root.setBounds(newui::Rect(0, 0, 1400, 700));
+    ASSERT_TRUE(editor.load(path.c_str(), path.size()));
+
+    newui::RootViewProxy* surface = editor.workspace()->rootViewProxy();
+    ASSERT_EQ(surface->childViews().size(), 1u);
+    auto* tabs = dynamic_cast<newui::TabControl*>(surface->childViews()[0]);
+    ASSERT_NE(tabs, nullptr);
+    EXPECT_EQ(tabs->childViews().size(), 2u);  // strip + pages area, nothing duplicated
+    ASSERT_EQ(tabs->tabCount(), 2u);
+    EXPECT_EQ(tabs->tabButton(0)->name(), "Tab 1");
+    EXPECT_EQ(tabs->tabButton(1)->name(), "Second");
+    EXPECT_NE(dynamic_cast<newui::TabPage*>(tabs->page(0)), nullptr);
+
+    // The outline shows just the two pages under the control.
+    EXPECT_EQ(editor.viewDesignerModel().childCount(std::vector<std::size_t>{0, 0}), 2u);
 }

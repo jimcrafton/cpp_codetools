@@ -34,6 +34,7 @@ add_executable(nativeeditcontrols_tests
     test_toolbox.cpp
     test_view_style_registry.cpp
     test_callout_placement.cpp
+    test_color_choices.cpp
     test_view_designer_controller.cpp
     test_view_designer_model.cpp
     test_properties_model.cpp
@@ -49,6 +50,7 @@ add_executable(nativeeditcontrols_tests
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/ColorPicker.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/ColorEditorDialog.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/PaintUtils.cpp"
+    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/ColorChoices.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/ComponentEditor.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/ToolboxRegistry.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/Toolbox.cpp"

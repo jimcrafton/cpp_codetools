@@ -158,3 +158,100 @@ TEST(Toolbox, DoubleClickingASelectedCategoryHeaderDoesNothing) {
     EXPECT_EQ(activated, nullptr);
     delete toolbox;
 }
+
+// ---- Drag source / drop payload ----
+
+namespace
+{
+    // The (category, entry) indices of the first registry entry named displayName.
+    bool findEntry(const std::string& displayName, std::size_t& categoryIndex, std::size_t& entryIndex)
+    {
+        const auto& categories = CodeToolsVsix::ToolboxRegistry::categories();
+        for (categoryIndex = 0; categoryIndex < categories.size(); ++categoryIndex) {
+            for (entryIndex = 0; entryIndex < categories[categoryIndex].entries.size(); ++entryIndex) {
+                if (categories[categoryIndex].entries[entryIndex].displayName == displayName) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+}
+
+TEST(ToolboxDragPayload, EveryRegistryEntryRoundTripsToWhateverItsOwnFactoryProduces)
+{
+    // Some entries' factories can legitimately yield nothing (double-click ignores those too), so
+    // the payload path must agree with the factory entry by entry rather than always succeed.
+    const auto& categories = CodeToolsVsix::ToolboxRegistry::categories();
+    std::size_t roundTripped = 0;
+    for (std::size_t c = 0; c < categories.size(); ++c) {
+        for (std::size_t e = 0; e < categories[c].entries.size(); ++e) {
+            newui::SubView* direct = categories[c].entries[e].factory();
+            newui::SubView* viaPayload = CodeToolsVsix::Toolbox::createFromDragPayload(
+                CodeToolsVsix::Toolbox::dragPayloadFor(c, e));
+            EXPECT_EQ(direct != nullptr, viaPayload != nullptr) << categories[c].entries[e].displayName;
+            if (viaPayload != nullptr) {
+                ++roundTripped;
+                EXPECT_EQ(typeid(*direct), typeid(*viaPayload)) << categories[c].entries[e].displayName;
+            }
+            for (newui::SubView* view : { direct, viaPayload }) {
+                if (view != nullptr) {
+                    view->destroy();
+                    delete view;
+                }
+            }
+        }
+    }
+    EXPECT_GT(roundTripped, 0u);
+}
+
+// Real bug: TabControl's only constructor is `explicit TabControl(TabAlignment = Top)`, and
+// reflectgen registered just the one-argument form, so its factory (createInstance() with no
+// arguments) produced nothing - a Toolbox double-click or drag of it silently did nothing. Every
+// listed entry has to actually produce a control.
+TEST(ToolboxRegistryFactories, EveryEntryProducesAControl)
+{
+    const auto& categories = CodeToolsVsix::ToolboxRegistry::categories();
+    for (const auto& category : categories) {
+        for (const auto& entry : category.entries) {
+            newui::SubView* created = entry.factory();
+            EXPECT_NE(created, nullptr) << category.displayName << " / " << entry.displayName;
+            if (created != nullptr) {
+                created->destroy();
+                delete created;
+            }
+        }
+    }
+}
+
+TEST(ToolboxDragPayload, RejectsForeignTextAndOutOfRangeOrMalformedPayloads)
+{
+    using CodeToolsVsix::Toolbox;
+    EXPECT_EQ(Toolbox::createFromDragPayload(L"just some dragged text"), nullptr);
+    EXPECT_EQ(Toolbox::createFromDragPayload(L""), nullptr);
+    EXPECT_EQ(Toolbox::createFromDragPayload(L"codetools-toolbox-entry:"), nullptr);
+    EXPECT_EQ(Toolbox::createFromDragPayload(L"codetools-toolbox-entry:0"), nullptr);
+    EXPECT_EQ(Toolbox::createFromDragPayload(L"codetools-toolbox-entry:x:y"), nullptr);
+    EXPECT_EQ(Toolbox::createFromDragPayload(L"codetools-toolbox-entry:999:0"), nullptr);
+    EXPECT_EQ(Toolbox::createFromDragPayload(L"codetools-toolbox-entry:0:999"), nullptr);
+}
+
+TEST(ToolboxDragSource, ProvidesThePayloadOfTheSelectedEntryButNotForACategoryHeaderOrNothing)
+{
+    CodeToolsVsix::Toolbox toolbox;
+    newui::DropSource* source = toolbox.treeView()->dragSource();
+    ASSERT_NE(source, nullptr);
+    ASSERT_FALSE(source->onProvideText.empty());
+
+    std::wstring text;
+    EXPECT_FALSE(source->onProvideText.syncCallFirst(*source, text).handled());  // nothing selected
+
+    toolbox.treeView()->setSelectedPath(std::vector<std::size_t>{0});  // a category header
+    EXPECT_FALSE(source->onProvideText.syncCallFirst(*source, text).handled());
+
+    std::size_t c = 0, e = 0;
+    ASSERT_TRUE(findEntry("Button", c, e));
+    toolbox.treeView()->setSelectedPath(std::vector<std::size_t>{c, e});
+    EXPECT_TRUE(source->onProvideText.syncCallFirst(*source, text).handled());
+    EXPECT_EQ(text, CodeToolsVsix::Toolbox::dragPayloadFor(c, e));
+}

@@ -145,10 +145,10 @@ namespace CodeToolsVsix
 
     void SelectionOverlay::paint(BLContext& ctx, const newui::Rect& /*rect*/)
     {
+        // No early return on an empty selection: a Toolbox drag hovering over the surface paints
+        // its cues below with nothing selected. (The selection-only sections just loop over / test
+        // an empty selection.)
         const std::vector<newui::SubView*>& selected = controller_.selected();
-        if (selected.empty()) {
-            return;
-        }
 
         BLRgba32 accent = newui::UIColorManager::colorFor(newui::UIColorRole::HighlightBackground).toBLRgba32();
 
@@ -212,6 +212,17 @@ namespace CodeToolsVsix
                 if (target != nullptr) {
                     paintReparentTargetHighlight(ctx, boundsInRootView(target));
                 }
+            }
+        }
+
+        // "A new control would land here" outline for a Toolbox drag over a free-position target.
+        if (dropGhostProvider_) {
+            if (std::optional<newui::Rect> ghost = dropGhostProvider_()) {
+                ctx.set_fill_style(BLRgba32(0x10, 0xB9, 0x81, 0x30));
+                ctx.fill_rect(BLRect(ghost->left(), ghost->top(), ghost->size().width, ghost->size().height));
+                ctx.set_stroke_style(kReparentTargetColor);
+                ctx.set_stroke_width(kReparentTargetBoxWidth);
+                ctx.stroke_box(ghost->left(), ghost->top(), ghost->right(), ghost->bottom());
             }
         }
 

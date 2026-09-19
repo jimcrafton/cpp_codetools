@@ -20,6 +20,8 @@
 #include <newui/view.h>
 #include <newui/viewstyle.h>
 
+namespace newui { class DropDownList; }
+
 namespace CodeToolsVsix
 {
     // Design-time editor for one newui::reflection::Property on one live
@@ -29,7 +31,9 @@ namespace CodeToolsVsix
     class PropertyEditor
     {
     public:
-        enum class EditStyle { None, Dropdown, Dialog, SubProperties };
+        // DropdownAndDialog: a dropdown of preset choices in the value cell *and* a "..." button
+        // opening edit() for anything the presets don't cover (ColorPropertyEditor).
+        enum class EditStyle { None, Dropdown, Dialog, SubProperties, DropdownAndDialog };
 
         PropertyEditor(const newui::reflection::Property* property, void* instance)
             : property_(property), instance_(instance) {}
@@ -51,7 +55,29 @@ namespace CodeToolsVsix
         void setValueFromString(const std::string& text);
 
         virtual std::vector<std::string> dropdownValues() const { return {}; }
-        virtual void edit(newui::View* owner) {}  // EditStyle::Dialog
+
+        // The dropdownValues() entry matching the current value, or "" when none does (a custom
+        // color, say). Defaults to valueAsString(), which is what every plain Dropdown editor's
+        // rows are.
+        virtual std::string dropdownCurrentValue() const { return valueAsString(); }
+
+        // Called once on the live dropdown right after it's created, *before* its model is set -
+        // the hook for custom row painting (dropdown.setController(...), which replaces the
+        // controller's model along with it, so anything set earlier is lost).
+        virtual void customizeDropdown(newui::DropDownList& /*dropdown*/) const {}
+
+        virtual void edit(newui::View* owner) {}  // EditStyle::Dialog / DropdownAndDialog
+
+        // True when this editor has an edit() dialog reachable from a "..." button.
+        bool hasDialog() const
+        {
+            return editStyle() == EditStyle::Dialog || editStyle() == EditStyle::DropdownAndDialog;
+        }
+        // True when the value cell itself opens a dropdown of dropdownValues().
+        bool hasDropdown() const
+        {
+            return editStyle() == EditStyle::Dropdown || editStyle() == EditStyle::DropdownAndDialog;
+        }
 
         // Paints this leaf row's own *value* representation into rect (a PropertiesGrid row's own
         // value column, already shrunk to make room for a Dialog editor's "..." button if this is
@@ -217,14 +243,18 @@ namespace CodeToolsVsix
     };
 
     // valueAsString()/parseValue() still reuse newui::Color::toString()/fromString() (CSS-style
-    // hex) directly - unchanged from this class's original text-only shape. edit() (EditStyle::
-    // Dialog, ColorEditorDialog.h) is the real picker, same shape as GradientPropertyEditor's own
-    // edit() below.
+    // hex) directly - unchanged from this class's original text-only shape. EditStyle::
+    // DropdownAndDialog: the value cell drops down system + named colors (ColorChoices.h, each with
+    // a swatch), and the "..." button opens edit() (ColorEditorDialog.h), the real picker, same
+    // shape as GradientPropertyEditor's own edit() below.
     class ColorPropertyEditor : public PropertyEditor
     {
     public:
         using PropertyEditor::PropertyEditor;
-        EditStyle editStyle() const override { return EditStyle::Dialog; }
+        EditStyle editStyle() const override { return EditStyle::DropdownAndDialog; }
+        std::vector<std::string> dropdownValues() const override;
+        std::string dropdownCurrentValue() const override;
+        void customizeDropdown(newui::DropDownList& dropdown) const override;
         std::string valueAsString() const override;
         std::optional<std::any> parseValue(const std::string& text) const override;
         void edit(newui::View* owner) override;

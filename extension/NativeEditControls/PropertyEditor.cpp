@@ -1,5 +1,6 @@
 #include "PropertyEditor.h"
 #include "CalloutPlacement.h"
+#include "ColorChoices.h"
 #include "ColorEditorDialog.h"
 #include "GradientEditorDialog.h"
 #include "PaintUtils.h"
@@ -365,6 +366,25 @@ namespace CodeToolsVsix
     std::string ColorPropertyEditor::valueAsString() const
     {
         return std::any_cast<newui::Color>(rawValue()).toString();
+    }
+
+    std::vector<std::string> ColorPropertyEditor::dropdownValues() const
+    {
+        std::vector<std::string> names;
+        for (const ColorChoice& choice : colorChoices()) {
+            names.push_back(choice.name);
+        }
+        return names;
+    }
+
+    std::string ColorPropertyEditor::dropdownCurrentValue() const
+    {
+        return colorChoiceNameFor(std::any_cast<newui::Color>(rawValue())).value_or(std::string());
+    }
+
+    void ColorPropertyEditor::customizeDropdown(newui::DropDownList& dropdown) const
+    {
+        dropdown.setController(std::make_shared<ColorListController>());
     }
 
     void ColorPropertyEditor::edit(newui::View* owner)

@@ -99,6 +99,19 @@ namespace CodeToolsVsix
 
     PropertiesModel::Node PropertiesModel::childOf(const Node& container, std::size_t index) const
     {
+        Node node = childOfUnflagged(container, index);
+        const bool editable = node.kind == Kind::PropertyLeaf || node.kind == Kind::PropertyGroup
+            || node.kind == Kind::PropertySubGroup || node.kind == Kind::SubPropertyEntry;
+        if (editable && !node.readOnly && selected_ != nullptr
+            && selected_->hasDesignTimeFlag(newui::DesignTimeFlags::ReadOnly)) {
+            node.readOnly = true;
+            node.readOnlyReason = "Managed by its owning control";
+        }
+        return node;
+    }
+
+    PropertiesModel::Node PropertiesModel::childOfUnflagged(const Node& container, std::size_t index) const
+    {
         switch (container.kind) {
         case Kind::Root: {
             std::size_t parentRow = showsParentPicker() ? 1 : 0;

@@ -21,6 +21,21 @@ namespace CodeToolsVsix
         return std::any();
     }
 
+    namespace
+    {
+        // A dropdown live editor's rect within valueRect: the full cell, or - for an editor that
+        // also has a dialog (Color) - stopping short of its "..." button, which stays visible.
+        newui::Rect liveDropdownRectFor(const newui::Rect& valueRect, bool hasEllipsisButton)
+        {
+            if (!hasEllipsisButton) {
+                return valueRect;
+            }
+            newui::Rect ellipsisRect = PropertyItem::ellipsisButtonRectFor(valueRect);
+            return newui::Rect(valueRect.left(), valueRect.top(),
+                ellipsisRect.left() - valueRect.left() - 4.0f, valueRect.size().height);
+        }
+    }
+
     PropertiesGrid::PropertiesGrid()
     {
         setVisible(true);
@@ -36,6 +51,10 @@ namespace CodeToolsVsix
         treeView_->onMouseMove.add(this, &PropertiesGrid::handleTreeMouseMove);
         treeView_->onMouseUp.add(this, &PropertiesGrid::handleTreeMouseUp);
         treeView_->onMouseDblClick.add(this, &PropertiesGrid::handleTreeMouseDblClick);
+        // The live editor is placed by absolute bounds inside treeView_, so it has to follow the
+        // grid's own width changing (the pane's splitter being dragged) as well as the divider.
+        onSizeChanged.add(this, &PropertiesGrid::handleSizeChanged);
+        treeView_->onSizeChanged.add(this, &PropertiesGrid::handleSizeChanged);
 
         // ScrollView::addChild() redirects into its own viewport - not a
         // second, separate wrapping layer, same convention Toolbox's own
@@ -124,11 +143,29 @@ namespace CodeToolsVsix
         return newui::SyncReturn::Handled;
     }
 
+    namespace
+    {
+        // Everything that reads an edited view's properties and won't notice they changed on its
+        // own: the parent's layout (FlexLayout/GridLayout/... read each child's desiredSize(),
+        // margins and layout params during arrange() - View::setDesiredSize() itself only stores
+        // the value, which is why an edit used to show only after something else, like a window
+        // resize, happened to re-arrange), the view's own layout for its children, and a repaint.
+        void refreshAfterPropertyChange(newui::SubView* view)
+        {
+            if (view == nullptr) {
+                return;
+            }
+            view->style().markDirty();
+            if (newui::View* parent = view->parent()) {
+                parent->updateLayout();
+            }
+            view->updateLayout();
+        }
+    }
+
     void PropertiesGrid::markSelectedViewDirty()
     {
-        if (newui::SubView* view = model_.selected()) {
-            view->style().markDirty();
-        }
+        refreshAfterPropertyChange(model_.selected());
     }
 
     void PropertiesGrid::rebuildLiveEditor()
@@ -189,17 +226,26 @@ namespace CodeToolsVsix
         // model_.selected() is used here rather than node.ownerInstance precisely because this
         // class already knows it's a real newui::SubView* - PropertyEditor/RectPropertyEditor
         // themselves deliberately don't assume that (see setPostCommitSync()'s own comment).
+        // Every live-editor commit - and each undo/redo of it, PropertyEditor runs this both ways -
+        // ends by refreshing whatever reads the edited view (see refreshAfterPropertyChange()).
+        newui::SubView* editedView = model_.selected();
+        std::function<void()> boundsSync;
         if (node.property != nullptr && node.property->name() == "bounds") {
-            newui::SubView* view = model_.selected();
-            liveEditor_->setPostCommitSync([view]() {
-                newui::View* parent = view != nullptr ? view->parent() : nullptr;
+            boundsSync = [editedView]() {
+                newui::View* parent = editedView != nullptr ? editedView->parent() : nullptr;
                 auto* anchorLayout = parent != nullptr ? dynamic_cast<newui::AnchorLayout*>(parent->layout()) : nullptr;
                 if (anchorLayout != nullptr) {
-                    applyFreePositionAnchorParams(view, view->bounds());
+                    applyFreePositionAnchorParams(editedView, editedView->bounds());
                     parent->updateLayout();
                 }
-            });
+            };
         }
+        liveEditor_->setPostCommitSync([editedView, boundsSync]() {
+            if (boundsSync) {
+                boundsSync();
+            }
+            refreshAfterPropertyChange(editedView);
+        });
 
         std::string initialText = isSubProperty
             ? liveEditor_->subPropertyValueAsString(node.subPropertyIndex) : liveEditor_->valueAsString();
@@ -231,12 +277,23 @@ namespace CodeToolsVsix
             ? liveEditor_->subPropertyDropdownValues(node.subPropertyIndex) : std::vector<std::string>();
         bool showsAsDropdown = isSubProperty
             ? !subDropdownValues.empty()
-            : liveEditor_->editStyle() == PropertyEditor::EditStyle::Dropdown;
+            : liveEditor_->hasDropdown();
         if (showsAsDropdown) {
             dropdownModel_.rows = isSubProperty ? subDropdownValues : liveEditor_->dropdownValues();
+            // What the dropdown highlights: valueAsString() for every plain dropdown, but a Color's
+            // hex text is never a row - it's the matching preset's name, or nothing (custom color).
+            if (!isSubProperty) {
+                initialText = liveEditor_->dropdownCurrentValue();
+            }
 
             auto* dropdown = new newui::DropDownList();
             dropdown->setVisible(true);
+            // Before setModel(): swapping the controller swaps its model too (a fresh controller
+            // has none), so a custom one installed afterwards would leave the dropdown empty and
+            // its popup unable to open.
+            if (!isSubProperty) {
+                liveEditor_->customizeDropdown(*dropdown);
+            }
             dropdown->setModel(&dropdownModel_);
 
             for (std::size_t i = 0; i < dropdownModel_.rows.size(); ++i) {
@@ -246,7 +303,8 @@ namespace CodeToolsVsix
                 }
             }
 
-            dropdown->setBounds(valueRect);
+            // A dialog-style editor's "..." button stays visible beside the dropdown.
+            dropdown->setBounds(liveDropdownRectFor(valueRect, !isSubProperty && liveEditor_->hasDialog()));
             dropdown->onSelectionChanged.add(this, &PropertiesGrid::handleLiveDropdownChanged);
             dropdown->onLostFocus.add(this, &PropertiesGrid::handleLiveEditorLostFocus);
             dropdown->onKeyDown.add(this, &PropertiesGrid::handleLiveEditorKeyDown);
@@ -382,12 +440,17 @@ namespace CodeToolsVsix
         if (node.kind == PropertiesModel::Kind::PropertyLeaf) {
             auto editor = PropertyEditorRegistry::instance()
                 .createEditor(node.property, node.ownerClass, node.ownerInstance);
-            if (editor != nullptr && editor->editStyle() == PropertyEditor::EditStyle::Dialog) {
+            if (editor != nullptr && editor->hasDialog()) {
                 newui::Rect ellipsisRect = PropertyItem::ellipsisButtonRectFor(valueRect);
                 if (ellipsisRect.contains(pt)) {
                     openDialogEditorFor(node, treeView_->localToScreen(ellipsisRect));
+                    return;
                 }
-                return;
+                // A dialog-only editor (Gradient/FilePath) does nothing on the rest of the cell;
+                // one that also has a dropdown (Color) falls through to build it below.
+                if (!editor->hasDropdown()) {
+                    return;
+                }
             }
         }
 
@@ -400,7 +463,7 @@ namespace CodeToolsVsix
 
         std::unique_ptr<PropertyEditor> editor = PropertyEditorRegistry::instance()
             .createEditor(node.property, node.ownerClass, node.ownerInstance);
-        if (editor == nullptr || editor->editStyle() != PropertyEditor::EditStyle::Dialog) {
+        if (editor == nullptr || !editor->hasDialog()) {
             return;
         }
         editor->setUndoStack(undoStack_);
@@ -504,12 +567,18 @@ namespace CodeToolsVsix
 
         auto editor = PropertyEditorRegistry::instance()
             .createEditor(node.property, node.ownerClass, node.ownerInstance);
-        if (editor == nullptr || editor->editStyle() != PropertyEditor::EditStyle::Dialog) {
+        if (editor == nullptr || !editor->hasDialog()) {
             return newui::SyncReturn::Ignored;
         }
 
         openDialogEditorFor(node, treeView_->localToScreen(ellipsisRect));
         return newui::SyncReturn::Handled;
+    }
+
+    newui::SyncReturn PropertiesGrid::handleSizeChanged(newui::View& /*sender*/, const newui::Size& /*newSize*/)
+    {
+        repositionLiveEditor();
+        return newui::SyncReturn::Ignored;  // other listeners (layout, scroll ranges) still run
     }
 
     void PropertiesGrid::repositionLiveEditor()
@@ -535,7 +604,8 @@ namespace CodeToolsVsix
             return;
         }
         if (auto* dropdown = dynamic_cast<newui::DropDownList*>(liveEditorView_)) {
-            dropdown->setBounds(valueRect);
+            bool hasEllipsis = liveEditor_ != nullptr && !liveEditorSubIndex_.has_value() && liveEditor_->hasDialog();
+            dropdown->setBounds(liveDropdownRectFor(valueRect, hasEllipsis));
             return;
         }
         if (auto* textField = dynamic_cast<newui::TextField*>(liveEditorView_)) {

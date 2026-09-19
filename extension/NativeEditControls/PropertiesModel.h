@@ -128,6 +128,8 @@ namespace CodeToolsVsix
 
     private:
         Node resolveNode(const std::vector<std::size_t>& path) const;
+        // Also marks every editable row read-only when the selected view is
+        // newui::DesignTimeFlags::ReadOnly (its owning control manages its state).
         Node childOf(const Node& container, std::size_t index) const;
         std::size_t childCountOf(const Node& node) const;
         static Node classifyProperty(const newui::reflection::Property* property,
@@ -149,6 +151,7 @@ namespace CodeToolsVsix
             return view != nullptr && view->parent() != nullptr;
         }
 
+        Node childOfUnflagged(const Node& container, std::size_t index) const;
         newui::SubView* selected_ = nullptr;
         const newui::reflection::Class* rootClass_ = nullptr;
     };

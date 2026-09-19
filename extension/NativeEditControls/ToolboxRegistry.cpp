@@ -156,6 +156,16 @@ namespace CodeToolsVsix
 
     bool ToolboxRegistry::isContainer(newui::SubView* view)
     {
-        return view != nullptr && view->layout() != nullptr;
+        if (view == nullptr || view->layout() == nullptr || view->isInternal()) {
+            return false;
+        }
+        // A control with private (Internal) parts, like TabControl, lays out and owns its own child
+        // list - a drop targets one of its user-facing children (a tab page), never it directly.
+        for (newui::SubView* child : view->childViews()) {
+            if (child->isInternal()) {
+                return false;
+            }
+        }
+        return true;
     }
 }

@@ -8,9 +8,8 @@
 
 namespace CodeToolsVsix
 {
-    // One draggable-in-spirit (see designer-plan.md 6.1 item 1 - real
-    // drag-and-drop is out of scope for v1, double-click appends instead)
-    // control type - a display name plus a factory building a fresh,
+    // One designable control type (double-click or drag it onto the design surface - see
+    // Toolbox.h) - a display name plus a factory building a fresh,
     // unattached instance the caller addChild()s wherever it wants.
     struct ToolboxEntry
     {

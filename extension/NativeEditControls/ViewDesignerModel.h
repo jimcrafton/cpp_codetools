@@ -20,16 +20,13 @@ namespace CodeToolsVsix
     // (a thin TreeModel-shaped adapter over this, see DocumentOutline.h)
     // one shared source of truth instead of two independent tree walks.
     //
-    // Deliberately a plain Model, not newui::Document - DesignerEditor
-    // (via the NativeEditor interface) already owns the real file-level
-    // load()/save()/isDirty() contract for the .newui bundle
-    // (bundle-name resolution, Bundle::loadRootView()/writeRootView(),
-    // the separate loadFrame() call just for the title - none of which
-    // fits Document::readFromFile()/writeToFile()'s "read one file's
-    // bytes" shape). A Document-based ViewDesignerModel would just be a
-    // second, competing filePath()/isModified() tracker never actually
-    // exercised through its own load()/save(). This class only ever
-    // needs Model's onChanged notification, not file I/O.
+    // Deliberately a plain Model, not newui::Document - the file-level
+    // side (path, modified flag, load()/save(), the .bak) lives in
+    // DesignerEditor's own DesignerDocument (DesignerEditor.h), which
+    // wraps the .newui bundle read/write. A Document-based
+    // ViewDesignerModel would be a second, competing
+    // filePath()/isModified() tracker. This class only ever needs
+    // Model's onChanged notification, not file I/O.
     //
     // Owns no data of its own beyond root_ - every query below walks the
     // live View::childViews() tree fresh, matching designer-plan.md's own
@@ -76,6 +73,12 @@ namespace CodeToolsVsix
         // std::nullopt) - computed fresh every call, never cached, same
         // "no new data model" spirit as viewAt().
         std::optional<std::vector<std::size_t>> pathFor(const newui::SubView* view) const;
+
+        // view's children as the designer shows them: an Internal child (newui::DesignTimeFlags,
+        // e.g. a TabControl's strip/pages area) is transparent - its own children take its place in
+        // the list, recursively - so a control's private structure never appears in the outline.
+        // childCount()/viewAt()/pathFor() all index into this, not the raw childViews().
+        static std::vector<newui::SubView*> visibleChildren(const newui::View& view);
 
     private:
         newui::SubView* root_ = nullptr;

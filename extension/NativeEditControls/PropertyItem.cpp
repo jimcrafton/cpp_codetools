@@ -331,8 +331,7 @@ namespace CodeToolsVsix
         // SubProperties editors are never EditStyle::Dialog by construction) or for bool
         // (BoolPropertyEditor is EditStyle::Dropdown), so both those branches below keep using
         // the full, unshrunk valueRect exactly as before.
-        if (node.kind != PropertiesModel::Kind::SubPropertyEntry
-                && editor->editStyle() == PropertyEditor::EditStyle::Dialog) {
+        if (node.kind != PropertiesModel::Kind::SubPropertyEntry && editor->hasDialog()) {
             newui::Rect ellipsisRect = ellipsisButtonRectFor(valueRect);
             paintEllipsisButton(ctx, ellipsisRect, dimTextColor(*this));
             valueRect = newui::Rect(valueRect.left(), valueRect.top(),

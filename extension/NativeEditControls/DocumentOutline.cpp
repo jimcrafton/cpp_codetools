@@ -27,6 +27,17 @@ namespace CodeToolsVsix
         return newui::SyncReturn::Ignored;
     }
 
+    namespace
+    {
+        // A view whose own class isn't reflected (e.g. a control's private internal part, like a
+        // TabControl's tab buttons) is still a SubView, so label it as one instead of "?".
+        std::string outlineTypeName(const newui::SubView& view)
+        {
+            const newui::reflection::Class* clazz = newui::reflection::classinfo(typeid(view));
+            return clazz != nullptr ? clazz->name() : std::string("SubView");
+        }
+    }
+
     std::size_t DocumentOutlineModel::childCount(const std::vector<std::size_t>& path) const
     {
         return source_ != nullptr ? source_->childCount(path) : 0;
@@ -41,8 +52,7 @@ namespace CodeToolsVsix
         }
 
         std::string name = view->name();
-        const newui::reflection::Class* clazz = newui::reflection::classinfo(typeid(*view));
-        std::string typeName = clazz != nullptr ? clazz->name() : std::string("?");
+        std::string typeName = outlineTypeName(*view);
         return name.empty() ? typeName : name + " (" + typeName + ")";
     }
 
@@ -242,8 +252,7 @@ namespace CodeToolsVsix
         if (name.empty()) {
             name = "(unnamed)";
         }
-        const newui::reflection::Class* clazz = newui::reflection::classinfo(typeid(*view));
-        std::string typeName = clazz != nullptr ? clazz->name() : std::string("?");
+        std::string typeName = outlineTypeName(*view);
 
         double nameWidth = paintText(ctx, textRect, name, rowTextColor(*this), newui::SystemUIFont::Message);
 

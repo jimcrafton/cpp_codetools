@@ -1,7 +1,10 @@
 #include "DesignerEditor.h"
+#include "ComponentEditor.h"
 #include "Logging.h"
 #include "TextEncoding.h"
 
+#include <newui/menus.h>
+#include <newui/mouse_constants.h>
 #include <newui/rootview.h>
 #include <newui/rootviewproxy.h>
 #include <newui/cursor.h>
@@ -9,10 +12,12 @@
 #include <newui/uicolormanager.h>
 #include <newui/bundle.h>
 #include <newui/dialogs.h>
+#include <newui/dragndrop.h>
 #include <newui/frame.h>
 #include <newui/viewbuilder.h>
 #include <newui/keyboard_constants.h>
 
+#include <algorithm>
 #include <utility>
 
 namespace CodeToolsVsix
@@ -154,6 +159,9 @@ namespace CodeToolsVsix
 
     bool DesignerEditor::setupUI(newui::RootView* root, newui::SubView* contentHost)
     {
+        document_ = new DesignerDocument(*this);
+        documentController_.addDocument(document_);  // takes ownership
+
         root->style().setBackgroundColor(newui::UIColorManager::colorFor(newui::UIColorRole::WindowBackground));
 
         // root itself is never marked design-time - it's just this
@@ -209,6 +217,7 @@ namespace CodeToolsVsix
         selectionOverlay_ = selectionOverlay.get();
         selectionOverlay_->setActiveDragCuesProvider([this]() { return activeMoveDragCues(); });
         selectionOverlay_->setReparentTargetProvider([this]() { return reparentTargets(); });
+        selectionOverlay_->setDropGhostProvider([this]() { return toolboxHoverGhostRect(); });
         root->setOverlay(std::move(selectionOverlay));
         root->onMouseDown.add(this, &DesignerEditor::handleMouseDownForSelection);
         root->onMouseMove.add(this, &DesignerEditor::handleMouseMove);
@@ -241,6 +250,15 @@ namespace CodeToolsVsix
         workspace_->documentOutlinePane()->onSelectionActivated.add(this, &DesignerEditor::handleOutlineSelectionActivated);
         workspace_->documentOutlinePane()->onDropRequested.add(this, &DesignerEditor::handleOutlineDropRequested);
         workspace_->onDesignSurfaceChanged.add(this, &DesignerEditor::handleDesignSurfaceChanged);
+
+        // A drop target on the design surface's root: COMDropTarget's hit-test walks up from
+        // whichever View is under the cursor, so this catches a drop anywhere over the document,
+        // however deeply nested the control underneath.
+        auto surfaceDropTarget = std::make_unique<newui::DropTarget>();
+        surfaceDropTarget->onTextDragOver.add(this, &DesignerEditor::handleTextDragOver);
+        surfaceDropTarget->onDragLeave.add(this, &DesignerEditor::handleDragLeave);
+        surfaceDropTarget->onTextDroppedAt.add(this, &DesignerEditor::handleTextDroppedAt);
+        workspace_->rootViewProxy()->setDropTarget(std::move(surfaceDropTarget));
 
         // undoStack_ backs PropertiesGrid's own undo-aware property
         // commits, Workspace's own Toolbox-add wiring, this class's own
@@ -296,8 +314,54 @@ namespace CodeToolsVsix
         return true;
     }
 
+    std::unique_ptr<ComponentEditor> DesignerEditor::createComponentEditorFor(newui::SubView* view)
+    {
+        if (view == nullptr || view->hasDesignTimeFlag(newui::DesignTimeFlags::Internal)
+            || view->hasDesignTimeFlag(newui::DesignTimeFlags::ReadOnly)) {
+            return nullptr;
+        }
+        const newui::reflection::Class* clazz = newui::reflection::classinfo(typeid(*view));
+        std::unique_ptr<ComponentEditor> editor = ComponentEditorRegistry::instance().createEditor(clazz, view);
+        if (editor == nullptr || editor->verbCount() == 0) {
+            return nullptr;
+        }
+        editor->setUndoStack(&undoStack_);
+        editor->setPostExecuteSync([this] {
+            viewDesignerModel_.refresh();
+            markDirty();
+            getRootView()->markDirty();
+        });
+        return editor;
+    }
+
+    void DesignerEditor::showComponentContextMenu(newui::SubView* view, const newui::Point& rootLocalPt)
+    {
+        std::unique_ptr<ComponentEditor> editor = createComponentEditorFor(view);
+        HWND hwnd = getRootView()->windowHandle();
+        if (editor == nullptr || hwnd == nullptr) {
+            return;
+        }
+
+        newui::MenuItem menu;
+        // Verbs run inside ContextMenu::show() (dispatchCommand() fires onClick before it returns),
+        // so editor and this local menu are both still alive when the lambdas below run.
+        ComponentEditor* rawEditor = editor.get();
+        for (std::size_t i = 0; i < rawEditor->verbCount(); ++i) {
+            newui::MenuItem* item = menu.addChild(std::make_unique<newui::MenuItem>(rawEditor->verb(i)));
+            item->onClick.add([rawEditor, i](newui::MenuItem&) {
+                rawEditor->executeVerb(i);
+                return newui::SyncReturn::Handled;
+            });
+        }
+
+        POINT screenPt = { static_cast<LONG>(rootLocalPt.x), static_cast<LONG>(rootLocalPt.y) };
+        ::ClientToScreen(hwnd, &screenPt);
+        newui::ContextMenu contextMenu;
+        contextMenu.show(hwnd, menu, screenPt.x, screenPt.y);
+    }
+
     newui::SyncReturn DesignerEditor::handleMouseDownForSelection(newui::View& /*sender*/, const newui::Point& pt,
-        std::uint32_t /*btnMask*/, std::uint32_t keyMask)
+        std::uint32_t btnMask, std::uint32_t keyMask)
     {
         // Checked first, so grabbing a guide line always starts a resize
         // rather than a selection - CanvasWell.h's own class comment has
@@ -346,6 +410,26 @@ namespace CodeToolsVsix
         newui::Point localPt(pt.x - surfaceBounds.left(), pt.y - surfaceBounds.top());
         newui::Point unused;
         newui::SubView* target = surface->hitTestChildren(localPt, unused);
+        // Clicking a part that can't be selected (a tab button, a slider's thumb) selects the
+        // nearest selectable ancestor instead.
+        while (target != nullptr && !target->isSelectableAtDesignTime()) {
+            target = dynamic_cast<newui::SubView*>(target->parent());
+        }
+
+        // Right-click: select what's under the cursor (unless it's already part of the selection -
+        // the menu then applies to it without collapsing a multi-selection), then show its
+        // ComponentEditor's verbs. Never arms a move-drag.
+        if ((btnMask & newui::mbmRightButton) != 0) {
+            if (target != nullptr) {
+                const std::vector<newui::SubView*> selected = viewDesignerController_.selected();
+                if (std::find(selected.begin(), selected.end(), target) == selected.end()) {
+                    viewDesignerController_.selectExclusive(target);
+                }
+                getRootView()->markDirty();
+                showComponentContextMenu(target, pt);
+            }
+            return newui::SyncReturn::Handled;
+        }
 
         if ((keyMask & newui::kmCtrl) != 0) {
             viewDesignerController_.toggleSelection(target);
@@ -417,8 +501,22 @@ namespace CodeToolsVsix
     std::vector<ActiveGeometryDrag> DesignerEditor::activeMoveDragCues() const
     {
         std::vector<ActiveGeometryDrag> cues;
+        // A Toolbox drag hovering the surface: the target layout's own cue (flex insertion line,
+        // grid cell) in the same green a canvas reparent target gets. Free position draws none -
+        // the ghost outline (toolboxHoverGhostRect()) covers that.
+        if (toolboxHover_.active && toolboxHover_.placement.policy != nullptr) {
+            GeometryEditKind kind = toolboxHover_.placement.policy->kind();
+            if (kind == GeometryEditKind::LinearReorder || kind == GeometryEditKind::GridCell) {
+                ActiveGeometryDrag drag;
+                drag.policy = toolboxHover_.placement.policy;
+                drag.ctx = toolboxHover_.placement.ctx;
+                drag.result = toolboxHover_.placement.result;
+                drag.isReparentTargetCue = true;
+                cues.push_back(drag);
+            }
+        }
         if (!moveDragStarted_) {
-            return cues;  // a plain click that never crossed the drag threshold has nothing to show
+            return cues;  // a plain click that never crossed the drag threshold has nothing more to show
         }
         cues.reserve(moveDragEntries_.size());
         for (const MoveDragEntry& entry : moveDragEntries_) {
@@ -627,6 +725,9 @@ namespace CodeToolsVsix
     std::vector<newui::SubView*> DesignerEditor::reparentTargets() const
     {
         std::vector<newui::SubView*> targets;
+        if (toolboxHover_.active) {
+            targets.push_back(toolboxHover_.placement.target);
+        }
         if (!moveDragStarted_) {
             return targets;
         }
@@ -1024,10 +1125,183 @@ namespace CodeToolsVsix
 
     newui::SyncReturn DesignerEditor::handleNewClicked(newui::Control& /*sender*/)
     {
-        newui::RootViewProxy* surface = workspace_ != nullptr ? workspace_->rootViewProxy() : nullptr;
-        if (surface == nullptr) {
+        if (workspace_ == nullptr || workspace_->rootViewProxy() == nullptr) {
             return newui::SyncReturn::Ignored;
         }
+        if (!documentController_.confirmDiscardChanges(*document_)) {
+            return newui::SyncReturn::Handled;  // user cancelled - keep the open document
+        }
+        clearDocument(/*resetDocument=*/true);
+        return newui::SyncReturn::Handled;
+    }
+
+    newui::SyncReturn DesignerEditor::handleTextDragOver(newui::DropTarget& /*sender*/, const std::wstring& text,
+        const newui::Point& localPt, newui::DropEffect& effect)
+    {
+        newui::Point rootLocalPt = workspace_->rootViewProxy()->localToRoot(localPt);
+        if (!hoverToolboxEntryAt(text, rootLocalPt)) {
+            effect = newui::DropEffect::None;  // foreign text / off the surface: "not allowed" cursor
+        }
+        return newui::SyncReturn::Handled;
+    }
+
+    newui::SyncReturn DesignerEditor::handleDragLeave(newui::DropTarget& /*sender*/)
+    {
+        endToolboxHover();
+        return newui::SyncReturn::Handled;
+    }
+
+    newui::SyncReturn DesignerEditor::handleTextDroppedAt(newui::DropTarget& /*sender*/, const std::wstring& text,
+        const newui::Point& localPt)
+    {
+        newui::Point rootLocalPt = workspace_->rootViewProxy()->localToRoot(localPt);
+        return dropToolboxEntryAt(text, rootLocalPt) ? newui::SyncReturn::Handled : newui::SyncReturn::Ignored;
+    }
+
+    std::optional<DesignerEditor::ToolboxPlacement> DesignerEditor::toolboxPlacementAt(
+        const newui::Point& rootLocalPt, newui::SubView* ghost) const
+    {
+        newui::SubView* target = findReparentTargetAt(rootLocalPt, nullptr);
+        if (target == nullptr) {
+            return std::nullopt;  // off the design surface
+        }
+
+        // Top-left at the point, in the target's own local space, at the default new-control size.
+        newui::Point targetOrigin = SelectionOverlay::boundsInRootView(target).pos();
+        ToolboxPlacement placement;
+        placement.target = target;
+        placement.dropBounds = newui::Rect(rootLocalPt.x - targetOrigin.x, rootLocalPt.y - targetOrigin.y,
+            Workspace::kNewControlDefaultWidth, Workspace::kNewControlDefaultHeight);
+
+        // What the target's own layout policy would do with it - the same zero-delta resolve()
+        // buildReparentAction() uses for a canvas drag into a container.
+        placement.ctx.view = ghost;
+        placement.ctx.parent = target;
+        placement.ctx.startBounds = placement.dropBounds;
+        placement.ctx.startPt = rootLocalPt;
+        placement.ctx.currentPt = rootLocalPt;
+        placement.policy = &policyFor(target->layout());
+        placement.result = placement.policy->resolve(placement.ctx);
+        return placement;
+    }
+
+    bool DesignerEditor::hoverToolboxEntryAt(const std::wstring& payload, const newui::Point& rootLocalPt)
+    {
+        if (workspace_ == nullptr || !Toolbox::isDragPayload(payload)) {
+            endToolboxHover();
+            return false;
+        }
+        if (!hoverGhost_) {
+            hoverGhost_ = std::make_unique<newui::SubView>();
+        }
+        std::optional<ToolboxPlacement> placement = toolboxPlacementAt(rootLocalPt, hoverGhost_.get());
+        if (!placement.has_value()) {
+            endToolboxHover();
+            return false;
+        }
+
+        std::optional<newui::Rect> ghostRootRect;
+        if (placement->policy->kind() == GeometryEditKind::FreePosition) {
+            newui::Point targetOrigin = SelectionOverlay::boundsInRootView(placement->target).pos();
+            const newui::Rect& proposed = placement->result.proposedBounds;
+            ghostRootRect = newui::Rect(targetOrigin.x + proposed.left(), targetOrigin.y + proposed.top(),
+                proposed.size().width, proposed.size().height);
+        }
+
+        // DragOver also fires on a timer while the mouse is still - only repaint when what the
+        // overlay would draw actually changed (target, ghost, or the flex/grid insertion result).
+        const GeometryEditResult& oldResult = toolboxHover_.placement.result;
+        bool changed = !toolboxHover_.active
+            || toolboxHover_.placement.target != placement->target
+            || toolboxHover_.ghostRootRect != ghostRootRect
+            || oldResult.kind != placement->result.kind
+            || oldResult.targetSiblingIndex != placement->result.targetSiblingIndex
+            || oldResult.targetRow != placement->result.targetRow
+            || oldResult.targetColumn != placement->result.targetColumn;
+
+        toolboxHover_.active = true;
+        toolboxHover_.placement = *placement;
+        toolboxHover_.ghostRootRect = ghostRootRect;
+        if (changed) {
+            repaintNow();  // the overlay paints these cues - see SelectionOverlay::paint()
+        }
+        return true;
+    }
+
+    void DesignerEditor::endToolboxHover()
+    {
+        bool wasActive = toolboxHover_.active;
+        toolboxHover_ = ToolboxHover();
+        hoverGhost_.reset();
+        if (wasActive) {
+            repaintNow();  // so the cues actually disappear, even mid-drag
+        }
+    }
+
+    void DesignerEditor::repaintNow()
+    {
+        newui::RootView* root = getRootView();
+        if (root == nullptr) {
+            return;
+        }
+        root->repaintNow();
+        if (HWND hwnd = root->windowHandle()) {
+            ::UpdateWindow(hwnd);
+        }
+    }
+
+    bool DesignerEditor::dropToolboxEntryAt(const std::wstring& payload, const newui::Point& rootLocalPt)
+    {
+        endToolboxHover();  // a drop ends the hover - the cues must not linger over the new control
+        if (workspace_ == nullptr || document_ == nullptr) {
+            return false;
+        }
+        newui::SubView* created = Toolbox::createFromDragPayload(payload);
+        if (created == nullptr) {
+            return false;
+        }
+        // Resolved against the real (still unattached) control - the same zero-delta
+        // resolve()/commit() pair buildReparentAction() uses for a canvas drag into a container.
+        std::optional<ToolboxPlacement> placement = toolboxPlacementAt(rootLocalPt, created);
+        if (!placement.has_value()) {
+            created->destroy();  // off the design surface
+            delete created;
+            return false;
+        }
+
+        // Same starting point Workspace's double-click add gives a new control, except positioned
+        // at the drop point.
+        newui::SubView* target = placement->target;
+        created->setDesignTime(true);
+        created->setVisible(true);
+        created->setBounds(placement->dropBounds);
+
+        const LayoutEditingPolicy& policy = *placement->policy;
+        newui::UndoableAction placementAction = policy.commit(placement->ctx, placement->result, placement->result);
+
+        const newui::reflection::Class* clazz = newui::reflection::classinfo(typeid(*created));
+        newui::UndoableAction action;
+        action.description = "Add " + (clazz != nullptr ? clazz->name() : std::string("Control"));
+        action.doIt = [this, created, target, doPlacement = placementAction.doIt]() {
+            target->addChild(created);  // placement (reorder / anchor params / grid cell) needs it attached
+            doPlacement();
+            viewDesignerModel_.refresh();
+            markDirty();
+            getRootView()->markDirty();
+        };
+        action.undoIt = [this, created, target]() {
+            target->removeChild(created);
+            viewDesignerModel_.refresh();
+            markDirty();
+            getRootView()->markDirty();
+        };
+        undoStack_.push(action);
+        return true;
+    }
+
+    void DesignerEditor::clearDocument(bool resetDocument)
+    {
+        newui::RootViewProxy* surface = workspace_->rootViewProxy();
 
         viewDesignerController_.clearSelection();
 
@@ -1038,16 +1312,19 @@ namespace CodeToolsVsix
         std::vector<newui::SubView*> children = surface->childViews();
         for (newui::SubView* child : children) {
             surface->removeChild(child);
+            child->destroy();  // frees nested descendants too - View::destroy()'s "destroy() then delete"
             delete child;
         }
 
         workspace_->frameProxy()->setTitle(std::string());
+        workspace_->setCanvasFrameSize(newui::Size());  // back to the default blank-document size
         viewDesignerModel_.refresh();
         undoStack_.clear();
         refreshUndoRedoButtons();
-        clearDirty();
+        if (resetDocument) {
+            document_->reset();
+        }
         getRootView()->markDirty();
-        return newui::SyncReturn::Handled;
     }
 
     newui::SyncReturn DesignerEditor::handleOpenClicked(newui::Control& /*sender*/)
@@ -1055,6 +1332,10 @@ namespace CodeToolsVsix
         std::wstring path = showNewuiFileDialog(windowHandle(), /*forSave=*/false);
         if (path.empty()) {
             return newui::SyncReturn::Ignored;
+        }
+        // Asked only after a file was actually picked, so cancelling the picker never prompts.
+        if (!documentController_.confirmDiscardChanges(*document_)) {
+            return newui::SyncReturn::Handled;
         }
         if (!load(path.c_str(), path.size())) {
             logToDebugOut(L"DesignerEditor: toolbar Open failed");
@@ -1064,6 +1345,13 @@ namespace CodeToolsVsix
 
     newui::SyncReturn DesignerEditor::handleSaveClicked(newui::Control& /*sender*/)
     {
+        // An already-titled document saves in place; only an untitled one asks for a path.
+        if (document_->hasFilePath()) {
+            if (!document_->save()) {
+                logToDebugOut(L"DesignerEditor: toolbar Save failed");
+            }
+            return newui::SyncReturn::Handled;
+        }
         std::wstring path = showNewuiFileDialog(windowHandle(), /*forSave=*/true);
         if (path.empty()) {
             return newui::SyncReturn::Ignored;
@@ -1122,15 +1410,38 @@ namespace CodeToolsVsix
 
     bool DesignerEditor::load(const wchar_t* filePath, std::size_t filePathLength)
     {
-        if (!workspace_)
+        if (!workspace_ || document_ == nullptr)
         {
             logToDebugOut(L"DesignerEditor::load: workspace is null (construction must have failed)");
             return false;
         }
+        return document_->load(wideToUtf8(copyPath(filePath, filePathLength)));
+    }
 
-        std::wstring path = copyPath(filePath, filePathLength);
-        std::string absolutePath = wideToUtf8(path);
+    bool DesignerEditor::loadFromFile(const std::string& absolutePath)
+    {
+        std::wstring path = utf8ToWide(absolutePath);
         std::string bundleName = bundleDisplayNameFor(path);
+
+        // A failed load never touches its target (missing/empty/unparsable file - see
+        // Bundle::loadRootViewFromFile()), but clearDocument() below would already have wiped the
+        // open document by then. Load into a throwaway proxy first so a bad file can't do that.
+        {
+            auto* probe = new newui::RootViewProxy();
+            bool readable = newui::Bundle::instance().loadRootViewFromFile(*probe, absolutePath, /*designMode=*/true);
+            probe->destroy();
+            delete probe;
+            if (!readable)
+            {
+                logToDebugOut(L"DesignerEditor::load: Bundle::loadRootViewFromFile failed");
+                return false;
+            }
+        }
+
+        // Start from a blank document - the reader below merges into existing children by
+        // position instead of replacing them, so anything left from the previous document would
+        // survive (extra children, stale properties, old title).
+        clearDocument(/*resetDocument=*/false);
 
         // designMode=true propagates setDesignTime(true) onto freshly-
         // constructed children (reflection.h's TypedClass<T>::read()).
@@ -1155,6 +1466,14 @@ namespace CodeToolsVsix
         // position/size (its AnchorLayoutParams, set up in Workspace's
         // constructor); re-running it here reasserts that, overriding
         // whatever bogus size the file's own bounds happened to contain.
+        // The file's saved rootView size *is* the document's real client size (read onto
+        // rootViewProxy() above, before this re-layout overrides it) - size the mock frame
+        // around it (plus the mock title bar) instead of leaving it at the fixed default.
+        newui::Size clientSize = workspace_->rootViewProxy()->bounds().size();
+        bool hasClientSize = clientSize.width > 0.0f && clientSize.height > 0.0f;
+        workspace_->setCanvasFrameSize(hasClientSize
+            ? newui::Size(clientSize.width, clientSize.height + newui::FrameProxy::kTitleBarHeight)
+            : newui::Size());
         workspace_->frameProxy()->updateLayout();
 
         // The file's own top-level "title" is a Frame property, a sibling
@@ -1207,20 +1526,22 @@ namespace CodeToolsVsix
         undoStack_.clear();
         refreshUndoRedoButtons();
 
-        clearDirty();
+        // Document::load() marks the document clean and adopts the path once this returns true.
         return true;
     }
 
     bool DesignerEditor::save(const wchar_t* filePath, std::size_t filePathLength)
     {
-        if (!workspace_)
+        if (!workspace_ || document_ == nullptr)
         {
             logToDebugOut(L"DesignerEditor::save: workspace is null (construction must have failed)");
             return false;
         }
+        return document_->save(wideToUtf8(copyPath(filePath, filePathLength)));
+    }
 
-        std::wstring path = copyPath(filePath, filePathLength);
-        std::string absolutePath = wideToUtf8(path);
+    bool DesignerEditor::saveToFile(const std::string& absolutePath)
+    {
 
         // No Bundle::setExecutableDirOverride() call here - see load()'s
         // own comment. writeRootViewToFile() resolves directly against
@@ -1231,9 +1552,11 @@ namespace CodeToolsVsix
             return false;
         }
 
-        clearDirty();
-        return true;
+        return true;  // Document::save() clears the modified flag and adopts the path
     }
+
+    bool DesignerDocument::readFromFile(const std::string& path) { return editor_.loadFromFile(path); }
+    bool DesignerDocument::writeToFile(const std::string& path) { return editor_.saveToFile(path); }
 
     bool DesignerEditor::execCommand(EditorCommand /*command*/, std::uint32_t /*flags*/, const EditorCommandArgs* /*args*/)
     {

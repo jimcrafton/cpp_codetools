@@ -61,7 +61,9 @@ namespace CodeToolsVsix
 
         virtual bool load(const wchar_t* filePath, std::size_t filePathLength) = 0;
         virtual bool save(const wchar_t* filePath, std::size_t filePathLength) = 0;
-        bool isDirty() const { return dirty_; }
+        // Virtual so an editor backed by a newui::Document (DesignerEditor) can report that
+        // document's own isModified() instead of this class's plain flag.
+        virtual bool isDirty() const { return dirty_; }
         virtual bool execCommand(EditorCommand command, std::uint32_t flags, const EditorCommandArgs* args) = 0;
 
     protected:
@@ -76,7 +78,7 @@ namespace CodeToolsVsix
         void setRootView(std::unique_ptr<newui::RootView> rootView) { rootView_ = std::move(rootView); }
         newui::RootView* getRootView() const { return rootView_.get(); }
 
-        void markDirty() { dirty_ = true; }
+        virtual void markDirty() { dirty_ = true; }
         void clearDirty() { dirty_ = false; }
 
     protected:

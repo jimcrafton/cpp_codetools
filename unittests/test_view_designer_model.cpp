@@ -1,6 +1,7 @@
 #include "../extension/NativeEditControls/ViewDesignerModel.h"
 
 #include <newui/subview.h>
+#include <newui/controls.h>
 
 #include <gtest/gtest.h>
 
@@ -146,4 +147,28 @@ TEST(ViewDesignerModel, RefreshFiresOnChangedWithRootUnchanged)
     model.refresh();
     EXPECT_EQ(g_changedCount, 1);
     EXPECT_EQ(model.root(), &root);
+}
+
+TEST(ViewDesignerModel, InternalViewsAreTransparentTheirUserFacingChildrenTakeTheirPlace)
+{
+    newui::SubView root;
+    auto* tabs = new newui::TabControl();
+    auto* page1 = new newui::SubView();
+    auto* page2 = new newui::SubView();
+    tabs->addTab("One", page1);
+    tabs->addTab("Two", page2);
+    root.addChild(tabs);
+
+    ViewDesignerModel model;
+    model.setRoot(&root);
+
+    // The TabControl shows its two pages directly - not TabControlStrip/TabControlPages/buttons.
+    EXPECT_EQ(model.childCount(std::vector<std::size_t>{0, 0}), 2u);
+    EXPECT_EQ(model.viewAt(std::vector<std::size_t>{0, 0, 0}), page1);
+    EXPECT_EQ(model.viewAt(std::vector<std::size_t>{0, 0, 1}), page2);
+    EXPECT_EQ(model.viewAt(std::vector<std::size_t>{0, 0, 2}), nullptr);
+
+    EXPECT_EQ(model.pathFor(page2), (std::vector<std::size_t>{0, 0, 1}));
+    EXPECT_EQ(model.pathFor(tabs->tabButton(0)), std::nullopt);  // Internal - not in the model at all
+    EXPECT_EQ(model.pathFor(static_cast<newui::SubView*>(page1->parent())), std::nullopt);  // the pages area
 }

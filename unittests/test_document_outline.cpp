@@ -5,6 +5,7 @@
 #include <newui/layout.h>
 #include <newui/mouse_constants.h>
 #include <newui/subview.h>
+#include <newui/controls.h>
 
 #include <gtest/gtest.h>
 
@@ -509,4 +510,24 @@ TEST(DocumentOutline, DraggingOntoANonContainerRowInADifferentParentFiresOnDropR
     EXPECT_EQ(a->parent(), containerA);
 
     delete outline;
+}
+
+namespace {
+    // Not in the reflection registry - like a control's private internal part.
+    class UnreflectedView : public newui::SubView {};
+}
+
+TEST(DocumentOutlineModel, AViewWhoseClassIsNotReflectedIsLabelledSubViewNotQuestionMark)
+{
+    newui::SubView root;
+    auto* unreflected = new UnreflectedView();
+    unreflected->setName("part");
+    root.addChild(unreflected);
+
+    ViewDesignerModel source;
+    source.setRoot(&root);
+    DocumentOutlineModel model;
+    model.setSource(&source);
+
+    EXPECT_EQ(std::any_cast<std::string>(model.value(std::vector<std::size_t>{0, 0})), "part (SubView)");
 }

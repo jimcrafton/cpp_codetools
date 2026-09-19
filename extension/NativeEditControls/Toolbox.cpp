@@ -6,6 +6,8 @@
 
 #include <cctype>
 #include <memory>
+#include <stdexcept>
+#include <string>
 
 namespace CodeToolsVsix
 {
@@ -176,10 +178,72 @@ namespace CodeToolsVsix
 
         treeView_->onMouseDblClick.add(this, &Toolbox::handleTreeDblClick);
 
+        // RootView (rootview.cpp) starts the OLE drag itself once a press on treeView_ moves past
+        // its threshold and this provides a payload - declining (a category header, nothing
+        // selected) just means no drag starts.
+        treeView_->setDragSource(std::make_unique<newui::DropSource>());
+        treeView_->dragSource()->onProvideText.add(this, &Toolbox::handleProvideDragText);
+
         // ScrollView::addChild() redirects into its own viewport - not a
         // second, separate wrapping layer, this *is* Toolbox's whole
         // content.
         addChild(treeView_);
+    }
+
+    namespace
+    {
+        const wchar_t kDragPayloadPrefix[] = L"codetools-toolbox-entry:";
+    }
+
+    std::wstring Toolbox::dragPayloadFor(std::size_t categoryIndex, std::size_t entryIndex)
+    {
+        return std::wstring(kDragPayloadPrefix) + std::to_wstring(categoryIndex) + L":" + std::to_wstring(entryIndex);
+    }
+
+    namespace
+    {
+        // The registry entry a payload names, or nullptr for anything else.
+        const ToolboxEntry* entryForPayload(const std::wstring& text)
+        {
+            const std::wstring prefix(kDragPayloadPrefix);
+            if (text.compare(0, prefix.size(), prefix) != 0) {
+                return nullptr;
+            }
+            std::size_t colon = text.find(L':', prefix.size());
+            if (colon == std::wstring::npos) {
+                return nullptr;
+            }
+            std::size_t categoryIndex = 0;
+            std::size_t entryIndex = 0;
+            try {
+                categoryIndex = std::stoull(text.substr(prefix.size(), colon - prefix.size()));
+                entryIndex = std::stoull(text.substr(colon + 1));
+            } catch (const std::exception&) {
+                return nullptr;  // not numbers - foreign text that just happens to start the same way
+            }
+            return entryAtPath({categoryIndex, entryIndex});
+        }
+    }
+
+    bool Toolbox::isDragPayload(const std::wstring& text)
+    {
+        return entryForPayload(text) != nullptr;
+    }
+
+    newui::SubView* Toolbox::createFromDragPayload(const std::wstring& text)
+    {
+        const ToolboxEntry* entry = entryForPayload(text);
+        return entry != nullptr ? entry->factory() : nullptr;
+    }
+
+    newui::SyncReturn Toolbox::handleProvideDragText(newui::DropSource& /*sender*/, std::wstring& outText)
+    {
+        auto path = treeView_->selectedPath();  // TreeView's own mouse-down already selected the pressed row
+        if (!path || entryAtPath(*path) == nullptr) {
+            return newui::SyncReturn::Ignored;
+        }
+        outText = dragPayloadFor((*path)[0], (*path)[1]);
+        return newui::SyncReturn::Handled;
     }
 
     newui::SyncReturn Toolbox::handleTreeDblClick(newui::View& /*sender*/, const newui::Point& /*pt*/,

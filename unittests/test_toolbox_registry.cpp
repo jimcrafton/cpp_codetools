@@ -4,6 +4,7 @@
 #include <newui/controls.h>
 #include <newui/layout.h>
 #include <newui/subview.h>
+#include <newui/controls.h>
 
 #include <gtest/gtest.h>
 
@@ -166,4 +167,19 @@ TEST(ToolboxRegistryIsContainer, FalseForABareViewWithNoLayout) {
 
 TEST(ToolboxRegistryIsContainer, FalseForNullptr) {
     EXPECT_FALSE(CodeToolsVsix::ToolboxRegistry::isContainer(nullptr));
+}
+
+TEST(ToolboxRegistryIsContainer, FalseForAControlWithInternalPartsAndForTheInternalPartsThemselves) {
+    auto* tabs = new newui::TabControl();
+    auto* page = new newui::SubView();
+    page->setLayout(std::make_unique<newui::AnchorLayout>());
+    tabs->addTab("One", page);
+
+    EXPECT_FALSE(CodeToolsVsix::ToolboxRegistry::isContainer(tabs));  // owns its child list
+    auto* pagesArea = static_cast<newui::SubView*>(page->parent());
+    EXPECT_FALSE(CodeToolsVsix::ToolboxRegistry::isContainer(pagesArea));  // Internal, though it has a Layout
+    EXPECT_TRUE(CodeToolsVsix::ToolboxRegistry::isContainer(page));  // the user-facing drop target
+
+    tabs->destroy();
+    delete tabs;
 }

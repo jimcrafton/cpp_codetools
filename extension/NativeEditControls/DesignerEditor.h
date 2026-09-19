@@ -2,14 +2,20 @@
 #include <Windows.h>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
+#include <optional>
 #include <vector>
 
+#include "ComponentEditor.h"
 #include "NativeEditor.h"
 #include "SelectionOverlay.h"
 #include "ViewDesignerController.h"
 #include "ViewDesignerModel.h"
 #include "Workspace.h"
 
+#include <newui/controllers.h>
+#include <newui/dragndrop.h>
+#include <newui/models.h>
 #include <newui/undostack.h>
 
 namespace CodeToolsVsix
@@ -24,8 +30,28 @@ namespace CodeToolsVsix
     // FrameProxy/RootViewProxy's own class comments for why a real RootView can't host a loaded
     // document's tree directly alongside Workspace's chrome) - load()/save() work against
     // workspace()->rootViewProxy() instead.
+    class DesignerEditor;
+
+    // The designer's newui::Document - owns path/modified tracking and (via Document::save())
+    // the ".bak" of the original file. readFromFile()/writeToFile() just hand back to the
+    // editor's own Bundle-based load/save; see DesignerEditor::document().
+    class DesignerDocument : public newui::Document
+    {
+    public:
+        explicit DesignerDocument(DesignerEditor& editor) : editor_(editor) {}
+
+    protected:
+        bool readFromFile(const std::string& path) override;
+        bool writeToFile(const std::string& path) override;
+
+    private:
+        DesignerEditor& editor_;
+    };
+
     class DesignerEditor : public NativeEditor
     {
+        friend class DesignerDocument;
+
     public:
         DesignerEditor(HWND hwndParent, int x, int y, int width, int height);
 
@@ -91,6 +117,49 @@ namespace CodeToolsVsix
         newui::UndoStack& undoStack() { return undoStack_; }
         const newui::UndoStack& undoStack() const { return undoStack_; }
 
+        // A Toolbox entry dropped at rootLocalPt (this editor's root space, same as every mouse
+        // handler's pt): creates the control from payload (Toolbox::dragPayloadFor()), adds it to
+        // the innermost container under the point - rootViewProxy() if none - placed by that
+        // container's own layout policy (free position at the drop point, flex insertion index,
+        // grid cell, ...), as one undoable "Add <Class>" step. Returns false, changing nothing, for
+        // a payload that isn't a Toolbox entry or a point off the design surface. Public so tests
+        // can drive it without a real OLE drag.
+        bool dropToolboxEntryAt(const std::wstring& payload, const newui::Point& rootLocalPt);
+
+        // The ComponentEditor (per-class design-time verbs - see ComponentEditor.h) registered for
+        // view's class, wired to this editor's undo stack and to refresh the outline/mark dirty/
+        // repaint after each verb (and its undo/redo). nullptr if view's class has no editor or it
+        // offers no verbs. Right-clicking a control shows these verbs as a context menu; public so
+        // tests can run them without the blocking native popup.
+        std::unique_ptr<ComponentEditor> createComponentEditorFor(newui::SubView* view);
+
+        // Hover feedback for a Toolbox drag at rootLocalPt (this editor's root space): highlights
+        // the target container and shows where the control would land - an insertion line (flex),
+        // cell (grid), or ghost outline (free position) - the same cues a canvas drag gets. Returns
+        // whether a drop is possible there (false: foreign payload / off the surface - the drag
+        // should show "not allowed"); either way stale feedback from an earlier point is cleared.
+        bool hoverToolboxEntryAt(const std::wstring& payload, const newui::Point& rootLocalPt);
+        void endToolboxHover();
+
+        // Repaints the whole editor immediately (and forces the pending WM_PAINT through) -
+        // RootView::markDirty() only schedules it on the RunLoop's idle queue, which doesn't run
+        // while Windows' own modal DoDragDrop loop is in charge, so hover feedback needs this.
+        void repaintNow();
+        // What the hover is currently showing (nullptr / nullopt when none) - for tests.
+        newui::SubView* toolboxHoverTarget() const { return toolboxHover_.active ? toolboxHover_.placement.target : nullptr; }
+        std::optional<newui::Rect> toolboxHoverGhostRect() const { return toolboxHover_.active ? toolboxHover_.ghostRootRect : std::nullopt; }
+        const GeometryEditResult* toolboxHoverResult() const { return toolboxHover_.active ? &toolboxHover_.placement.result : nullptr; }
+
+        // The open document (path, modified flag, backup-on-first-overwrite) and the controller
+        // that guards discarding it - New/Open go through documentController().
+        // confirmDiscardChanges(); tests replace its prompt via setUnsavedChangesHandler().
+        DesignerDocument& document() { return *document_; }
+        newui::DocumentController& documentController() { return documentController_; }
+
+        // NativeEditor's flag is replaced by document()'s own.
+        bool isDirty() const override { return document_ != nullptr && document_->isModified(); }
+        void markDirty() override { if (document_ != nullptr) { document_->markModified(); } }
+
         // filePath can be any real, absolute ".newui" path - a user's
         // project document, unrelated to this DLL's own resource root.
         // Uses Bundle::loadRootViewFromFile()/loadFrameFromFile() directly,
@@ -118,6 +187,9 @@ namespace CodeToolsVsix
         // one that can start dragging it, matching ordinary design-tool click-and-drag behavior.
         newui::SyncReturn handleMouseDownForSelection(newui::View& sender, const newui::Point& pt,
             std::uint32_t btnMask, std::uint32_t keyMask);
+
+        // Blocks in a native popup until a verb is picked or the menu is dismissed.
+        void showComponentContextMenu(newui::SubView* view, const newui::Point& rootLocalPt);
 
         // One authoritative onMouseMove/onMouseUp pair for root, covering both CanvasWell's
         // resize-guide drag and the canvas selection's own Move drag - deliberately NOT two
@@ -192,6 +264,53 @@ namespace CodeToolsVsix
         // own header comment, Workspace.h) - wired directly onto each
         // ToolbarButton's inherited Control::onClick in setupUI().
         newui::SyncReturn handleNewClicked(newui::Control& sender);
+
+        // The design surface's drop target callbacks (positions are rootViewProxy()-local - see
+        // dropToolboxEntryAt()/hoverToolboxEntryAt() for the root-space logic they forward to).
+        newui::SyncReturn handleTextDragOver(newui::DropTarget& sender, const std::wstring& text,
+            const newui::Point& localPt, newui::DropEffect& effect);
+        newui::SyncReturn handleDragLeave(newui::DropTarget& sender);
+        newui::SyncReturn handleTextDroppedAt(newui::DropTarget& sender, const std::wstring& text,
+            const newui::Point& localPt);
+
+        // Where a Toolbox control would be placed if dropped at rootLocalPt, as a fresh (unattached)
+        // ghost view + the target container's policy resolution - shared by hover feedback and the
+        // drop itself so they can't disagree. nullopt when the point is off the design surface.
+        struct ToolboxPlacement
+        {
+            newui::SubView* target = nullptr;
+            newui::Rect dropBounds;  // target-local, top-left at the point
+            GeometryDragContext ctx;
+            GeometryEditResult result;
+            const LayoutEditingPolicy* policy = nullptr;
+        };
+        std::optional<ToolboxPlacement> toolboxPlacementAt(const newui::Point& rootLocalPt, newui::SubView* ghost) const;
+
+        // Live state while a Toolbox drag hovers the surface (see hoverToolboxEntryAt()).
+        struct ToolboxHover
+        {
+            bool active = false;
+            ToolboxPlacement placement;
+            std::optional<newui::Rect> ghostRootRect;  // FreePosition targets only
+        };
+        ToolboxHover toolboxHover_;
+        std::unique_ptr<newui::SubView> hoverGhost_;  // stands in for the not-yet-created control
+
+        // Empties the design surface back to a blank document: selection, every child of
+        // rootViewProxy() (deleted), frameProxy() title, Outline, undo history, dirty flag. Shared
+        // by New and load() - the Bundle reader merges into whatever children already exist
+        // (position-based, in place) rather than replacing them, so load() must start from blank.
+        // resetDocument: also return document() to untitled (New). load() passes false - the
+        // Document adopts the new path itself once the load succeeds.
+        void clearDocument(bool resetDocument);
+
+        // The real load/save bodies, reached only through DesignerDocument (so path/modified
+        // bookkeeping and the .bak happen in Document::load()/save()). UTF-8 paths.
+        bool loadFromFile(const std::string& utf8Path);
+        bool saveToFile(const std::string& utf8Path);
+
+        newui::DocumentController documentController_;
+        DesignerDocument* document_ = nullptr;  // owned by documentController_
         newui::SyncReturn handleOpenClicked(newui::Control& sender);
         newui::SyncReturn handleSaveClicked(newui::Control& sender);
         newui::SyncReturn handleUndoClicked(newui::Control& sender);

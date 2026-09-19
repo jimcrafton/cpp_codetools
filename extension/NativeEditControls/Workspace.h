@@ -67,15 +67,18 @@ namespace CodeToolsVsix
         // Properties row above it, which gets the rest.
         static constexpr float kAnimationDockHeight = 84.0f;
 
-        // frameProxy_'s own fixed size, centered inside the darker canvas
+        // frameProxy_'s default size for a blank document, centered inside the darker canvas
         // well rather than stretched to fill it - matches
         // bluesky/designer-surface/Main.dc.html's own ".artboard" (640x460),
-        // itself an arbitrary reference size, not derived from any real
-        // document yet (an "idea, not built" gap: sizing this from the
-        // loaded document's own real Frame bounds instead, once
-        // DesignerEditor::load() has one to read).
+        // itself an arbitrary reference size. A loaded document overrides it via
+        // setCanvasFrameSize() below.
         static constexpr float kDefaultCanvasWidth = 640.0f;
         static constexpr float kDefaultCanvasHeight = 460.0f;
+
+        // A brand-new control's default size (Toolbox double-click and drag-drop both use it) -
+        // nothing in newui measures itself, so a fixed default is the honest v1 answer.
+        static constexpr float kNewControlDefaultWidth = 120.0f;
+        static constexpr float kNewControlDefaultHeight = 32.0f;
 
         // Thinner than newui::Splitter's own generic 6px default - a
         // slimmer divider reads better across three of these stacked
@@ -111,6 +114,12 @@ namespace CodeToolsVsix
         // isn't built yet - a separate, deferred piece.
         newui::Label* undoRedoStatusLabel() const { return undoRedoStatusLabel_; }
         newui::FrameProxy* frameProxy() const { return frameProxy_; }
+
+        // Sets frameProxy_'s total size, mock title bar included (so rootViewProxy()'s client
+        // area ends up frameSize.height - FrameProxy::kTitleBarHeight tall). A non-positive width
+        // or height falls back to kDefaultCanvasWidth/Height (blank document, or no usable size
+        // in a loaded file). Re-runs canvasWell()'s layout so the change shows immediately.
+        void setCanvasFrameSize(const newui::Size& frameSize);
         newui::RootViewProxy* rootViewProxy() const { return rootViewProxy_; }
 
         // New/Open/Save/Undo/Redo - temporary testing-phase conveniences,

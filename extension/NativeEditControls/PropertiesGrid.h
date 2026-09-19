@@ -187,6 +187,9 @@ namespace CodeToolsVsix
         // continuously) every time the user also drags the divider while
         // editing. A no-op if nothing is currently being edited.
         void repositionLiveEditor();
+        // Grid or tree resized (the Properties pane's splitter) - the live editor's absolute
+        // bounds go stale otherwise.
+        newui::SyncReturn handleSizeChanged(newui::View& sender, const newui::Size& newSize);
 
         // Resizable key/value divider (bluesky/property-grid-design.md) -
         // hooked directly onto treeView_'s own onMouseDown/Move/Up

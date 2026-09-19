@@ -428,3 +428,26 @@ TEST_F(PropertiesModelTest, ParentPickerNeverAppearsForANonViewSelection)
     EXPECT_EQ(empty.childCount({}), 0u);
     EXPECT_EQ(empty.nodeAt({0}).kind, PropertiesModel::Kind::Invalid);
 }
+
+TEST_F(PropertiesModelTest, EveryEditableRowIsReadOnlyForAReadOnlyFlaggedView)
+{
+    std::size_t editableRows = 0;
+    for (std::size_t i = 0; i < model_.childCount({}); ++i) {
+        PropertiesModel::Node node = model_.nodeAt({i});
+        if (node.kind == PropertiesModel::Kind::PropertyLeaf || node.kind == PropertiesModel::Kind::PropertyGroup
+            || node.kind == PropertiesModel::Kind::PropertySubGroup) {
+            EXPECT_FALSE(node.readOnly && node.readOnlyReason == "Managed by its owning control") << i;
+            ++editableRows;
+        }
+    }
+    ASSERT_GT(editableRows, 0u);
+
+    button_.setDesignTimeFlag(newui::DesignTimeFlags::ReadOnly);
+    for (std::size_t i = 0; i < model_.childCount({}); ++i) {
+        PropertiesModel::Node node = model_.nodeAt({i});
+        if (node.kind == PropertiesModel::Kind::PropertyLeaf || node.kind == PropertiesModel::Kind::PropertyGroup
+            || node.kind == PropertiesModel::Kind::PropertySubGroup) {
+            EXPECT_TRUE(node.readOnly) << i;
+        }
+    }
+}

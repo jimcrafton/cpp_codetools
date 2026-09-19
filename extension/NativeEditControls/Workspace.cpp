@@ -36,8 +36,8 @@ namespace CodeToolsVsix
         // documented behavior), stays pinned there through every future resize too - a real,
         // reported bug. Real per-class natural sizing would need an actual measurement pass,
         // which doesn't exist in this toolkit at all - a fixed default is the honest v1 answer.
-        constexpr float kNewControlDefaultWidth = 120.0f;
-        constexpr float kNewControlDefaultHeight = 32.0f;
+        constexpr float kNewControlDefaultWidth = Workspace::kNewControlDefaultWidth;
+        constexpr float kNewControlDefaultHeight = Workspace::kNewControlDefaultHeight;
         constexpr float kNewControlDefaultMargin = 20.0f;
 
         void applyDefaultDesignTimeGeometry(newui::SubView* view)
@@ -61,6 +61,19 @@ namespace CodeToolsVsix
     // Reads the same as the tree it produces (leaves first, containers
     // last), unlike the nested child<ChildT>(fn) lambda pyramid this
     // replaced, which grew a closure-capture level per nesting depth.
+    void Workspace::setCanvasFrameSize(const newui::Size& frameSize)
+    {
+        auto* params = dynamic_cast<newui::AnchorLayoutParams*>(frameProxy_->layoutParams());
+        if (params == nullptr) {
+            return;
+        }
+        bool usable = frameSize.width > 0.0f && frameSize.height > 0.0f;
+        params->width = usable ? frameSize.width : kDefaultCanvasWidth;
+        params->height = usable ? frameSize.height : kDefaultCanvasHeight;
+        canvasWell_->updateLayout();
+        frameProxy_->updateLayout();
+    }
+
     Workspace::Workspace()
     {
         setVisible(true);

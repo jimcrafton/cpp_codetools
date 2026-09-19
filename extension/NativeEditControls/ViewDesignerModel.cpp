@@ -4,6 +4,27 @@
 
 namespace CodeToolsVsix
 {
+    namespace
+    {
+        void collectVisibleChildren(const newui::View& view, std::vector<newui::SubView*>& out)
+        {
+            for (newui::SubView* child : view.childViews()) {
+                if (child->isInternal()) {
+                    collectVisibleChildren(*child, out);
+                } else {
+                    out.push_back(child);
+                }
+            }
+        }
+    }
+
+    std::vector<newui::SubView*> ViewDesignerModel::visibleChildren(const newui::View& view)
+    {
+        std::vector<newui::SubView*> result;
+        collectVisibleChildren(view, result);
+        return result;
+    }
+
     void ViewDesignerModel::setRoot(newui::SubView* root)
     {
         root_ = root;
@@ -21,7 +42,7 @@ namespace CodeToolsVsix
             return root_ != nullptr ? 1 : 0;
         }
         newui::SubView* view = viewAt(path);
-        return view != nullptr ? view->childViews().size() : 0;
+        return view != nullptr ? visibleChildren(*view).size() : 0;
     }
 
     newui::SubView* ViewDesignerModel::viewAt(const std::vector<std::size_t>& path) const
@@ -31,7 +52,7 @@ namespace CodeToolsVsix
         }
         newui::SubView* current = root_;
         for (std::size_t i = 1; i < path.size(); ++i) {
-            const auto& children = current->childViews();
+            const std::vector<newui::SubView*> children = visibleChildren(*current);
             if (path[i] >= children.size()) {
                 return nullptr;
             }
@@ -48,15 +69,21 @@ namespace CodeToolsVsix
         if (static_cast<const newui::View*>(view) == static_cast<const newui::View*>(root_)) {
             return std::vector<std::size_t>{0};
         }
+        if (view->isInternal()) {
+            return std::nullopt;
+        }
 
         std::vector<std::size_t> reversed;
         const newui::View* current = view;
         while (static_cast<const newui::View*>(current) != static_cast<const newui::View*>(root_)) {
             const newui::View* parent = current->parent();
+            while (parent != nullptr && parent->isInternal()) {
+                parent = parent->parent();
+            }
             if (parent == nullptr) {
                 return std::nullopt;
             }
-            const auto& siblings = parent->childViews();
+            const std::vector<newui::SubView*> siblings = visibleChildren(*parent);
             auto it = std::find_if(siblings.begin(), siblings.end(), [current](const newui::SubView* s) {
                 return static_cast<const newui::View*>(s) == current;
             });

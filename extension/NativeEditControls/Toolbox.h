@@ -4,6 +4,7 @@
 
 #include <newui/controls.h>
 #include <newui/delegate.h>
+#include <newui/dragndrop.h>
 #include <newui/items.h>
 #include <newui/models.h>
 
@@ -83,11 +84,10 @@ namespace CodeToolsVsix
     // iconFor() - not every entry has one yet (ToolboxRegistry.cpp's own
     // class-name-to-icon table), those fall back to text-only.
     //
-    // Real drag-and-drop is out of scope for v1 (newui::dragndrop.h is
-    // shaped for OS-level file/text/image drags across the shell
-    // boundary, not an in-process "create a new control instance and
-    // attach it" gesture) - double-click an entry instead, which fires
-    // onEntryActivated with a freshly-created, unattached instance.
+    // Entries can be double-clicked (fires onEntryActivated with a freshly-created, unattached
+    // instance) or dragged: the tree is an OLE text drag source whose payload names the entry
+    // (dragPayloadFor()); a drop target - DesignerEditor's design surface - turns it back into a
+    // fresh instance with createFromDragPayload(). Only entry rows drag, never category headers.
     class Toolbox : public newui::ScrollView
     {
     public:
@@ -101,7 +101,21 @@ namespace CodeToolsVsix
 
         newui::TreeView* treeView() const { return treeView_; }
 
+        // The text a drag of entry (categoryIndex, entryIndex) carries - a private prefix plus the
+        // registry indices, so a drop target can tell it from arbitrary dragged text.
+        static std::wstring dragPayloadFor(std::size_t categoryIndex, std::size_t entryIndex);
+
+        // A fresh, unattached instance for a payload from dragPayloadFor(), or nullptr if text
+        // isn't one (foreign text, out-of-range indices, a factory that fails). The caller owns
+        // the result, same handoff as onEntryActivated.
+        static newui::SubView* createFromDragPayload(const std::wstring& text);
+
+        // Whether text is a payload naming a real registry entry - createFromDragPayload()'s
+        // validity check without creating anything (for hover feedback, called on every drag move).
+        static bool isDragPayload(const std::wstring& text);
+
     private:
+        newui::SyncReturn handleProvideDragText(newui::DropSource& sender, std::wstring& outText);
         newui::SyncReturn handleTreeDblClick(newui::View& sender, const newui::Point& pt,
             std::uint32_t btnMask, std::uint32_t keyMask);
 

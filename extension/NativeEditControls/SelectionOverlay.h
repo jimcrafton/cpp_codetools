@@ -71,6 +71,15 @@ namespace CodeToolsVsix
             reparentTargetProvider_ = std::move(provider);
         }
 
+        // Supplies a root-local rect to outline as "a new control would land here" while a Toolbox
+        // drag hovers over a free-position container (DesignerEditor::toolboxHoverGhostRect()) -
+        // those layouts draw no cue of their own, since a real dragged view shows its own bounds,
+        // but a not-yet-created control has none. Same "left unset paints nothing" default.
+        void setDropGhostProvider(std::function<std::optional<newui::Rect>()> provider)
+        {
+            dropGhostProvider_ = std::move(provider);
+        }
+
         // view's bounds in the coordinate space Overlay::paint() itself
         // already draws in (overlay.h - (0,0) at the hosting RootView's own
         // top-left). Walks view->parent() up to the root, undoing each
@@ -89,5 +98,6 @@ namespace CodeToolsVsix
         const newui::View* clipView_;
         std::function<std::vector<ActiveGeometryDrag>()> activeDragCuesProvider_;
         std::function<std::vector<newui::SubView*>()> reparentTargetProvider_;
+        std::function<std::optional<newui::Rect>()> dropGhostProvider_;
     };
 }
