@@ -46,10 +46,10 @@ namespace CodeToolsVsix
             view->setBounds(newui::Rect(kNewControlDefaultMargin, kNewControlDefaultMargin,
                 kNewControlDefaultWidth, kNewControlDefaultHeight));
             auto params = std::make_unique<newui::AnchorLayoutParams>(newui::Anchor::Left | newui::Anchor::Top);
-            params->leftMargin = kNewControlDefaultMargin;
-            params->topMargin = kNewControlDefaultMargin;
-            params->width = kNewControlDefaultWidth;
-            params->height = kNewControlDefaultHeight;
+            params->setLeftMargin(kNewControlDefaultMargin);
+            params->setTopMargin(kNewControlDefaultMargin);
+            params->setWidth(kNewControlDefaultWidth);
+            params->setHeight(kNewControlDefaultHeight);
             view->setLayoutParams(std::move(params));
         }
 
@@ -68,8 +68,8 @@ namespace CodeToolsVsix
             return;
         }
         bool usable = frameSize.width > 0.0f && frameSize.height > 0.0f;
-        params->width = usable ? frameSize.width : kDefaultCanvasWidth;
-        params->height = usable ? frameSize.height : kDefaultCanvasHeight;
+        params->setWidth(usable ? frameSize.width : kDefaultCanvasWidth);
+        params->setHeight(usable ? frameSize.height : kDefaultCanvasHeight);
         canvasWell_->updateLayout();
         frameProxy_->updateLayout();
     }
@@ -188,9 +188,9 @@ namespace CodeToolsVsix
         newui::ViewBuilder<newui::RootViewProxy> rootViewProxyBuilder;
         rootViewProxyBuilder.name("workspaceRootViewProxy")
             .layoutParams<newui::AnchorLayoutParams>([](newui::AnchorLayoutParams& p) {
-                p.anchors = newui::Anchor::Left | newui::Anchor::Top
-                          | newui::Anchor::Right | newui::Anchor::Bottom;
-                p.topMargin = newui::FrameProxy::kTitleBarHeight;
+                p.setAnchors(newui::Anchor::Left | newui::Anchor::Top
+                          | newui::Anchor::Right | newui::Anchor::Bottom);
+                p.setTopMargin(newui::FrameProxy::kTitleBarHeight);
             })
             // rootViewProxy_'s own children (the edited document's real controls) get a real
             // AnchorLayout so a dragged/moved control's position is expressed as a real,
@@ -225,9 +225,9 @@ namespace CodeToolsVsix
                 // expressed via AnchorLayout's CenterX/CenterY instead
                 // (width/height come from these params, not the child's
                 // own desiredSize() - see AnchorLayoutParams's own comment).
-                p.anchors = newui::Anchor::CenterX | newui::Anchor::CenterY;
-                p.width = Workspace::kDefaultCanvasWidth;
-                p.height = Workspace::kDefaultCanvasHeight;
+                p.setAnchors(newui::Anchor::CenterX | newui::Anchor::CenterY);
+                p.setWidth(Workspace::kDefaultCanvasWidth);
+                p.setHeight(Workspace::kDefaultCanvasHeight);
             })
             .configure([](newui::FrameProxy& f) { f.setDesignTime(true); });
         frameBuilder.child(rootViewProxy_);
@@ -413,10 +413,10 @@ namespace CodeToolsVsix
                 // params fields instead (real bug found live: this was
                 // originally left at its 0.0f default, so the label always
                 // painted into a zero-width rect regardless of its text).
-                p.anchors = newui::Anchor::Left | newui::Anchor::CenterY;
-                p.leftMargin = 8.0f;
-                p.width = 400.0f;
-                p.height = Workspace::kStatusBarHeight;
+                p.setAnchors(newui::Anchor::Left | newui::Anchor::CenterY);
+                p.setLeftMargin(8.0f);
+                p.setWidth(400.0f);
+                p.setHeight(Workspace::kStatusBarHeight);
             })
             .configure([](newui::Label& label) {
                 label.setTextColor(newui::UIColorManager::colorFor(newui::UIColorRole::HighlightText).toBLRgba32());

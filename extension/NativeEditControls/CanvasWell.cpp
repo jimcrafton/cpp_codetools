@@ -213,10 +213,10 @@ namespace CodeToolsVsix
         // FrameProxy needs to remain centered"), not from a fixed corner.
         if (resizing_ == ResizeEdge::Vertical) {
             float newWidth = std::fabs(localPt.x - centerX) * 2.0f;
-            params->width = (newWidth > kMinFrameSize) ? newWidth : kMinFrameSize;
+            params->setWidth((newWidth > kMinFrameSize) ? newWidth : kMinFrameSize);
         } else {
             float newHeight = std::fabs(localPt.y - centerY) * 2.0f;
-            params->height = (newHeight > kMinFrameSize) ? newHeight : kMinFrameSize;
+            params->setHeight((newHeight > kMinFrameSize) ? newHeight : kMinFrameSize);
         }
 
         // This view's own AnchorLayout is what actually owns frameProxy_'s

@@ -310,7 +310,7 @@ namespace CodeToolsVsix
         newui::ViewBuilder<SVSquare> svBuilder(new SVSquare(*this));
         svBuilder.name("colorPickerSVSquare")
             .visible(true)
-            .layoutParams<newui::FlexLayoutParams>([](newui::FlexLayoutParams& params) { params.weight = 1.0f; });
+            .layoutParams<newui::FlexLayoutParams>([](newui::FlexLayoutParams& params) { params.setWeight(1.0f); });
         svSquare_ = svBuilder.build();
         addChild(svSquare_);
 

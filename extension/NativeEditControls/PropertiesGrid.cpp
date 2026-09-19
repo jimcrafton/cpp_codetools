@@ -472,7 +472,18 @@ namespace CodeToolsVsix
         // goes out of scope at the end of this method) - harmless no-op timing-wise for a real
         // blocking showModal()/showOpenFile() editor (Color/Gradient/FilePath), which already
         // commits (if at all) before editAsync() returns below.
-        editor->setPostCommitSync([this] { markSelectedViewDirty(); treeView_->style().markDirty(); });
+        // Swapping the Layout must also re-kind every child's LayoutParams to match it (an
+        // AnchorLayoutParams left under a FlexLayout is silently ignored) - before the refresh
+        // below, so it arranges with the right params. model_.selected() is read when this runs
+        // (from the picker popup, later), not captured, so it never dangles.
+        const bool swapsLayout = node.property != nullptr && node.property->name() == "layout";
+        editor->setPostCommitSync([this, swapsLayout] {
+            if (swapsLayout && model_.selected() != nullptr) {
+                syncChildLayoutParams(*model_.selected());
+            }
+            markSelectedViewDirty();
+            treeView_->style().markDirty();
+        });
 
         // Deferred via RunLoop::post(), never called inline here - a real, reproduced Win32
         // focus-stealing bug otherwise: this method's own callers (activateLiveEditorIfClicked

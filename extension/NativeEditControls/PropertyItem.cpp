@@ -104,6 +104,18 @@ namespace CodeToolsVsix
         }
     }
 
+    std::string PropertyItem::groupTypeNameFor(const PropertiesModel::Node& node)
+    {
+        if (const newui::reflection::Class* nested = node.property->getClass(node.ownerInstance)) {
+            return nested->name();
+        }
+        // A flags enum (Anchor) is a SubProperties group with no Class behind it.
+        if (const newui::reflection::Enum* enumInfo = newui::reflection::ReflectionRegistry::getEnum(node.property->type())) {
+            return enumInfo->name();
+        }
+        return "?";
+    }
+
     void PropertyItem::paint(BLContext& ctx, const newui::Rect& rect, const std::vector<std::size_t>& path,
         newui::TreeController& controller)
     {
@@ -201,8 +213,7 @@ namespace CodeToolsVsix
                     // attached subclass ("layout (FlexLayout)"), not the
                     // useless declared base ("layout (Layout)") - see
                     // PropertiesModel::classifyProperty()'s own comment.
-                    const newui::reflection::Class* nested = node.property->getClass(node.ownerInstance);
-                    typeSuffix = " (" + (nested != nullptr ? nested->name() : std::string("?")) + ")";
+                    typeSuffix = " (" + groupTypeNameFor(node) + ")";
                 }
 
                 // "bounds" specifically, once PropertiesModel has determined its owning View's

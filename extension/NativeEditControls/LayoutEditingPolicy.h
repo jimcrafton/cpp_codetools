@@ -66,6 +66,15 @@ namespace CodeToolsVsix
     // are each responsible for checking that themselves before calling this.
     void applyFreePositionAnchorParams(newui::SubView* view, const newui::Rect& bounds);
 
+    // Makes every direct child's LayoutParams the kind container's *current* Layout reads
+    // (Anchor -> AnchorLayoutParams, Flex -> FlexLayoutParams, Grid -> GridLayoutParams; Card
+    // reads none, so any are dropped), then relayouts container. A child that already has the
+    // right kind keeps its values; a new AnchorLayoutParams is derived from the child's current
+    // bounds so it stays put, the others start at their defaults. Children marked Internal are
+    // skipped - their owning control manages them. Call after swapping container's Layout: the
+    // old kind's params are otherwise left on each child, ignored by the new Layout.
+    void syncChildLayoutParams(newui::View& container);
+
     class LayoutEditingPolicy;
 
     // One active drag's worth of state for SelectionOverlay to paint a cue for - bundles a

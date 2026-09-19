@@ -200,6 +200,16 @@ namespace CodeToolsVsix
         std::optional<std::any> parseValue(const std::string& text) const override;
     };
 
+    // std::size_t - an index or count (GridLayoutParams' row/column/rowSpan/columnSpan). Rejects a
+    // negative or non-numeric entry rather than wrapping it.
+    class SizeTPropertyEditor : public PropertyEditor
+    {
+    public:
+        using PropertyEditor::PropertyEditor;
+        std::string valueAsString() const override;
+        std::optional<std::any> parseValue(const std::string& text) const override;
+    };
+
     class FloatPropertyEditor : public PropertyEditor
     {
     public:

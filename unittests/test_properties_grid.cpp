@@ -594,14 +594,14 @@ TEST_F(PropertiesGridTest, EditingBoundsUnderAnAnchorLayoutParentSyncsAnchorLayo
     EXPECT_FLOAT_EQ(button_.bounds().width(), 250.0f);
     auto* params = dynamic_cast<newui::AnchorLayoutParams*>(button_.layoutParams());
     ASSERT_NE(params, nullptr) << "a directly-typed bounds edit must create real AnchorLayoutParams so a later relayout doesn't revert it";
-    EXPECT_FLOAT_EQ(params->width, 250.0f);
+    EXPECT_FLOAT_EQ(params->width(), 250.0f);
 
     ASSERT_TRUE(undoStack.canUndo());
     undoStack.undo();
     EXPECT_FLOAT_EQ(button_.bounds().width(), 100.0f);
     params = dynamic_cast<newui::AnchorLayoutParams*>(button_.layoutParams());
     ASSERT_NE(params, nullptr);
-    EXPECT_FLOAT_EQ(params->width, 100.0f) << "undo must restore the old AnchorLayoutParams too, not just bounds()";
+    EXPECT_FLOAT_EQ(params->width(), 100.0f) << "undo must restore the old AnchorLayoutParams too, not just bounds()";
 
     container.removeChild(&button_);
 }

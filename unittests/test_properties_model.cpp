@@ -3,6 +3,7 @@
 #include <newui/controls.h>
 #include <newui/layout.h>
 #include <newui/reflection.h>
+#include <newui/undostack.h>
 
 #include <gtest/gtest.h>
 
@@ -25,7 +26,13 @@ protected:
         CodeToolsVsix::PropertyEditorRegistry::instance().registerBuiltinEditors();
         buttonClass_ = classinfo(typeid(newui::Button));
         ASSERT_NE(buttonClass_, nullptr);
-        buttonClass_->allProperties(properties_);
+        std::vector<const Property*> all;
+        buttonClass_->allProperties(all);
+        for (const Property* property : all) {
+            if (!property->isCollection()) {   // the grid hides collections (childViews)
+                properties_.push_back(property);
+            }
+        }
         buttonClass_->allDelegates(delegates_);
         ASSERT_FALSE(properties_.empty());
         ASSERT_FALSE(delegates_.empty());
@@ -450,4 +457,170 @@ TEST_F(PropertiesModelTest, EveryEditableRowIsReadOnlyForAReadOnlyFlaggedView)
             EXPECT_TRUE(node.readOnly) << i;
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// layoutParams - the selected control's per-child layout data, edited in place. Its fields are
+// real reflected properties (getter/setter pairs), so the group expands and each row commits.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+    // The root row for the "layoutParams" property, or npos.
+    std::size_t layoutParamsRow(PropertiesModel& model)
+    {
+        for (std::size_t i = 0; i < model.childCount({}); ++i) {
+            PropertiesModel::Node node = model.nodeAt({i});
+            if (node.property != nullptr && node.property->name() == "layoutParams") {
+                return i;
+            }
+        }
+        return static_cast<std::size_t>(-1);
+    }
+
+    // The child of group row `group` whose property is `name`, or Invalid.
+    PropertiesModel::Node childNamed(PropertiesModel& model, std::size_t group, const std::string& name)
+    {
+        for (std::size_t c = 0; c < model.childCount({group}); ++c) {
+            PropertiesModel::Node node = model.nodeAt({group, c});
+            if (node.property != nullptr && node.property->name() == name) {
+                return node;
+            }
+        }
+        return PropertiesModel::Node();
+    }
+}
+
+TEST_F(PropertiesModelTest, AnchorLayoutParamsExpandsIntoItsEditableFields)
+{
+    button_.setLayoutParams(std::make_unique<newui::AnchorLayoutParams>());
+    model_.setSelection(&button_);
+
+    std::size_t row = layoutParamsRow(model_);
+    ASSERT_NE(row, static_cast<std::size_t>(-1));
+    EXPECT_EQ(model_.nodeAt({row}).kind, PropertiesModel::Kind::PropertyGroup);
+    EXPECT_EQ(model_.childCount({row}), 7u);
+
+    EXPECT_EQ(childNamed(model_, row, "anchors").kind, PropertiesModel::Kind::PropertySubGroup);  // flags
+    for (const char* name : { "leftMargin", "topMargin", "rightMargin", "bottomMargin", "width", "height" }) {
+        EXPECT_EQ(childNamed(model_, row, name).kind, PropertiesModel::Kind::PropertyLeaf) << name;
+    }
+}
+
+TEST_F(PropertiesModelTest, EditingAnAnchorLayoutParamsFieldWritesThroughAndUndoes)
+{
+    auto* params = new newui::AnchorLayoutParams();
+    button_.setLayoutParams(std::unique_ptr<newui::LayoutParams>(params));
+    model_.setSelection(&button_);
+
+    std::size_t row = layoutParamsRow(model_);
+    ASSERT_NE(row, static_cast<std::size_t>(-1));
+    PropertiesModel::Node margin = childNamed(model_, row, "leftMargin");
+    ASSERT_EQ(margin.kind, PropertiesModel::Kind::PropertyLeaf);
+
+    auto editor = CodeToolsVsix::PropertyEditorRegistry::instance()
+        .createEditor(margin.property, margin.ownerClass, margin.ownerInstance);
+    ASSERT_NE(editor, nullptr);
+    newui::UndoStack undo;
+    editor->setUndoStack(&undo);
+
+    editor->setValueFromString("12");
+    EXPECT_FLOAT_EQ(params->leftMargin(), 12.0f);
+    undo.undo();
+    EXPECT_FLOAT_EQ(params->leftMargin(), 0.0f);
+    undo.redo();
+    EXPECT_FLOAT_EQ(params->leftMargin(), 12.0f);
+}
+
+TEST_F(PropertiesModelTest, FlexAndGridLayoutParamsExposeTheirFieldsToo)
+{
+    button_.setLayoutParams(std::make_unique<newui::FlexLayoutParams>());
+    model_.setSelection(&button_);
+    std::size_t row = layoutParamsRow(model_);
+    ASSERT_NE(row, static_cast<std::size_t>(-1));
+    EXPECT_EQ(childNamed(model_, row, "weight").kind, PropertiesModel::Kind::PropertyLeaf);
+
+    button_.setLayoutParams(std::make_unique<newui::GridLayoutParams>());
+    model_.setSelection(&button_);
+    row = layoutParamsRow(model_);
+    ASSERT_NE(row, static_cast<std::size_t>(-1));
+    for (const char* name : { "row", "column", "rowSpan", "columnSpan", "horizontalAlignment", "verticalAlignment" }) {
+        EXPECT_EQ(childNamed(model_, row, name).kind, PropertiesModel::Kind::PropertyLeaf) << name;
+    }
+}
+
+TEST_F(PropertiesModelTest, GridLayoutParamsCellFieldsTakeUnsignedIntegersOnly)
+{
+    auto* params = new newui::GridLayoutParams();
+    button_.setLayoutParams(std::unique_ptr<newui::LayoutParams>(params));
+    model_.setSelection(&button_);
+    std::size_t row = layoutParamsRow(model_);
+    ASSERT_NE(row, static_cast<std::size_t>(-1));
+
+    PropertiesModel::Node column = childNamed(model_, row, "column");
+    auto editor = CodeToolsVsix::PropertyEditorRegistry::instance()
+        .createEditor(column.property, column.ownerClass, column.ownerInstance);
+    ASSERT_NE(editor, nullptr);
+
+    editor->setValueFromString("3");
+    EXPECT_EQ(params->column(), 3u);
+    EXPECT_EQ(editor->valueAsString(), "3");
+
+    editor->setValueFromString("-1");   // would wrap to a huge index
+    editor->setValueFromString("2.5");
+    editor->setValueFromString("abc");
+    editor->setValueFromString("");
+    EXPECT_EQ(params->column(), 3u);
+}
+
+TEST_F(PropertiesModelTest, TheChildViewsCollectionIsNotListed)
+{
+    std::size_t rows = model_.childCount({});
+    for (std::size_t i = 0; i < rows; ++i) {
+        PropertiesModel::Node node = model_.nodeAt({i});
+        if (node.property != nullptr) {
+            EXPECT_NE(node.property->name(), "childViews");
+            EXPECT_FALSE(node.property->isCollection());
+        }
+    }
+    // ...yet it is still a real reflected property of the class (the file format needs it).
+    EXPECT_NE(classinfo(typeid(newui::View))->property("childViews"), nullptr);
+}
+
+TEST_F(PropertiesModelTest, DerivedClientBoundsAndTransientOriginAreNotListed)
+{
+    for (std::size_t i = 0; i < model_.childCount({}); ++i) {
+        PropertiesModel::Node node = model_.nodeAt({i});
+        if (node.property != nullptr) {
+            EXPECT_NE(node.property->name(), "clientBounds");
+            EXPECT_NE(node.property->name(), "origin");
+        }
+    }
+}
+
+TEST_F(PropertiesModelTest, TheCursorKindRowIsAnEditableDropdownThatWritesThrough)
+{
+    std::size_t cursorRow = static_cast<std::size_t>(-1);
+    for (std::size_t i = 0; i < model_.childCount({}); ++i) {
+        PropertiesModel::Node node = model_.nodeAt({i});
+        if (node.property != nullptr && node.property->name() == "cursor") {
+            cursorRow = i;
+        }
+    }
+    ASSERT_NE(cursorRow, static_cast<std::size_t>(-1));
+
+    PropertiesModel::Node kind;
+    for (std::size_t c = 0; c < model_.childCount({cursorRow}); ++c) {
+        PropertiesModel::Node child = model_.nodeAt({cursorRow, c});
+        if (child.property != nullptr && child.property->name() == "kind") {
+            kind = child;
+        }
+    }
+    ASSERT_EQ(kind.kind, PropertiesModel::Kind::PropertyLeaf);
+
+    auto editor = CodeToolsVsix::PropertyEditorRegistry::instance()
+        .createEditor(kind.property, kind.ownerClass, kind.ownerInstance);
+    ASSERT_NE(editor, nullptr);
+    editor->setValueFromString("Hand");
+    EXPECT_EQ(button_.cursorKind(), newui::CursorKind::Hand);
 }

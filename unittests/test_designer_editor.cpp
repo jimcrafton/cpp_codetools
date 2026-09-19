@@ -1366,10 +1366,10 @@ TEST(DesignerEditorToolbar, ToolboxAddGivesTheNewControlSensibleDefaultBoundsAnd
 
     auto* params = dynamic_cast<newui::AnchorLayoutParams*>(created->layoutParams());
     ASSERT_NE(params, nullptr);
-    EXPECT_TRUE(newui::hasAnchor(params->anchors, newui::Anchor::Left));
-    EXPECT_TRUE(newui::hasAnchor(params->anchors, newui::Anchor::Top));
-    EXPECT_GT(params->width, 0.0f);
-    EXPECT_GT(params->height, 0.0f);
+    EXPECT_TRUE(newui::hasAnchor(params->anchors(), newui::Anchor::Left));
+    EXPECT_TRUE(newui::hasAnchor(params->anchors(), newui::Anchor::Top));
+    EXPECT_GT(params->width(), 0.0f);
+    EXPECT_GT(params->height(), 0.0f);
 }
 
 TEST(DesignerEditorToolbar, ToolboxAddNestsIntoTheSelectedContainerWhenOneExists)

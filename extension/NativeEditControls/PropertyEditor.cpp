@@ -314,6 +314,29 @@ namespace CodeToolsVsix
         return std::nullopt;
     }
 
+    std::string SizeTPropertyEditor::valueAsString() const
+    {
+        return std::to_string(std::any_cast<std::size_t>(rawValue()));
+    }
+
+    std::optional<std::any> SizeTPropertyEditor::parseValue(const std::string& text) const
+    {
+        // std::stoull() accepts "-1" and wraps it, so a sign is refused up front.
+        if (text.empty() || text.find_first_not_of("0123456789") != std::string::npos) {
+            return std::nullopt;
+        }
+        try {
+            std::size_t consumed = 0;
+            unsigned long long value = std::stoull(text, &consumed);
+            if (consumed == text.size()) {
+                return std::any(static_cast<std::size_t>(value));
+            }
+        } catch (const std::exception&) {
+            // out of range: falls through to nullopt below
+        }
+        return std::nullopt;
+    }
+
     std::string FloatPropertyEditor::valueAsString() const
     {
         return std::to_string(std::any_cast<float>(rawValue()));
@@ -1093,6 +1116,8 @@ namespace CodeToolsVsix
             [](const newui::reflection::Property* p, void* instance) { return std::make_unique<BoolPropertyEditor>(p, instance); });
         registerEditor(std::type_index(typeid(int)),
             [](const newui::reflection::Property* p, void* instance) { return std::make_unique<IntPropertyEditor>(p, instance); });
+        registerEditor(std::type_index(typeid(std::size_t)),
+            [](const newui::reflection::Property* p, void* instance) { return std::make_unique<SizeTPropertyEditor>(p, instance); });
         registerEditor(std::type_index(typeid(float)),
             [](const newui::reflection::Property* p, void* instance) { return std::make_unique<FloatPropertyEditor>(p, instance); });
         registerEditor(std::type_index(typeid(std::string)),

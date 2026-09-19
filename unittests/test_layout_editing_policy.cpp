@@ -1,6 +1,7 @@
 #include "../extension/NativeEditControls/LayoutEditingPolicy.h"
 
 #include <newui/rootview.h>
+#include <newui/layout.h>
 #include <newui/subview.h>
 
 #include <blend2d/blend2d.h>
@@ -140,15 +141,15 @@ TEST(FreePositionPolicyCommit, WithAnAnchorLayoutParentWritesFreshAnchorLayoutPa
 
     auto* params = dynamic_cast<newui::AnchorLayoutParams*>(view->layoutParams());
     ASSERT_NE(params, nullptr);
-    EXPECT_FLOAT_EQ(params->leftMargin, 20.0f);
-    EXPECT_FLOAT_EQ(params->topMargin, 30.0f);
+    EXPECT_FLOAT_EQ(params->leftMargin(), 20.0f);
+    EXPECT_FLOAT_EQ(params->topMargin(), 30.0f);
 
     action.undoIt();
 
     params = dynamic_cast<newui::AnchorLayoutParams*>(view->layoutParams());
     ASSERT_NE(params, nullptr);
-    EXPECT_FLOAT_EQ(params->leftMargin, 0.0f);
-    EXPECT_FLOAT_EQ(params->topMargin, 0.0f);
+    EXPECT_FLOAT_EQ(params->leftMargin(), 0.0f);
+    EXPECT_FLOAT_EQ(params->topMargin(), 0.0f);
 
     delete view;
     delete parent;
@@ -409,8 +410,8 @@ TEST(GridCellPolicyApplyPreview, SetsGridLayoutParamsAndRelayouts) {
 
     auto* params = dynamic_cast<newui::GridLayoutParams*>(child->layoutParams());
     ASSERT_NE(params, nullptr);
-    EXPECT_EQ(params->row, 0u);
-    EXPECT_EQ(params->column, 2u);
+    EXPECT_EQ(params->row(), 0u);
+    EXPECT_EQ(params->column(), 2u);
     EXPECT_FLOAT_EQ(child->bounds().left(), 45.0f);
 
     delete child;
@@ -507,4 +508,100 @@ TEST(NoGeometryPolicy, ResolveAndCommitAreBothInertNoOps) {
     newui::UndoableAction action = policy.commit(ctx, result, result);
     EXPECT_FALSE(static_cast<bool>(action.doIt));
     EXPECT_FALSE(static_cast<bool>(action.undoIt));
+}
+
+// ---------------------------------------------------------------------------
+// syncChildLayoutParams() - a Layout swap must re-kind each child's LayoutParams to match.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+    struct ParamsContainer
+    {
+        ParamsContainer()
+        {
+            container = new newui::SubView();
+            container->setVisible(true);
+            container->setBounds(newui::Rect(0, 0, 300, 200));
+            container->setLayout(std::make_unique<newui::AnchorLayout>());
+            for (int i = 0; i < 2; ++i) {
+                auto* child = new newui::SubView();
+                child->setVisible(true);
+                child->setBounds(newui::Rect(10.0f + 50.0f * i, 20.0f, 40, 30));
+                container->addChild(child);
+                children.push_back(child);
+            }
+        }
+        ~ParamsContainer()
+        {
+            container->destroy();
+            delete container;
+        }
+        newui::SubView* container;
+        std::vector<newui::SubView*> children;
+    };
+}
+
+TEST(SyncChildLayoutParams, AnchorToFlexGivesEveryChildFlexParams)
+{
+    ParamsContainer f;
+    syncChildLayoutParams(*f.container);  // anchors first: each child pinned where it sits
+    auto* anchored = dynamic_cast<newui::AnchorLayoutParams*>(f.children[1]->layoutParams());
+    ASSERT_NE(anchored, nullptr);
+    EXPECT_FLOAT_EQ(anchored->leftMargin(), 60.0f);
+    EXPECT_FLOAT_EQ(anchored->topMargin(), 20.0f);
+
+    f.container->setLayout(std::make_unique<newui::FlexLayout>(newui::Orientation::Vertical));
+    syncChildLayoutParams(*f.container);
+    for (newui::SubView* child : f.children) {
+        EXPECT_NE(dynamic_cast<newui::FlexLayoutParams*>(child->layoutParams()), nullptr);
+    }
+}
+
+TEST(SyncChildLayoutParams, FlexToAnchorPinsEachChildWhereItCurrentlySits)
+{
+    ParamsContainer f;
+    f.container->setLayout(std::make_unique<newui::FlexLayout>(newui::Orientation::Vertical));
+    syncChildLayoutParams(*f.container);
+    f.children[0]->setBounds(newui::Rect(7, 9, 40, 30));
+
+    f.container->setLayout(std::make_unique<newui::AnchorLayout>());
+    syncChildLayoutParams(*f.container);
+
+    auto* params = dynamic_cast<newui::AnchorLayoutParams*>(f.children[0]->layoutParams());
+    ASSERT_NE(params, nullptr);
+    EXPECT_FLOAT_EQ(params->leftMargin(), 7.0f);
+    EXPECT_FLOAT_EQ(params->topMargin(), 9.0f);
+}
+
+TEST(SyncChildLayoutParams, AGridLayoutGetsGridParamsAndACardLayoutDropsThem)
+{
+    ParamsContainer f;
+    f.container->setLayout(std::make_unique<newui::GridLayout>());
+    syncChildLayoutParams(*f.container);
+    for (newui::SubView* child : f.children) {
+        EXPECT_NE(dynamic_cast<newui::GridLayoutParams*>(child->layoutParams()), nullptr);
+    }
+
+    f.container->setLayout(std::make_unique<newui::CardLayout>());
+    syncChildLayoutParams(*f.container);
+    for (newui::SubView* child : f.children) {
+        EXPECT_EQ(child->layoutParams(), nullptr);
+    }
+}
+
+TEST(SyncChildLayoutParams, ParamsOfTheRightKindKeepTheirValuesAndInternalChildrenAreSkipped)
+{
+    ParamsContainer f;
+    f.container->setLayout(std::make_unique<newui::FlexLayout>(newui::Orientation::Horizontal));
+    auto weighted = std::make_unique<newui::FlexLayoutParams>(3.0f);
+    f.children[0]->setLayoutParams(std::move(weighted));
+    f.children[1]->setDesignTimeFlag(newui::DesignTimeFlags::Internal);
+
+    syncChildLayoutParams(*f.container);
+
+    auto* kept = dynamic_cast<newui::FlexLayoutParams*>(f.children[0]->layoutParams());
+    ASSERT_NE(kept, nullptr);
+    EXPECT_FLOAT_EQ(kept->weight(), 3.0f);
+    EXPECT_EQ(f.children[1]->layoutParams(), nullptr);  // internal: untouched
 }

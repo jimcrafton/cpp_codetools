@@ -29,11 +29,46 @@ namespace CodeToolsVsix
             params = owned.get();
             view->setLayoutParams(std::move(owned));
         }
-        params->anchors = newui::Anchor::Left | newui::Anchor::Top;
-        params->leftMargin = bounds.left();
-        params->topMargin = bounds.top();
-        params->width = bounds.size().width;
-        params->height = bounds.size().height;
+        params->setAnchors(newui::Anchor::Left | newui::Anchor::Top);
+        params->setLeftMargin(bounds.left());
+        params->setTopMargin(bounds.top());
+        params->setWidth(bounds.size().width);
+        params->setHeight(bounds.size().height);
+    }
+
+    void syncChildLayoutParams(newui::View& container)
+    {
+        newui::Layout* layout = container.layout();
+        const bool anchor = dynamic_cast<newui::AnchorLayout*>(layout) != nullptr;
+        const bool flex = dynamic_cast<newui::FlexLayout*>(layout) != nullptr;
+        const bool grid = dynamic_cast<newui::GridLayout*>(layout) != nullptr;
+        const bool card = dynamic_cast<newui::CardLayout*>(layout) != nullptr;
+        if (!anchor && !flex && !grid && !card) {
+            return;
+        }
+
+        for (newui::SubView* child : container.childViews()) {
+            if (child->isInternal()) {
+                continue;
+            }
+            newui::LayoutParams* current = child->layoutParams();
+            if (anchor) {
+                if (dynamic_cast<newui::AnchorLayoutParams*>(current) == nullptr) {
+                    applyFreePositionAnchorParams(child, child->bounds());
+                }
+            } else if (flex) {
+                if (dynamic_cast<newui::FlexLayoutParams*>(current) == nullptr) {
+                    child->setLayoutParams(std::make_unique<newui::FlexLayoutParams>());
+                }
+            } else if (grid) {
+                if (dynamic_cast<newui::GridLayoutParams*>(current) == nullptr) {
+                    child->setLayoutParams(std::make_unique<newui::GridLayoutParams>());
+                }
+            } else if (current != nullptr) {
+                child->setLayoutParams(nullptr);
+            }
+        }
+        container.updateLayout();
     }
 
     namespace
@@ -45,8 +80,8 @@ namespace CodeToolsVsix
             if (params == nullptr) {
                 view->setLayoutParams(std::make_unique<newui::GridLayoutParams>(row, column));
             } else {
-                params->row = row;
-                params->column = column;
+                params->setRow(row);
+                params->setColumn(column);
             }
             parent->updateLayout();
         }

@@ -10,6 +10,20 @@ namespace CodeToolsVsix
 
     namespace
     {
+        // The properties the grid lists for cls - allProperties() minus collections (childViews):
+        // a collection has no editor, and the tree it holds is edited on the canvas and in the
+        // Outline. It stays a real, serialized property; this only hides it from the grid.
+        void gridProperties(const Class* cls, std::vector<const Property*>& out)
+        {
+            std::vector<const Property*> all;
+            cls->allProperties(all);
+            for (const Property* property : all) {
+                if (!property->isCollection()) {
+                    out.push_back(property);
+                }
+            }
+        }
+
         // Gates PropertiesModel::Node::readOnly for "bounds" specifically - the only Rect-typed
         // registered property (see RectPropertyEditor's own commitValue() override comment,
         // PropertyEditor.h), so ownerInstance here is always a real View* at runtime once
@@ -125,7 +139,7 @@ namespace CodeToolsVsix
             std::size_t propertyIndex = index - parentRow;
 
             std::vector<const Property*> properties;
-            container.ownerClass->allProperties(properties);
+            gridProperties(container.ownerClass, properties);
             if (propertyIndex < properties.size()) {
                 Node node = classifyProperty(properties[propertyIndex], container.ownerClass, container.ownerInstance);
                 std::string reason;
@@ -153,7 +167,7 @@ namespace CodeToolsVsix
                 return Node();
             }
             std::vector<const Property*> properties;
-            nested->allProperties(properties);
+            gridProperties(nested, properties);
             if (index < properties.size()) {
                 return classifyProperty(properties[index], nested, nestedInstance);
             }
@@ -201,7 +215,7 @@ namespace CodeToolsVsix
         switch (node.kind) {
         case Kind::Root: {
             std::vector<const Property*> properties;
-            node.ownerClass->allProperties(properties);
+            gridProperties(node.ownerClass, properties);
             std::vector<const Delegate*> delegates;
             node.ownerClass->allDelegates(delegates);
             std::size_t parentRow = showsParentPicker() ? 1 : 0;
@@ -214,7 +228,7 @@ namespace CodeToolsVsix
                 return 0;
             }
             std::vector<const Property*> properties;
-            nested->allProperties(properties);
+            gridProperties(nested, properties);
             return properties.size();
         }
         case Kind::PropertySubGroup: {

@@ -37,11 +37,11 @@ TEST(Workspace, RootViewProxyIsAnchoredBelowTheFrameProxysTitleBar) {
 
     auto* params = dynamic_cast<newui::AnchorLayoutParams*>(workspace->rootViewProxy()->layoutParams());
     ASSERT_NE(params, nullptr);
-    EXPECT_TRUE(newui::hasAnchor(params->anchors, newui::Anchor::Left));
-    EXPECT_TRUE(newui::hasAnchor(params->anchors, newui::Anchor::Top));
-    EXPECT_TRUE(newui::hasAnchor(params->anchors, newui::Anchor::Right));
-    EXPECT_TRUE(newui::hasAnchor(params->anchors, newui::Anchor::Bottom));
-    EXPECT_FLOAT_EQ(params->topMargin, newui::FrameProxy::kTitleBarHeight);
+    EXPECT_TRUE(newui::hasAnchor(params->anchors(), newui::Anchor::Left));
+    EXPECT_TRUE(newui::hasAnchor(params->anchors(), newui::Anchor::Top));
+    EXPECT_TRUE(newui::hasAnchor(params->anchors(), newui::Anchor::Right));
+    EXPECT_TRUE(newui::hasAnchor(params->anchors(), newui::Anchor::Bottom));
+    EXPECT_FLOAT_EQ(params->topMargin(), newui::FrameProxy::kTitleBarHeight);
 
     delete workspace;
 }

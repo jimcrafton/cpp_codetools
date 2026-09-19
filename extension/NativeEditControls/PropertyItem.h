@@ -113,5 +113,9 @@ namespace CodeToolsVsix
         // why: an accidental slow double-click on Color/Gradient used to be indistinguishable from
         // two intentional single clicks before this changed).
         static newui::Rect ellipsisButtonRectFor(const newui::Rect& contentRect);
+
+        // The "(Type)" a group header shows for node: its real class name, else its enum's name
+        // (a flags enum like Anchor has no Class), else "?".
+        static std::string groupTypeNameFor(const PropertiesModel::Node& node);
     };
 }

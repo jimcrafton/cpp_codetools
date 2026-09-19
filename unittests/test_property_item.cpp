@@ -36,6 +36,22 @@ namespace {
     }
 }
 
+namespace {
+    // The root properties PropertiesModel lists for a Button, in row order - allProperties() minus
+    // collections (childViews), which the grid hides.
+    std::vector<const newui::reflection::Property*> listedProperties() {
+        std::vector<const newui::reflection::Property*> all;
+        classinfo(typeid(newui::Button))->allProperties(all);
+        std::vector<const newui::reflection::Property*> listed;
+        for (const auto* property : all) {
+            if (!property->isCollection()) {
+                listed.push_back(property);
+            }
+        }
+        return listed;
+    }
+}
+
 class PropertyItemTest : public ::testing::Test {
 protected:
     void SetUp() override {
@@ -68,8 +84,7 @@ protected:
 
 TEST_F(PropertyItemTest, LeafPropertyRowPaintsSomething)
 {
-    std::vector<const newui::reflection::Property*> properties;
-    classinfo(typeid(newui::Button))->allProperties(properties);
+    std::vector<const newui::reflection::Property*> properties = listedProperties();
     ASSERT_FALSE(properties.empty());
 
     // Some root property is bound to end up PropertyLeaf (the model's own
@@ -90,8 +105,7 @@ TEST_F(PropertyItemTest, LeafPropertyRowPaintsSomething)
 
 TEST_F(PropertyItemTest, PropertyGroupRowForcesSelectedFalseAndPaintsALabel)
 {
-    std::vector<const newui::reflection::Property*> properties;
-    classinfo(typeid(newui::Button))->allProperties(properties);
+    std::vector<const newui::reflection::Property*> properties = listedProperties();
 
     std::size_t groupIndex = properties.size();
     for (std::size_t i = 0; i < properties.size(); ++i) {
@@ -116,8 +130,7 @@ TEST_F(PropertyItemTest, PropertyGroupRowWithNoLiveInstanceAttachedStillPaints)
     // null address(). This exercises the "(none)" type-suffix branch
     // (PropertyItem::paint()'s own comment) rather than crashing on the
     // null pointer.
-    std::vector<const newui::reflection::Property*> properties;
-    classinfo(typeid(newui::Button))->allProperties(properties);
+    std::vector<const newui::reflection::Property*> properties = listedProperties();
 
     std::size_t layoutIndex = properties.size();
     for (std::size_t i = 0; i < properties.size(); ++i) {
@@ -140,8 +153,7 @@ TEST_F(PropertyItemTest, PropertyGroupRowWithNoLiveInstanceAttachedStillPaints)
 // EditStyle::Dialog) rather than crashing on the ellipsis geometry/paintEllipsisButton() call.
 TEST_F(PropertyItemTest, StyleGroupHeaderWithATypeSwapEditorStillPaintsItsEllipsisButton)
 {
-    std::vector<const newui::reflection::Property*> properties;
-    classinfo(typeid(newui::Button))->allProperties(properties);
+    std::vector<const newui::reflection::Property*> properties = listedProperties();
 
     std::size_t styleIndex = properties.size();
     for (std::size_t i = 0; i < properties.size(); ++i) {
@@ -176,8 +188,7 @@ TEST(PropertyItemEllipsisButtonRectFor, RightAlignedAndVerticallyCenteredWithinC
 
 TEST_F(PropertyItemTest, DelegatesHeaderRowForcesSelectedFalseAndPaints)
 {
-    std::vector<const newui::reflection::Property*> properties;
-    classinfo(typeid(newui::Button))->allProperties(properties);
+    std::vector<const newui::reflection::Property*> properties = listedProperties();
 
     EXPECT_TRUE(paintPath({properties.size()}, /*selectedBefore=*/true));
     EXPECT_FALSE(lastPaintedSelected_);
@@ -185,8 +196,7 @@ TEST_F(PropertyItemTest, DelegatesHeaderRowForcesSelectedFalseAndPaints)
 
 TEST_F(PropertyItemTest, DelegateEntryRowPaints)
 {
-    std::vector<const newui::reflection::Property*> properties;
-    classinfo(typeid(newui::Button))->allProperties(properties);
+    std::vector<const newui::reflection::Property*> properties = listedProperties();
     std::vector<const newui::reflection::Delegate*> delegates;
     classinfo(typeid(newui::Button))->allDelegates(delegates);
     ASSERT_FALSE(delegates.empty());
@@ -196,8 +206,7 @@ TEST_F(PropertyItemTest, DelegateEntryRowPaints)
 
 TEST_F(PropertyItemTest, UnsupportedPropertyRowPaintsKeyAndPlaceholder)
 {
-    std::vector<const newui::reflection::Property*> properties;
-    classinfo(typeid(newui::Button))->allProperties(properties);
+    std::vector<const newui::reflection::Property*> properties = listedProperties();
 
     std::size_t unsupportedIndex = properties.size();
     for (std::size_t i = 0; i < properties.size(); ++i) {
@@ -287,4 +296,32 @@ TEST_F(PropertyItemTest, ParentPickerRowStillPaintsWithNoParentButtonIsNeverGive
     ASSERT_EQ(button_.parent(), nullptr);
     EXPECT_NE(model_.nodeAt({0}).kind, PropertiesModel::Kind::ParentPicker);
     EXPECT_NE(model_.nodeAt({0}).kind, PropertiesModel::Kind::Invalid);
+}
+
+TEST(PropertyItemGroupTypeName, NamesTheClassOrElseTheEnumNeverAQuestionMark)
+{
+    CodeToolsVsix::PropertyEditorRegistry::instance().registerBuiltinEditors();
+
+    newui::Button button;
+    button.setLayoutParams(std::make_unique<newui::AnchorLayoutParams>());
+    CodeToolsVsix::PropertiesModel model;
+    model.setSelection(&button);
+
+    bool sawLayoutParams = false;
+    for (std::size_t i = 0; i < model.childCount({}); ++i) {
+        CodeToolsVsix::PropertiesModel::Node node = model.nodeAt({i});
+        if (node.property == nullptr || node.property->name() != "layoutParams") {
+            continue;
+        }
+        sawLayoutParams = true;
+        EXPECT_EQ(CodeToolsVsix::PropertyItem::groupTypeNameFor(node), "AnchorLayoutParams");
+        for (std::size_t c = 0; c < model.childCount({i}); ++c) {
+            CodeToolsVsix::PropertiesModel::Node child = model.nodeAt({i, c});
+            if (child.property != nullptr && child.property->name() == "anchors") {
+                EXPECT_EQ(child.kind, CodeToolsVsix::PropertiesModel::Kind::PropertySubGroup);
+                EXPECT_EQ(CodeToolsVsix::PropertyItem::groupTypeNameFor(child), "Anchor");
+            }
+        }
+    }
+    EXPECT_TRUE(sawLayoutParams);
 }

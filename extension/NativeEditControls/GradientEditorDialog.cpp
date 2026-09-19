@@ -1133,8 +1133,8 @@ namespace CodeToolsVsix
             .visible(true)
             .bounds(newui::Rect(0.0f, 0.0f, kDialogWidth, kDialogHeight))
             .layoutParams<newui::AnchorLayoutParams>([](newui::AnchorLayoutParams& params) {
-                params.anchors = newui::Anchor::Left | newui::Anchor::Top
-                                | newui::Anchor::Right | newui::Anchor::Bottom;
+                params.setAnchors(newui::Anchor::Left | newui::Anchor::Top
+                                | newui::Anchor::Right | newui::Anchor::Bottom);
             })
             .layout<newui::FlexLayout>([](newui::FlexLayout& layout) {
                 layout.setOrientation(newui::Orientation::Vertical);
@@ -1225,7 +1225,7 @@ namespace CodeToolsVsix
         newui::ViewBuilder<newui::TextField> hexFieldBuilder;
         hexFieldBuilder.name("gradientHexField")
             .visible(true)
-            .layoutParams<newui::FlexLayoutParams>([](newui::FlexLayoutParams& params) { params.weight = 1.0f; });
+            .layoutParams<newui::FlexLayoutParams>([](newui::FlexLayoutParams& params) { params.setWeight(1.0f); });
         hexField_ = hexFieldBuilder.build();
         hexField_->onLostFocus.add([this](newui::View&) { commitHexField(); return newui::SyncReturn::Ignored; });
         hexField_->onReturnPressed.add([this](newui::TextField&) { commitHexField(); return newui::SyncReturn::Handled; });
@@ -1306,7 +1306,7 @@ namespace CodeToolsVsix
             .visible(true)
             .desiredSize(newui::Size(kAngleLabelWidth, kRowHeight))
             .layoutParams<newui::FlexLayoutParams>([](newui::FlexLayoutParams& params) {
-                params.crossAxisAlignment = newui::CrossAxisAlignment::Center;
+                params.setCrossAxisAlignment(newui::CrossAxisAlignment::Center);
             });
         linearAngleLabel_ = angleLabelBuilder.build();
         linearPage_->addChild(linearAngleLabel_);
@@ -1377,7 +1377,7 @@ namespace CodeToolsVsix
         newui::ViewBuilder<newui::Slider> blendPowerSliderBuilder;
         blendPowerSliderBuilder.name("gradientBlendPowerSlider")
             .visible(true)
-            .layoutParams<newui::FlexLayoutParams>([](newui::FlexLayoutParams& params) { params.weight = 1.0f; })
+            .layoutParams<newui::FlexLayoutParams>([](newui::FlexLayoutParams& params) { params.setWeight(1.0f); })
             .configure([](newui::Slider& slider) {
                 slider.setRange(kPointBlendPowerMin, kPointBlendPowerMax);
                 slider.setStep(kPointBlendPowerStep);
@@ -1433,7 +1433,7 @@ namespace CodeToolsVsix
         newui::ViewBuilder<newui::SubView> footerSpacerBuilder;
         footerSpacerBuilder.name("gradientEditorFooterSpacer")
             .visible(true)
-            .layoutParams<newui::FlexLayoutParams>([](newui::FlexLayoutParams& params) { params.weight = 1.0f; });
+            .layoutParams<newui::FlexLayoutParams>([](newui::FlexLayoutParams& params) { params.setWeight(1.0f); });
         footer->addChild(footerSpacerBuilder.build());
 
         newui::ViewBuilder<newui::Button> cancelBuilder;
