@@ -198,6 +198,10 @@ add_library(NativeEditControls SHARED
     extension/NativeEditControls/ColorChoices.cpp
     extension/NativeEditControls/ComponentEditor.h
     extension/NativeEditControls/ComponentEditor.cpp
+    extension/NativeEditControls/DesignerClipboard.h
+    extension/NativeEditControls/DesignerClipboard.cpp
+    extension/NativeEditControls/DesignerArrange.h
+    extension/NativeEditControls/DesignerArrange.cpp
     extension/NativeEditControls/ToolboxRegistry.h
     extension/NativeEditControls/ToolboxRegistry.cpp
     extension/NativeEditControls/Toolbox.h
@@ -271,6 +275,8 @@ add_executable(testharness
     extension/NativeEditControls/PaintUtils.cpp
     extension/NativeEditControls/ColorChoices.cpp
     extension/NativeEditControls/ComponentEditor.cpp
+    extension/NativeEditControls/DesignerClipboard.cpp
+    extension/NativeEditControls/DesignerArrange.cpp
     extension/NativeEditControls/ToolboxRegistry.cpp
     extension/NativeEditControls/Toolbox.cpp
     extension/NativeEditControls/Workspace.cpp

@@ -1,5 +1,6 @@
 #include "DesignerEditor.h"
 #include "ComponentEditor.h"
+#include "DesignerClipboard.h"
 #include "Logging.h"
 #include "TextEncoding.h"
 
@@ -223,13 +224,10 @@ namespace CodeToolsVsix
         root->onMouseMove.add(this, &DesignerEditor::handleMouseMove);
         root->onMouseUp.add(this, &DesignerEditor::handleMouseUp);
 
-        // root's own onKeyDown only fires when nothing else has focus
-        // (RootView::keyEvent(), rootview.cpp - it dispatches to
-        // focusedSubView_ instead when one exists) - a design-time canvas
-        // control never actually receives focus at all (RootView's own
-        // design-time input gating), so this is exactly "Delete while the
-        // canvas, not a Properties field or the Outline, has attention."
-        root->onKeyDown.add(this, &DesignerEditor::handleKeyDownForDelete);
+        // root->onKeyDown fires for EVERY key (RootView::keyEvent() calls it first, then also
+        // hands the key to focusedSubView_), so handleKeyDown() itself checks
+        // canvasOwnsKeyboard() - see it for why "nothing focused" means the canvas.
+        root->onKeyDown.add(this, &DesignerEditor::handleKeyDown);
 
         // PropertiesGrid and Document Outline both learn about selection
         // changes this way - through ViewDesignerController's own
@@ -336,23 +334,79 @@ namespace CodeToolsVsix
 
     void DesignerEditor::showComponentContextMenu(newui::SubView* view, const newui::Point& rootLocalPt)
     {
-        std::unique_ptr<ComponentEditor> editor = createComponentEditorFor(view);
         HWND hwnd = getRootView()->windowHandle();
-        if (editor == nullptr || hwnd == nullptr) {
+        if (view == nullptr || hwnd == nullptr) {
             return;
         }
+        std::unique_ptr<ComponentEditor> editor = createComponentEditorFor(view);   // null: no per-class verbs
 
         newui::MenuItem menu;
-        // Verbs run inside ContextMenu::show() (dispatchCommand() fires onClick before it returns),
-        // so editor and this local menu are both still alive when the lambdas below run.
-        ComponentEditor* rawEditor = editor.get();
-        for (std::size_t i = 0; i < rawEditor->verbCount(); ++i) {
-            newui::MenuItem* item = menu.addChild(std::make_unique<newui::MenuItem>(rawEditor->verb(i)));
-            item->onClick.add([rawEditor, i](newui::MenuItem&) {
-                rawEditor->executeVerb(i);
+        // Every item's action runs inside ContextMenu::show() (dispatchCommand() fires onClick before
+        // it returns), so editor, this local menu and the captured `this` are all still alive.
+        auto add = [](newui::MenuItem& parent, const std::string& text, std::function<void()> action,
+                       bool enabled = true, const std::string& shortcut = std::string()) {
+            newui::MenuItem* item = parent.addChild(std::make_unique<newui::MenuItem>(text));
+            item->state.setEnabled(enabled);
+            item->shortcutText = shortcut;
+            item->onClick.add([action](newui::MenuItem&) {
+                action();
                 return newui::SyncReturn::Handled;
             });
+            return item;
+        };
+
+        // A disabled title row - which control this menu is for - then a separator.
+        std::string title = view->name();
+        if (title.empty()) {
+            const newui::reflection::Class* clazz = newui::reflection::classinfo(typeid(*view));
+            title = clazz != nullptr ? clazz->name() : std::string("(unnamed)");
         }
+        add(menu, title, [] {}, false);
+        menu.addChild(newui::MenuItem::Separator());
+
+        if (editor != nullptr) {
+            ComponentEditor* rawEditor = editor.get();
+            for (std::size_t i = 0; i < rawEditor->verbCount(); ++i) {
+                add(menu, rawEditor->verb(i), [rawEditor, i] { rawEditor->executeVerb(i); });
+            }
+            menu.addChild(newui::MenuItem::Separator());
+        }
+
+        const bool canPaste = !DesignerClipboard::readClipboard().empty();
+        add(menu, "Cut", [this] { cutSelection(); }, true, "Ctrl+X");
+        add(menu, "Copy", [this] { copySelection(); }, true, "Ctrl+C");
+        add(menu, "Paste", [this] { pasteFromClipboard(); }, canPaste, "Ctrl+V");
+        add(menu, "Duplicate", [this] { duplicateSelection(); }, true, "Ctrl+D");
+        add(menu, "Delete", [this] { deleteSelection(); }, true, "Del");
+        menu.addChild(newui::MenuItem::Separator());
+
+        newui::MenuItem* order = add(menu, "Order", [] {});
+        add(*order, "Bring to Front", [this] { reorderSelection(ZOrderOp::BringToFront); }, true, "Ctrl+Shift+PgUp");
+        add(*order, "Send to Back", [this] { reorderSelection(ZOrderOp::SendToBack); }, true, "Ctrl+Shift+PgDn");
+        add(*order, "Bring Forward", [this] { reorderSelection(ZOrderOp::BringForward); }, true, "Ctrl+PgUp");
+        add(*order, "Send Backward", [this] { reorderSelection(ZOrderOp::SendBackward); }, true, "Ctrl+PgDn");
+
+        // Alignment needs at least two controls whose position is their own; distribution three.
+        std::size_t free = 0;
+        for (newui::SubView* selected : viewDesignerController_.selected()) {
+            if (hasFreeGeometry(selected)) {
+                ++free;
+            }
+        }
+        newui::MenuItem* align = add(menu, "Align", [] {}, free >= 2);
+        add(*align, "Left", [this] { alignSelection(AlignKind::Left); });
+        add(*align, "Center", [this] { alignSelection(AlignKind::HorizontalCenter); });
+        add(*align, "Right", [this] { alignSelection(AlignKind::Right); });
+        add(*align, "Top", [this] { alignSelection(AlignKind::Top); });
+        add(*align, "Middle", [this] { alignSelection(AlignKind::VerticalMiddle); });
+        add(*align, "Bottom", [this] { alignSelection(AlignKind::Bottom); });
+        newui::MenuItem* space = add(menu, "Space Evenly", [] {}, free >= 3);
+        add(*space, "Horizontally", [this] { distributeSelection(DistributeKind::Horizontal); });
+        add(*space, "Vertically", [this] { distributeSelection(DistributeKind::Vertical); });
+        newui::MenuItem* size = add(menu, "Make Same Size", [] {}, free >= 2);
+        add(*size, "Width", [this] { matchSizeSelection(MatchSizeKind::Width); });
+        add(*size, "Height", [this] { matchSizeSelection(MatchSizeKind::Height); });
+        add(*size, "Both", [this] { matchSizeSelection(MatchSizeKind::Both); });
 
         POINT screenPt = { static_cast<LONG>(rootLocalPt.x), static_cast<LONG>(rootLocalPt.y) };
         ::ClientToScreen(hwnd, &screenPt);
@@ -740,16 +794,57 @@ namespace CodeToolsVsix
         return targets;
     }
 
-    newui::SyncReturn DesignerEditor::handleKeyDownForDelete(newui::View& /*sender*/, std::uint32_t /*keyMask*/,
+    newui::SyncReturn DesignerEditor::handleKeyDown(newui::View& /*sender*/, std::uint32_t keyMask,
         int /*keyCharVal*/, int /*repeatCount*/, std::uint32_t VKeyCode)
     {
-        if (VKeyCode != static_cast<std::uint32_t>(newui::vkDelete) || workspace_ == nullptr) {
+        if (workspace_ == nullptr || !canvasOwnsKeyboard()) {
             return newui::SyncReturn::Ignored;
         }
 
+        bool handled = false;
+        if ((keyMask & newui::kmCtrl) != 0) {
+            switch (VKeyCode) {
+            // VKeyCode is newui's own translated key enum (newui::vk*), not a Windows VK_ code or ASCII.
+            case newui::vkLetterC: handled = copySelection(); break;
+            case newui::vkLetterX: handled = cutSelection(); break;
+            case newui::vkLetterV: handled = pasteFromClipboard(); break;
+            case newui::vkLetterD: handled = duplicateSelection(); break;
+            // z-order: newui doesn't translate the "[" / "]" keys on key-down, so PageUp/PageDown.
+            case newui::vkPgUp:
+                handled = reorderSelection((keyMask & newui::kmShift) != 0 ? ZOrderOp::BringToFront : ZOrderOp::BringForward);
+                break;
+            case newui::vkPgDown:
+                handled = reorderSelection((keyMask & newui::kmShift) != 0 ? ZOrderOp::SendToBack : ZOrderOp::SendBackward);
+                break;
+            default: break;
+            }
+        } else if (VKeyCode == static_cast<std::uint32_t>(newui::vkDelete)) {
+            handled = deleteSelection();
+        }
+        return handled ? newui::SyncReturn::Handled : newui::SyncReturn::Ignored;
+    }
+
+    bool DesignerEditor::canvasOwnsKeyboard() const
+    {
+        // UIInputManager::resolveClickFocusTarget() (called by RootView on every mouse-down) hands
+        // focus to the nearest focusable View under the click, and to nothing for a click on
+        // design-time content or empty space - so a click on the canvas clears focus, while a click
+        // in a Properties field, the Outline or the Toolbox focuses that control. Nothing focused
+        // therefore means the canvas has attention; otherwise the keys belong to the focused control
+        // (Ctrl+C in a text field must copy text, not the selected control).
+        const newui::RootView* root = getRootView();
+        return root != nullptr && root->focusedSubView() == nullptr;
+    }
+
+    bool DesignerEditor::deleteSelection(const std::string& description)
+    {
+        std::string label = description;
         std::vector<newui::SubView*> selected = viewDesignerController_.selected();
         if (selected.empty()) {
-            return newui::SyncReturn::Ignored;
+            return false;
+        }
+        if (label.empty()) {
+            label = selected.size() == 1 ? "Delete Control" : "Delete Controls";
         }
 
         // A selected view's real parent can be any real SubView in the
@@ -766,13 +861,13 @@ namespace CodeToolsVsix
             }
         }
         if (toDelete.empty()) {
-            return newui::SyncReturn::Ignored;
+            return false;
         }
 
         viewDesignerController_.clearSelection();
 
         newui::UndoableAction action;
-        action.description = toDelete.size() == 1 ? "Delete Control" : "Delete Controls";
+        action.description = label;
         // removeChild()/addChild() only ever detach/attach - never delete -
         // same raw-pointer ownership handoff Workspace's own Toolbox-add
         // wiring already relies on, so undoIt() can safely re-attach the
@@ -799,8 +894,9 @@ namespace CodeToolsVsix
             getRootView()->markDirty();
         };
         undoStack_.push(action);
-        return newui::SyncReturn::Handled;
+        return true;
     }
+
 
     newui::SyncReturn DesignerEditor::handleMouseMove(newui::View& /*sender*/, const newui::Point& pt,
         std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/)
@@ -1298,6 +1394,246 @@ namespace CodeToolsVsix
         return true;
     }
 
+    bool DesignerEditor::applyBoundsChanges(const std::vector<BoundsChange>& changes, const std::string& description)
+    {
+        if (changes.empty()) {
+            return false;
+        }
+
+        auto apply = [this, changes](bool forward) {
+            std::vector<newui::View*> parents;
+            for (const BoundsChange& change : changes) {
+                const newui::Rect& bounds = forward ? change.after : change.before;
+                newui::View* parent = change.view->parent();
+                if (parent != nullptr && dynamic_cast<newui::AnchorLayout*>(parent->layout()) != nullptr) {
+                    applyFreePositionAnchorParams(change.view, bounds);   // the params, not bounds, drive the layout
+                } else {
+                    change.view->setBounds(bounds);
+                }
+                if (parent != nullptr && std::find(parents.begin(), parents.end(), parent) == parents.end()) {
+                    parents.push_back(parent);
+                }
+            }
+            for (newui::View* parent : parents) {
+                parent->updateLayout();
+            }
+            markDirty();
+            getRootView()->markDirty();
+        };
+
+        newui::UndoableAction action;
+        action.description = description;
+        action.doIt = [apply]() { apply(true); };
+        action.undoIt = [apply]() { apply(false); };
+        undoStack_.push(std::move(action));
+        return true;
+    }
+
+    bool DesignerEditor::applyOrderChanges(const std::vector<OrderChange>& changes, const std::string& description)
+    {
+        if (changes.empty()) {
+            return false;
+        }
+
+        auto apply = [this, changes](bool forward) {
+            for (const OrderChange& change : changes) {
+                const std::vector<newui::SubView*>& order = forward ? change.after : change.before;
+                for (std::size_t i = 0; i < order.size(); ++i) {
+                    change.parent->reorderChild(order[i], i);
+                }
+            }
+            viewDesignerModel_.refresh();
+            markDirty();
+            getRootView()->markDirty();
+        };
+
+        newui::UndoableAction action;
+        action.description = description;
+        action.doIt = [apply]() { apply(true); };
+        action.undoIt = [apply]() { apply(false); };
+        undoStack_.push(std::move(action));
+        return true;
+    }
+
+    bool DesignerEditor::reorderSelection(ZOrderOp op)
+    {
+        const char* description = "Bring Forward";
+        switch (op) {
+        case ZOrderOp::BringToFront: description = "Bring to Front"; break;
+        case ZOrderOp::SendToBack: description = "Send to Back"; break;
+        case ZOrderOp::BringForward: description = "Bring Forward"; break;
+        case ZOrderOp::SendBackward: description = "Send Backward"; break;
+        }
+        return applyOrderChanges(computeZOrder(viewDesignerController_.selected(), op), description);
+    }
+
+    bool DesignerEditor::alignSelection(AlignKind kind)
+    {
+        static const char* const names[] = { "Align Left", "Align Center", "Align Right", "Align Top", "Align Middle", "Align Bottom" };
+        return applyBoundsChanges(
+            computeAlign(viewDesignerController_.selected(), viewDesignerController_.primary(), kind),
+            names[static_cast<int>(kind)]);
+    }
+
+    bool DesignerEditor::distributeSelection(DistributeKind kind)
+    {
+        return applyBoundsChanges(computeDistribute(viewDesignerController_.selected(), kind),
+            kind == DistributeKind::Horizontal ? "Distribute Horizontally" : "Distribute Vertically");
+    }
+
+    bool DesignerEditor::matchSizeSelection(MatchSizeKind kind)
+    {
+        static const char* const names[] = { "Make Same Width", "Make Same Height", "Make Same Size" };
+        return applyBoundsChanges(
+            computeMatchSize(viewDesignerController_.selected(), viewDesignerController_.primary(), kind),
+            names[static_cast<int>(kind)]);
+    }
+
+    newui::SubView* DesignerEditor::pasteTargetForSelection() const
+    {
+        newui::SubView* surface = workspace_ != nullptr ? workspace_->rootViewProxy() : nullptr;
+        newui::SubView* primary = viewDesignerController_.primary();
+        if (primary == nullptr) {
+            return surface;
+        }
+        // The selected container itself, else the nearest container above the selection.
+        if (ToolboxRegistry::isContainer(primary)) {
+            return primary;
+        }
+        for (newui::View* ancestor = primary->parent(); ancestor != nullptr; ancestor = ancestor->parent()) {
+            auto* sub = dynamic_cast<newui::SubView*>(ancestor);
+            if (sub != nullptr && (sub == surface || ToolboxRegistry::isContainer(sub))) {
+                return sub;
+            }
+        }
+        return surface;
+    }
+
+    bool DesignerEditor::insertClones(const std::vector<ClonePlan>& plans, const std::string& description, float offset)
+    {
+        struct Entry
+        {
+            newui::SubView* clone;
+            newui::SubView* target;
+            newui::Rect bounds;      // target-local, already offset
+            bool freePosition;
+        };
+        std::vector<Entry> entries;
+        for (const ClonePlan& plan : plans) {
+            newui::SubView* clone = DesignerClipboard::create(plan.text);
+            if (clone == nullptr) {
+                continue;
+            }
+            DesignerClipboard::uniquifyNames(*clone, *getRootView());
+            newui::Rect bounds = clone->bounds();
+            const bool free = policyFor(plan.target->layout()).kind() == GeometryEditKind::FreePosition;
+            if (free) {
+                bounds = newui::Rect(bounds.left() + offset, bounds.top() + offset, bounds.width(), bounds.height());
+            }
+            entries.push_back({ clone, plan.target, bounds, free });
+        }
+        if (entries.empty()) {
+            return false;
+        }
+
+        std::vector<newui::SubView*> clones;
+        for (const Entry& entry : entries) {
+            clones.push_back(entry.clone);
+        }
+
+        newui::UndoableAction action;
+        action.description = description;
+        // Attached by raw pointer like every other add here (see deleteSelection), so undoIt()
+        // detaches without deleting and redo re-attaches the very same instances; a discarded
+        // detached clone leaks - the same accepted gap as Delete.
+        action.doIt = [this, entries, clones]() {
+            std::vector<newui::SubView*> targets;
+            for (const Entry& entry : entries) {
+                entry.target->addChild(entry.clone);
+                if (entry.freePosition) {
+                    if (dynamic_cast<newui::AnchorLayout*>(entry.target->layout()) != nullptr) {
+                        applyFreePositionAnchorParams(entry.clone, entry.bounds);
+                    } else {
+                        entry.clone->setBounds(entry.bounds);
+                    }
+                }
+                if (std::find(targets.begin(), targets.end(), entry.target) == targets.end()) {
+                    targets.push_back(entry.target);
+                }
+            }
+            for (newui::SubView* target : targets) {
+                syncChildLayoutParams(*target);   // e.g. Anchor params pasted under a FlexLayout
+            }
+            viewDesignerModel_.refresh();
+            viewDesignerController_.setSelection(clones);
+            markDirty();
+            getRootView()->markDirty();
+        };
+        action.undoIt = [this, entries]() {
+            viewDesignerController_.clearSelection();
+            for (const Entry& entry : entries) {
+                entry.target->removeChild(entry.clone);
+            }
+            viewDesignerModel_.refresh();
+            markDirty();
+            getRootView()->markDirty();
+        };
+        undoStack_.push(std::move(action));
+        return true;
+    }
+
+    bool DesignerEditor::copySelection()
+    {
+        pasteCount_ = 0;
+        return DesignerClipboard::copyToClipboard(viewDesignerController_.selected(), getRootView());
+    }
+
+    bool DesignerEditor::cutSelection()
+    {
+        if (!copySelection()) {
+            return false;
+        }
+        return deleteSelection("Cut");
+    }
+
+    bool DesignerEditor::pasteFromClipboard()
+    {
+        std::vector<std::string> texts = DesignerClipboard::readClipboard();
+        if (texts.empty()) {
+            return false;
+        }
+        return pasteSerializedViews(texts, kPasteOffsetPixels * static_cast<float>(++pasteCount_));
+    }
+
+    bool DesignerEditor::pasteSerializedViews(const std::vector<std::string>& texts, float offset)
+    {
+        newui::SubView* target = pasteTargetForSelection();
+        if (target == nullptr) {
+            return false;
+        }
+        std::vector<ClonePlan> plans;
+        for (const std::string& text : texts) {
+            plans.push_back({ text, target });
+        }
+        return insertClones(plans, texts.size() == 1 ? "Paste Control" : "Paste Controls", offset);
+    }
+
+    bool DesignerEditor::duplicateSelection()
+    {
+        std::vector<ClonePlan> plans;
+        for (newui::SubView* view : DesignerClipboard::topLevelOf(viewDesignerController_.selected())) {
+            auto* parent = dynamic_cast<newui::SubView*>(view->parent());
+            if (parent == nullptr) {
+                continue;
+            }
+            std::string text = DesignerClipboard::serialize(*view);
+            if (!text.empty()) {
+                plans.push_back({ std::move(text), parent });
+            }
+        }
+        return insertClones(plans, plans.size() == 1 ? "Duplicate Control" : "Duplicate Controls", kPasteOffsetPixels);
+    }
+
     void DesignerEditor::beginDragCursor(newui::SubView* view, newui::CursorKind kind)
     {
         // The view's real cursor is a document property the user may have set (Cursor.kind/path) -
@@ -1578,9 +1914,15 @@ namespace CodeToolsVsix
     bool DesignerDocument::readFromFile(const std::string& path) { return editor_.loadFromFile(path); }
     bool DesignerDocument::writeToFile(const std::string& path) { return editor_.saveToFile(path); }
 
-    bool DesignerEditor::execCommand(EditorCommand /*command*/, std::uint32_t /*flags*/, const EditorCommandArgs* /*args*/)
+    bool DesignerEditor::execCommand(EditorCommand command, std::uint32_t /*flags*/, const EditorCommandArgs* /*args*/)
     {
-        logToDebugOut(L"DesignerEditor::execCommand: no document model yet, stub");
-        return true;
+        switch (command) {
+        case EditorCommand::Copy: return copySelection();
+        case EditorCommand::Cut: return cutSelection();
+        case EditorCommand::Paste: return pasteFromClipboard();
+        default:
+            logToDebugOut(L"DesignerEditor::execCommand: command not handled by the designer");
+            return false;
+        }
     }
 }

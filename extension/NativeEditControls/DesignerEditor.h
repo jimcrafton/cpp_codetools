@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "ComponentEditor.h"
+#include "DesignerArrange.h"
 #include "NativeEditor.h"
 #include "SelectionOverlay.h"
 #include "ViewDesignerController.h"
@@ -127,6 +128,39 @@ namespace CodeToolsVsix
         // can drive it without a real OLE drag.
         bool dropToolboxEntryAt(const std::wstring& payload, const newui::Point& rootLocalPt);
 
+        // Copy / cut / paste / duplicate of the selected controls (Ctrl+C / X / V / D - keys arrive as newui::vk* codes - and the host's
+        // Edit commands). A copy is each top-level selected control's whole subtree, serialized as a
+        // saved file would hold it (DesignerClipboard) onto the system clipboard; a paste creates
+        // fresh clones - new unique names, moved down-right by kPasteOffsetPixels per paste so they
+        // don't sit exactly on the originals - into the selected container (else the nearest one
+        // above the selection, else the design surface), re-kinds their LayoutParams for that
+        // container's Layout, and selects them. Each is one undoable step. All return whether
+        // anything was done.
+        // Whether the canvas, rather than some other control, currently has keyboard attention: the
+        // shortcuts above (and Delete) only act then. Decided by focus, which UIInputManager
+        // resolves on every click - clicking the canvas clears it, clicking a field focuses that.
+        bool canvasOwnsKeyboard() const;
+        bool copySelection();
+        bool cutSelection();
+        bool pasteFromClipboard();
+        bool duplicateSelection();
+        // Pastes already-serialized views (DesignerClipboard::serialize()) as pasteFromClipboard()
+        // does, but from the given texts and offset instead of the system clipboard. Public so tests
+        // can drive a paste without touching the real clipboard.
+        bool pasteSerializedViews(const std::vector<std::string>& texts, float offset);
+        static constexpr float kPasteOffsetPixels = 16.0f;
+
+        // Arrange operations on the selection, each one undoable step (see DesignerArrange.h for the
+        // rules): z-order within each parent (paint order - later is on top), and - for controls
+        // whose position is their own to set (an AnchorLayout or layout-less parent) - alignment to
+        // the primary (last-selected) control, even spacing, and matching its size. Views in a
+        // Flex/Grid/Card parent are skipped: their layout owns their geometry. Return whether
+        // anything changed.
+        bool reorderSelection(ZOrderOp op);
+        bool alignSelection(AlignKind kind);
+        bool distributeSelection(DistributeKind kind);
+        bool matchSizeSelection(MatchSizeKind kind);
+
         // The move-drag's cursor feedback: overrides view's own Cursor with a system kind (the
         // four-way arrow / hand), first parking its real one; endDragCursors() puts every parked
         // Cursor back. The real Cursor is a saved, user-editable property (Cursor.kind/path), so a
@@ -223,7 +257,7 @@ namespace CodeToolsVsix
         // Deletes the current canvas selection (viewDesignerController_.
         // selected()) as one undo-aware step - only fires when the canvas
         // itself has focus (see setupUI()'s own comment on root->onKeyDown).
-        newui::SyncReturn handleKeyDownForDelete(newui::View& sender, std::uint32_t keyMask,
+        newui::SyncReturn handleKeyDown(newui::View& sender, std::uint32_t keyMask,
             int keyCharVal, int repeatCount, std::uint32_t VKeyCode);
 
         // Pushes viewDesignerController_'s new selection into both
@@ -400,6 +434,21 @@ namespace CodeToolsVsix
         // paint() should highlight right now - wired in via
         // selectionOverlay_->setReparentTargetProvider() in setupUI().
         std::vector<newui::SubView*> reparentTargets() const;
+
+        struct ClonePlan
+        {
+            std::string text;             // DesignerClipboard::serialize() output
+            newui::SubView* target;       // the container the clone is added to
+        };
+        // Creates a clone per plan and adds them all as one undoable step named description;
+        // free-position targets place each clone at its source bounds moved by offset.
+        bool insertClones(const std::vector<ClonePlan>& plans, const std::string& description, float offset);
+        newui::SubView* pasteTargetForSelection() const;
+        // Deletes the current selection as one undoable step. description empty = "Delete Control(s)".
+        bool deleteSelection(const std::string& description = std::string());
+        bool applyBoundsChanges(const std::vector<BoundsChange>& changes, const std::string& description);
+        bool applyOrderChanges(const std::vector<OrderChange>& changes, const std::string& description);
+        std::size_t pasteCount_ = 0;   // pastes since the last copy, for the cascading offset
 
         // Below this many pixels of total mouse movement since mouseDown, handleMouseMove()
         // doesn't touch bounds() at all - a real, caught bug otherwise: with no threshold at all,

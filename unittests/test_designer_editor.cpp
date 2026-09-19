@@ -1,3 +1,4 @@
+#include "../extension/NativeEditControls/DesignerClipboard.h"
 #include "../extension/NativeEditControls/DesignerEditor.h"
 
 #include <newui/bundle.h>
@@ -2197,4 +2198,159 @@ TEST(DesignerEditorDragCursor, ACustomFileCursorSurvivesTheDragToo)
     EXPECT_EQ(view.cursorKind(), newui::CursorKind::Custom);
     EXPECT_EQ(view.cursor().path(), svg);
     ::DeleteFileA(svg.c_str());
+}
+
+// ---------------------------------------------------------------------------
+// Copy / paste / duplicate. The system clipboard itself is never touched here (a test run must not
+// clobber the developer's clipboard) - pasteSerializedViews() takes the text directly.
+// ---------------------------------------------------------------------------
+
+TEST(DesignerEditorCopyPaste, DuplicateClonesTheSelectionOffsetIntoTheSameParentAsOneUndoStep)
+{
+    HoverFixture f;
+    auto* button = new newui::Button();
+    button->setText("Go");
+    button->setName("myButton");
+    button->setBounds(newui::Rect(20, 30, 80, 24));
+    f.anchorBox->addChild(button);
+    f.editor.viewDesignerModel().refresh();
+    f.editor.viewDesignerController().selectExclusive(button);
+    ASSERT_FALSE(f.editor.isDirty());
+
+    ASSERT_TRUE(f.editor.duplicateSelection());
+
+    ASSERT_EQ(f.anchorBox->childViews().size(), 2u);
+    auto* clone = dynamic_cast<newui::Button*>(f.anchorBox->childViews()[1]);
+    ASSERT_NE(clone, nullptr);
+    EXPECT_EQ(clone->text(), "Go");
+    EXPECT_FALSE(clone->name().empty());
+    EXPECT_NE(clone->name(), "myButton");          // a fresh unique name, not a duplicate
+    EXPECT_TRUE(clone->isDesignTime());
+    auto* params = dynamic_cast<newui::AnchorLayoutParams*>(clone->layoutParams());
+    ASSERT_NE(params, nullptr);
+    EXPECT_FLOAT_EQ(params->leftMargin(), 20.0f + CodeToolsVsix::DesignerEditor::kPasteOffsetPixels);
+    EXPECT_FLOAT_EQ(params->topMargin(), 30.0f + CodeToolsVsix::DesignerEditor::kPasteOffsetPixels);
+    EXPECT_FLOAT_EQ(params->width(), 80.0f);
+    EXPECT_TRUE(f.editor.isDirty());
+    ASSERT_EQ(f.editor.viewDesignerController().selected().size(), 1u);
+    EXPECT_EQ(f.editor.viewDesignerController().primary(), clone);   // the clone is what's selected now
+
+    ASSERT_TRUE(f.editor.undoStack().canUndo());
+    EXPECT_EQ(f.editor.undoStack().undoDescription(), "Duplicate Control");
+    f.editor.undoStack().undo();
+    EXPECT_EQ(f.anchorBox->childViews().size(), 1u);
+    EXPECT_TRUE(f.editor.viewDesignerController().selected().empty());
+    f.editor.undoStack().redo();
+    ASSERT_EQ(f.anchorBox->childViews().size(), 2u);
+    EXPECT_EQ(f.anchorBox->childViews()[1], clone);                  // the very same instance
+}
+
+TEST(DesignerEditorCopyPaste, DuplicatingAContainerAndItsChildTogetherClonesOnlyTheContainer)
+{
+    HoverFixture f;
+    auto* button = new newui::Button();
+    f.anchorBox->addChild(button);
+    f.editor.viewDesignerModel().refresh();
+    const std::size_t before = f.surface->childViews().size();
+    f.editor.viewDesignerController().setSelection({ f.anchorBox, button });
+
+    ASSERT_TRUE(f.editor.duplicateSelection());
+
+    ASSERT_EQ(f.surface->childViews().size(), before + 1);
+    auto* clonedBox = f.surface->childViews().back();
+    EXPECT_EQ(clonedBox->childViews().size(), 1u);   // the child came along inside the container's clone
+}
+
+TEST(DesignerEditorCopyPaste, PasteGoesIntoTheNearestContainerAboveTheSelectionAndRekindsItsParams)
+{
+    HoverFixture f;
+    auto* source = new newui::Button();
+    source->setText("Pasted");
+    source->setBounds(newui::Rect(5, 5, 60, 20));
+    f.anchorBox->addChild(source);
+    std::string text = CodeToolsVsix::DesignerClipboard::serialize(*source);
+
+    // A child of the vertical Flex column is selected - not a container itself, so its parent gets the paste.
+    newui::SubView* columnChild = f.column->childViews()[0];
+    f.editor.viewDesignerModel().refresh();
+    f.editor.viewDesignerController().selectExclusive(columnChild);
+
+    ASSERT_TRUE(f.editor.pasteSerializedViews({ text }, 0.0f));
+
+    ASSERT_EQ(f.column->childViews().size(), 3u);
+    auto* pasted = dynamic_cast<newui::Button*>(f.column->childViews()[2]);
+    ASSERT_NE(pasted, nullptr);
+    EXPECT_EQ(pasted->text(), "Pasted");
+    // The source had AnchorLayoutParams; under a FlexLayout it must carry Flex ones instead.
+    EXPECT_NE(dynamic_cast<newui::FlexLayoutParams*>(pasted->layoutParams()), nullptr);
+    EXPECT_EQ(f.editor.undoStack().undoDescription(), "Paste Control");
+}
+
+TEST(DesignerEditorCopyPaste, WithNothingSelectedAPasteLandsOnTheDesignSurface)
+{
+    HoverFixture f;
+    auto* source = new newui::Button();
+    source->setBounds(newui::Rect(5, 5, 60, 20));
+    f.anchorBox->addChild(source);
+    std::string text = CodeToolsVsix::DesignerClipboard::serialize(*source);
+    f.editor.viewDesignerController().clearSelection();
+    const std::size_t before = f.surface->childViews().size();
+
+    ASSERT_TRUE(f.editor.pasteSerializedViews({ text, text }, 0.0f));
+
+    EXPECT_EQ(f.surface->childViews().size(), before + 2);
+    EXPECT_EQ(f.editor.undoStack().undoDescription(), "Paste Controls");
+    EXPECT_FALSE(f.editor.pasteSerializedViews({ "garbage" }, 0.0f));   // unreadable text changes nothing
+}
+
+TEST(DesignerEditorCopyPaste, DuplicatingATabControlKeepsItsTabsAndUndoRemovesTheWholeClone)
+{
+    HoverFixture f;
+    auto* tabs = new newui::TabControl();
+    tabs->setBounds(newui::Rect(10, 10, 200, 100));
+    tabs->addTab("Alpha", new newui::TabPage());
+    tabs->addTab("Beta", new newui::TabPage());
+    f.anchorBox->addChild(tabs);
+    f.editor.viewDesignerModel().refresh();
+    f.editor.viewDesignerController().selectExclusive(tabs);
+
+    ASSERT_TRUE(f.editor.duplicateSelection());
+
+    ASSERT_EQ(f.anchorBox->childViews().size(), 2u);
+    auto* clone = dynamic_cast<newui::TabControl*>(f.anchorBox->childViews()[1]);
+    ASSERT_NE(clone, nullptr);
+    ASSERT_EQ(clone->tabCount(), 2u);
+    EXPECT_EQ(clone->tabButton(1)->name(), "Beta");
+
+    f.editor.undoStack().undo();
+    EXPECT_EQ(f.anchorBox->childViews().size(), 1u);
+}
+
+TEST(DesignerEditorCopyPaste, NothingSelectedMeansNothingToDuplicate)
+{
+    HoverFixture f;
+    f.editor.viewDesignerController().clearSelection();
+    EXPECT_FALSE(f.editor.duplicateSelection());
+    EXPECT_FALSE(f.editor.undoStack().canUndo());
+}
+
+// The designer's shortcuts (Ctrl+C/X/V/D, PageUp/PageDown, Delete) share the window with real text
+// fields: they must only act while the canvas has attention, and UIInputManager's click-to-focus
+// policy is what says so (a click on the canvas clears focus, a click in a field focuses it).
+TEST(DesignerEditorKeyboardOwnership, TheCanvasOwnsTheKeyboardOnlyWhileNothingIsFocused)
+{
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&root);
+    root.setBounds(newui::Rect(0, 0, 1400, 700));
+    EXPECT_TRUE(editor.canvasOwnsKeyboard());            // nothing focused: the canvas has attention
+
+    auto* field = new newui::TextField();                // stands in for a Properties field
+    field->setVisible(true);
+    editor.workspace()->addChild(field);
+    root.setFocusedSubView(field);
+    ASSERT_EQ(root.focusedSubView(), field);
+    EXPECT_FALSE(editor.canvasOwnsKeyboard());           // the field owns Ctrl+C now, not the designer
+
+    root.setFocusedSubView(nullptr);                     // what a canvas click resolves to
+    EXPECT_TRUE(editor.canvasOwnsKeyboard());
 }
