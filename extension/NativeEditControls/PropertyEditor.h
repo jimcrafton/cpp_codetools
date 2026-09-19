@@ -15,6 +15,7 @@
 #include <newui/graphics.h>
 #include <newui/layout.h>
 #include <newui/popuptool.h>
+#include <newui/dialogs.h>
 #include <newui/reflection.h>
 #include <newui/undostack.h>
 #include <newui/view.h>
@@ -250,6 +251,12 @@ namespace CodeToolsVsix
         // selection; a no-op on Cancel/dialog failure, same contract every other EditStyle::
         // Dialog editor here already has.
         void edit(newui::View* owner) override;
+
+        // The picker's file-type filters, chosen by the property's tags (from "@reflect tags=..."):
+        // an "image" tag offers the image formats a Cursor/Image path can load (.png, .svg),
+        // then "All Files" so any other decodable format can still be picked. No "image" tag:
+        // no filter at all.
+        static std::vector<newui::FileDialogFilter> filtersFor(const newui::reflection::Property* property);
     };
 
     // valueAsString()/parseValue() still reuse newui::Color::toString()/fromString() (CSS-style

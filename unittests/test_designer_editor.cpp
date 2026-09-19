@@ -2146,3 +2146,55 @@ TEST_F(DesignerEditorFileFixture, TabsAddedInTheDesignerSurviveSaveAndReopen)
     // The outline shows just the two pages under the control.
     EXPECT_EQ(editor.viewDesignerModel().childCount(std::vector<std::size_t>{0, 0}), 2u);
 }
+
+// The drag feedback overrides a dragged view's Cursor - which is a real, saved property the user can
+// set. It must come back exactly as it was (a system kind or a custom file cursor), and a view that
+// was never dragged must not be touched at all.
+TEST(DesignerEditorDragCursor, TheViewsOwnCursorIsRestoredAfterTheDragFeedback)
+{
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&root);
+
+    newui::SubView view;
+    view.cursor().setCursorKind(newui::CursorKind::Hand);   // what the user chose in the grid
+    newui::SubView untouched;
+    untouched.cursor().setCursorKind(newui::CursorKind::IBeam);
+
+    editor.beginDragCursor(&view, newui::CursorKind::SizeAll);
+    EXPECT_EQ(view.cursorKind(), newui::CursorKind::SizeAll);
+    editor.beginDragCursor(&view, newui::CursorKind::Hand);   // the reparent-target feedback, same drag
+    EXPECT_EQ(view.cursorKind(), newui::CursorKind::Hand);
+    editor.beginDragCursor(&view, newui::CursorKind::SizeAll);
+
+    editor.endDragCursors();
+    EXPECT_EQ(view.cursorKind(), newui::CursorKind::Hand);    // the user's, not Arrow
+    EXPECT_EQ(untouched.cursorKind(), newui::CursorKind::IBeam);
+
+    editor.endDragCursors();   // nothing parked: a plain click must change nothing
+    EXPECT_EQ(view.cursorKind(), newui::CursorKind::Hand);
+}
+
+TEST(DesignerEditorDragCursor, ACustomFileCursorSurvivesTheDragToo)
+{
+    char tempPath[MAX_PATH]{};
+    ::GetTempPathA(MAX_PATH, tempPath);
+    const std::string svg = std::string(tempPath) + "DragCursor.svg";
+    {
+        std::ofstream file(svg, std::ios::binary);
+        file << R"(<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect width="32" height="32" fill="green"/></svg>)";
+    }
+
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&root);
+    newui::SubView view;
+    ASSERT_TRUE(view.cursor().loadPath(svg));
+    ASSERT_EQ(view.cursorKind(), newui::CursorKind::Custom);
+
+    editor.beginDragCursor(&view, newui::CursorKind::SizeAll);
+    EXPECT_EQ(view.cursorKind(), newui::CursorKind::SizeAll);
+    editor.endDragCursors();
+
+    EXPECT_EQ(view.cursorKind(), newui::CursorKind::Custom);
+    EXPECT_EQ(view.cursor().path(), svg);
+    ::DeleteFileA(svg.c_str());
+}

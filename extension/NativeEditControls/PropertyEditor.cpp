@@ -376,10 +376,27 @@ namespace CodeToolsVsix
         return std::any(text);
     }
 
+    std::vector<newui::FileDialogFilter> FilePathPropertyEditor::filtersFor(const newui::reflection::Property* property)
+    {
+        std::vector<newui::FileDialogFilter> filters;
+        if (property == nullptr) {
+            return filters;
+        }
+        for (const std::string& tag : property->tags()) {
+            if (tag == "image") {
+                filters.push_back({ "Images (*.png, *.svg)", "*.png;*.svg" });
+                filters.push_back({ "All Files (*.*)", "*.*" });
+                break;
+            }
+        }
+        return filters;
+    }
+
     void FilePathPropertyEditor::edit(newui::View* owner)
     {
         newui::FileDialogOptions options;
         options.title = "Select File";
+        options.filters = filtersFor(property_);
         std::string outPath;
         if (newui::Dialog::showOpenFile(owner->rootView()->windowHandle(), options, outPath)) {
             commitValue(std::any(outPath));

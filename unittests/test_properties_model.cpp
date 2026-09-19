@@ -1,12 +1,14 @@
 #include "../extension/NativeEditControls/PropertiesModel.h"
 
 #include <newui/controls.h>
+#include <newui/dialogs.h>
 #include <newui/layout.h>
 #include <newui/reflection.h>
 #include <newui/undostack.h>
 
 #include <gtest/gtest.h>
 
+#include <fstream>
 #include <memory>
 
 using newui::reflection::Class;
@@ -623,4 +625,86 @@ TEST_F(PropertiesModelTest, TheCursorKindRowIsAnEditableDropdownThatWritesThroug
     ASSERT_NE(editor, nullptr);
     editor->setValueFromString("Hand");
     EXPECT_EQ(button_.cursorKind(), newui::CursorKind::Hand);
+}
+
+// ---------------------------------------------------------------------------
+// cursor.path - an image file path: gets the "..." file picker (a Dialog-style FilePath editor,
+// chosen by the property's "filepath" tag), offers .png/.svg, and changing it switches the kind.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+    PropertiesModel::Node cursorChild(PropertiesModel& model, const std::string& name)
+    {
+        for (std::size_t i = 0; i < model.childCount({}); ++i) {
+            PropertiesModel::Node node = model.nodeAt({i});
+            if (node.property == nullptr || node.property->name() != "cursor") {
+                continue;
+            }
+            for (std::size_t c = 0; c < model.childCount({i}); ++c) {
+                PropertiesModel::Node child = model.nodeAt({i, c});
+                if (child.property != nullptr && child.property->name() == name) {
+                    return child;
+                }
+            }
+        }
+        return PropertiesModel::Node();
+    }
+}
+
+TEST_F(PropertiesModelTest, CursorPathIsAFilePathRowWithTheEllipsisPickerAndAnImageFilter)
+{
+    PropertiesModel::Node path = cursorChild(model_, "path");
+    ASSERT_EQ(path.kind, PropertiesModel::Kind::PropertyLeaf);
+
+    auto editor = CodeToolsVsix::PropertyEditorRegistry::instance()
+        .createEditor(path.property, path.ownerClass, path.ownerInstance);
+    ASSERT_NE(editor, nullptr);
+    EXPECT_NE(dynamic_cast<CodeToolsVsix::FilePathPropertyEditor*>(editor.get()), nullptr);
+    EXPECT_EQ(editor->editStyle(), CodeToolsVsix::PropertyEditor::EditStyle::Dialog);
+    EXPECT_TRUE(editor->hasDialog());  // what makes PropertiesGrid paint the "..." button
+
+    std::vector<newui::FileDialogFilter> filters = CodeToolsVsix::FilePathPropertyEditor::filtersFor(path.property);
+    ASSERT_EQ(filters.size(), 2u);
+    EXPECT_NE(filters[0].pattern.find("*.png"), std::string::npos);
+    EXPECT_NE(filters[0].pattern.find("*.svg"), std::string::npos);
+    EXPECT_EQ(filters[1].pattern, "*.*");
+
+    // A filepath property without the "image" tag gets no filter.
+    EXPECT_TRUE(CodeToolsVsix::FilePathPropertyEditor::filtersFor(nullptr).empty());
+    PropertiesModel::Node kind = cursorChild(model_, "kind");
+    EXPECT_TRUE(CodeToolsVsix::FilePathPropertyEditor::filtersFor(kind.property).empty());
+}
+
+TEST_F(PropertiesModelTest, ChangingCursorPathSwitchesTheKindToCustomAndUndoRestoresIt)
+{
+    char tempPath[MAX_PATH]{};
+    ::GetTempPathA(MAX_PATH, tempPath);
+    const std::string svg = std::string(tempPath) + "PropertiesModelCursor.svg";
+    {
+        std::ofstream file(svg, std::ios::binary);
+        file << R"(<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32"><rect width="32" height="32" fill="blue"/></svg>)";
+    }
+
+    button_.setCursor(newui::Cursor(newui::CursorKind::Hand));
+    ASSERT_EQ(button_.cursorKind(), newui::CursorKind::Hand);
+
+    PropertiesModel::Node path = cursorChild(model_, "path");
+    auto editor = CodeToolsVsix::PropertyEditorRegistry::instance()
+        .createEditor(path.property, path.ownerClass, path.ownerInstance);
+    ASSERT_NE(editor, nullptr);
+    newui::UndoStack undo;
+    editor->setUndoStack(&undo);
+
+    editor->setValueFromString(svg);
+    EXPECT_EQ(button_.cursorKind(), newui::CursorKind::Custom);
+    EXPECT_EQ(button_.cursor().path(), svg);
+
+    undo.undo();   // the path goes back to "", and the cursor to what it was
+    EXPECT_EQ(button_.cursorKind(), newui::CursorKind::Hand);
+
+    undo.redo();
+    EXPECT_EQ(button_.cursorKind(), newui::CursorKind::Custom);
+
+    ::DeleteFileA(svg.c_str());
 }

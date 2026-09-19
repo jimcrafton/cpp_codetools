@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <unordered_map>
 #include <vector>
 
 #include "ComponentEditor.h"
@@ -125,6 +126,14 @@ namespace CodeToolsVsix
         // a payload that isn't a Toolbox entry or a point off the design surface. Public so tests
         // can drive it without a real OLE drag.
         bool dropToolboxEntryAt(const std::wstring& payload, const newui::Point& rootLocalPt);
+
+        // The move-drag's cursor feedback: overrides view's own Cursor with a system kind (the
+        // four-way arrow / hand), first parking its real one; endDragCursors() puts every parked
+        // Cursor back. The real Cursor is a saved, user-editable property (Cursor.kind/path), so a
+        // drag - or a plain click that only arms one - must never leave it changed. Public so tests
+        // can check the save/restore without synthesizing mouse input.
+        void beginDragCursor(newui::SubView* view, newui::CursorKind kind);
+        void endDragCursors();
 
         // The ComponentEditor (per-class design-time verbs - see ComponentEditor.h) registered for
         // view's class, wired to this editor's undo stack and to refresh the outline/mark dirty/
@@ -408,6 +417,13 @@ namespace CodeToolsVsix
         // too (nothing in this tree scales or rotates), so startBounds + that delta is always the
         // right new parent-local position regardless of how deep view sits.
         std::vector<MoveDragEntry> moveDragEntries_;
+
+        // The drag cursor (four-way arrow / hand) is shown by overriding the dragged view's own
+        // Cursor - which is a real, editable, saved property (Cursor.kind/path). The original is
+        // parked here for the duration of the drag and put back by endDragCursors(), so a drag (or
+        // a plain click that arms one) never changes what the user chose. Keys are views with an
+        // active override only.
+        std::unordered_map<newui::SubView*, newui::Cursor> savedDragCursors_;
         newui::Point moveDragStartPt_;
 
         // Latches true the first time total movement crosses kMoveDragThresholdPixels since this

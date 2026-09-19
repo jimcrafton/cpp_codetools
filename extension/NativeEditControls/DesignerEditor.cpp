@@ -456,6 +456,7 @@ namespace CodeToolsVsix
         // with the layout later. AnchorLayout/no-Layout, FlexLayout, and GridLayout parents are
         // all now draggable (previously only AnchorLayout/no-Layout was) - see
         // LayoutEditingPolicy.h's own FreePosition/LinearReorder/GridCell policies.
+        endDragCursors();
         moveDragEntries_.clear();
         moveDragStarted_ = false;
         // TEMPORARY diagnostic - remove once the "no move-drag entry armed" investigation is done.
@@ -868,7 +869,7 @@ namespace CodeToolsVsix
                 // (hitTestExcluding()'s own comment: the cursor never leaves its own bounds mid-
                 // drag) - setting the cursor anywhere else is invisible, a real bug this
                 // consolidation also fixes.
-                entry.view->cursor().setCursorKind(
+                beginDragCursor(entry.view,
                     entry.pendingReparentTarget != nullptr ? newui::CursorKind::Hand : newui::CursorKind::SizeAll);
             }
 
@@ -913,11 +914,9 @@ namespace CodeToolsVsix
         moveDragEntries_.clear();
         bool started = moveDragStarted_;
         moveDragStarted_ = false;
-        // Restores each dragged view's own cursor - see handleMouseMove()'s own comment on why
-        // this has to be set on the actual dragged view, never root/sender.
-        for (MoveDragEntry& entry : entries) {
-            entry.view->cursor().setCursorKind(newui::CursorKind::Arrow);
-        }
+        // Puts back each dragged view's own cursor - see handleMouseMove()'s own comment on why
+        // the drag cursor has to be set on the actual dragged view, never root/sender.
+        endDragCursors();
 
         // A plain click, or a real mouse-down/up pair that never crossed
         // kMoveDragThresholdPixels, leaves every view exactly where applyPreview() never touched -
@@ -1299,8 +1298,29 @@ namespace CodeToolsVsix
         return true;
     }
 
+    void DesignerEditor::beginDragCursor(newui::SubView* view, newui::CursorKind kind)
+    {
+        // The view's real cursor is a document property the user may have set (Cursor.kind/path) -
+        // the drag feedback must not overwrite it for good. The first override moves the real
+        // Cursor out; endDragCursors() moves it back.
+        if (savedDragCursors_.find(view) == savedDragCursors_.end()) {
+            savedDragCursors_.emplace(view, std::move(view->cursor()));
+        }
+        view->cursor().setCursorKind(kind);
+    }
+
+    void DesignerEditor::endDragCursors()
+    {
+        for (auto& [view, saved] : savedDragCursors_) {
+            view->setCursor(std::move(saved));
+        }
+        savedDragCursors_.clear();
+    }
+
     void DesignerEditor::clearDocument(bool resetDocument)
     {
+        // The views are about to be deleted - nothing to put back.
+        savedDragCursors_.clear();
         newui::RootViewProxy* surface = workspace_->rootViewProxy();
 
         viewDesignerController_.clearSelection();
