@@ -5,6 +5,7 @@
 #include <newui/uicolormanager.h>
 
 #include <any>
+#include <cctype>
 
 namespace CodeToolsVsix
 {
@@ -30,10 +31,15 @@ namespace CodeToolsVsix
     {
         static const std::vector<ColorChoice> choices = [] {
             std::vector<ColorChoice> result;
+            result.push_back({ kNoColorName, false });
             for (const char* name : kSystemColorNames) {
                 result.push_back({ name, true });
             }
             for (const newui::NamedColorEntry& entry : newui::kNamedColors) {
+                newui::Color color;
+                if (newui::Color::fromString(entry.name, color) && color.isNull()) {
+                    continue;   // "transparent" - the same color as "none", which already heads the list
+                }
                 result.push_back({ entry.name, false });
             }
             return result;
@@ -51,12 +57,35 @@ namespace CodeToolsVsix
         return false;
     }
 
+    std::string colorDisplayText(const newui::Color& color)
+    {
+        return color.isNull() ? std::string(kNoColorName) : color.toString();
+    }
+
+    bool parseColorText(const std::string& text, newui::Color& outColor)
+    {
+        std::string lower;
+        for (char c : text) {
+            if (c != ' ' && c != '\t') {
+                lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+            }
+        }
+        if (lower == kNoColorName || lower == "null") {
+            outColor = newui::Color::null();
+            return true;
+        }
+        return newui::Color::fromString(text, outColor);
+    }
+
     std::optional<std::string> colorChoiceNameFor(const newui::Color& color)
     {
+        if (color.isNull()) {
+            return std::string(kNoColorName);
+        }
         std::uint32_t target = packed(color);
         for (const ColorChoice& choice : colorChoices()) {
             newui::Color candidate;
-            if (newui::Color::fromString(choice.name, candidate) && packed(candidate) == target) {
+            if (parseColorText(choice.name, candidate) && packed(candidate) == target) {
                 return choice.name;
             }
         }
@@ -95,7 +124,7 @@ namespace CodeToolsVsix
         newui::Rect swatch(bounds.left() + kRowInset, bounds.top() + (bounds.size().height - kSwatchSize) * 0.5f,
             kSwatchSize, kSwatchSize);
         newui::Color color;
-        if (newui::Color::fromString(name, color)) {
+        if (parseColorText(name, color)) {
             paintSwatch(ctx, swatch, color, textColor);
         }
 

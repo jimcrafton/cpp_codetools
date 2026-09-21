@@ -137,3 +137,31 @@ TEST(DesignerClipboard, UniquifyNamesClearsATakenNameButLeavesInternalPartsAndFr
     EXPECT_EQ(free->name(), "brandNew");
     EXPECT_EQ(tabs->childViews()[0]->name(), "TabControlStrip");   // internal: kept
 }
+
+// A GridLayout's row/column tracks come back from a copy (they used to be written but never read).
+TEST(DesignerClipboard, AGridLayoutCloneKeepsItsTracksAndSpacing)
+{
+    newui::SubView container;
+    auto grid = std::make_unique<newui::GridLayout>();
+    grid->addFixedRow(40);
+    grid->addStarRow(2);
+    grid->addAutoColumn();
+    grid->addStarColumn(1);
+    grid->setRowSpacing(3);
+    container.setLayout(std::move(grid));
+
+    newui::SubView* clone = DesignerClipboard::create(DesignerClipboard::serialize(container));
+    ASSERT_NE(clone, nullptr);
+    auto* cloned = dynamic_cast<newui::GridLayout*>(clone->layout());
+    ASSERT_NE(cloned, nullptr);
+    ASSERT_EQ(cloned->rows().size(), 2u);
+    EXPECT_EQ(cloned->rows()[0].kind, newui::GridTrackKind::Fixed);
+    EXPECT_FLOAT_EQ(cloned->rows()[0].value, 40.0f);
+    EXPECT_FLOAT_EQ(cloned->rows()[1].value, 2.0f);
+    ASSERT_EQ(cloned->columns().size(), 2u);
+    EXPECT_EQ(cloned->columns()[0].kind, newui::GridTrackKind::Auto);
+    EXPECT_FLOAT_EQ(cloned->rowSpacing(), 3.0f);
+
+    clone->destroy();
+    delete clone;
+}

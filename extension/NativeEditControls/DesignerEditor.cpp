@@ -312,24 +312,37 @@ namespace CodeToolsVsix
         return true;
     }
 
-    std::unique_ptr<ComponentEditor> DesignerEditor::createComponentEditorFor(newui::SubView* view)
+    std::vector<std::unique_ptr<ComponentEditor>> DesignerEditor::createComponentEditorsFor(newui::SubView* view)
     {
+        std::vector<std::unique_ptr<ComponentEditor>> editors;
         if (view == nullptr || view->hasDesignTimeFlag(newui::DesignTimeFlags::Internal)
             || view->hasDesignTimeFlag(newui::DesignTimeFlags::ReadOnly)) {
-            return nullptr;
+            return editors;
         }
+
         const newui::reflection::Class* clazz = newui::reflection::classinfo(typeid(*view));
-        std::unique_ptr<ComponentEditor> editor = ComponentEditorRegistry::instance().createEditor(clazz, view);
-        if (editor == nullptr || editor->verbCount() == 0) {
-            return nullptr;
+        editors.push_back(ComponentEditorRegistry::instance().createEditor(clazz, view));   // may be null
+        if (dynamic_cast<newui::GridLayout*>(view->layout()) != nullptr) {
+            editors.push_back(std::make_unique<GridLayoutEditor>(view));
         }
-        editor->setUndoStack(&undoStack_);
-        editor->setPostExecuteSync([this] {
-            viewDesignerModel_.refresh();
-            markDirty();
-            getRootView()->markDirty();
-        });
-        return editor;
+
+        editors.erase(std::remove_if(editors.begin(), editors.end(),
+            [](const std::unique_ptr<ComponentEditor>& e) { return e == nullptr || e->verbCount() == 0; }), editors.end());
+        for (auto& editor : editors) {
+            editor->setUndoStack(&undoStack_);
+            editor->setPostExecuteSync([this] {
+                viewDesignerModel_.refresh();
+                markDirty();
+                getRootView()->markDirty();
+            });
+        }
+        return editors;
+    }
+
+    std::unique_ptr<ComponentEditor> DesignerEditor::createComponentEditorFor(newui::SubView* view)
+    {
+        std::vector<std::unique_ptr<ComponentEditor>> editors = createComponentEditorsFor(view);
+        return editors.empty() ? nullptr : std::move(editors.front());
     }
 
     void DesignerEditor::showComponentContextMenu(newui::SubView* view, const newui::Point& rootLocalPt)
@@ -338,7 +351,7 @@ namespace CodeToolsVsix
         if (view == nullptr || hwnd == nullptr) {
             return;
         }
-        std::unique_ptr<ComponentEditor> editor = createComponentEditorFor(view);   // null: no per-class verbs
+        std::vector<std::unique_ptr<ComponentEditor>> editors = createComponentEditorsFor(view);   // may be empty
 
         newui::MenuItem menu;
         // Every item's action runs inside ContextMenu::show() (dispatchCommand() fires onClick before
@@ -364,7 +377,7 @@ namespace CodeToolsVsix
         add(menu, title, [] {}, false);
         menu.addChild(newui::MenuItem::Separator());
 
-        if (editor != nullptr) {
+        for (auto& editor : editors) {
             ComponentEditor* rawEditor = editor.get();
             for (std::size_t i = 0; i < rawEditor->verbCount(); ++i) {
                 add(menu, rawEditor->verb(i), [rawEditor, i] { rawEditor->executeVerb(i); });
@@ -809,6 +822,7 @@ namespace CodeToolsVsix
             case newui::vkLetterX: handled = cutSelection(); break;
             case newui::vkLetterV: handled = pasteFromClipboard(); break;
             case newui::vkLetterD: handled = duplicateSelection(); break;
+            case newui::vkLetterZ: handled = (keyMask & newui::kmShift) != 0 ? redo() : undo(); break;
             // z-order: newui doesn't translate the "[" / "]" keys on key-down, so PageUp/PageDown.
             case newui::vkPgUp:
                 handled = reorderSelection((keyMask & newui::kmShift) != 0 ? ZOrderOp::BringToFront : ZOrderOp::BringForward);
@@ -1718,23 +1732,37 @@ namespace CodeToolsVsix
         return newui::SyncReturn::Handled;
     }
 
-    newui::SyncReturn DesignerEditor::handleUndoClicked(newui::Control& /*sender*/)
+    bool DesignerEditor::undo()
     {
-        if (undoStack_.canUndo()) {
+        const bool could = undoStack_.canUndo();
+        if (could) {
             undoStack_.undo();
         }
         refreshUndoRedoButtons();
         getRootView()->markDirty();
+        return could;
+    }
+
+    bool DesignerEditor::redo()
+    {
+        const bool could = undoStack_.canRedo();
+        if (could) {
+            undoStack_.redo();
+        }
+        refreshUndoRedoButtons();
+        getRootView()->markDirty();
+        return could;
+    }
+
+    newui::SyncReturn DesignerEditor::handleUndoClicked(newui::Control& /*sender*/)
+    {
+        undo();
         return newui::SyncReturn::Handled;
     }
 
     newui::SyncReturn DesignerEditor::handleRedoClicked(newui::Control& /*sender*/)
     {
-        if (undoStack_.canRedo()) {
-            undoStack_.redo();
-        }
-        refreshUndoRedoButtons();
-        getRootView()->markDirty();
+        redo();
         return newui::SyncReturn::Handled;
     }
 
@@ -1920,6 +1948,8 @@ namespace CodeToolsVsix
         case EditorCommand::Copy: return copySelection();
         case EditorCommand::Cut: return cutSelection();
         case EditorCommand::Paste: return pasteFromClipboard();
+        case EditorCommand::Undo: return undo();
+        case EditorCommand::Redo: return redo();
         default:
             logToDebugOut(L"DesignerEditor::execCommand: command not handled by the designer");
             return false;

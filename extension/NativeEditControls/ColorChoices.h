@@ -26,6 +26,15 @@ namespace CodeToolsVsix
 
     bool isSystemColorName(const std::string& name);
 
+    // The null color (newui::Color::null(): all four channels zero - "unset", paints nothing) is shown
+    // as "none" instead of "#00000000", and "none" heads the dropdown. Everywhere a Color is shown
+    // as text or typed as text goes through these two so they agree.
+    constexpr const char* kNoColorName = "none";
+    std::string colorDisplayText(const newui::Color& color);
+    // Parses "none"/"null" (any case) to the null color, else whatever newui::Color::fromString()
+    // accepts (hex, CSS names - "transparent" is the null color too). False if it isn't a color.
+    bool parseColorText(const std::string& text, newui::Color& outColor);
+
     // The choice whose *current* color equals color exactly (8-bit RGBA), or nullopt. System
     // colors are checked first, so a color that happens to equal both shows as the system one.
     std::optional<std::string> colorChoiceNameFor(const newui::Color& color);

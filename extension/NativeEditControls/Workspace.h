@@ -3,6 +3,7 @@
 #include "CanvasWell.h"
 #include "DocumentOutline.h"
 #include "PropertiesGrid.h"
+#include "PropertiesPanel.h"
 #include "Toolbox.h"
 
 #include <newui/controls.h>
@@ -103,6 +104,9 @@ namespace CodeToolsVsix
         Toolbox* toolboxPane() const { return toolboxPane_; }
         DocumentOutline* documentOutlinePane() const { return documentOutlinePane_; }
         PropertiesGrid* propertiesPane() const { return propertiesPane_; }
+        // The Properties pane as docked: the filter/sort header above propertiesPane() - what the
+        // right dock actually holds.
+        PropertiesPanel* propertiesPanel() const { return propertiesPanel_; }
         newui::SubView* animationPane() const { return animationPane_; }
         newui::SubView* statusBar() const { return statusBar_; }
 
@@ -185,6 +189,7 @@ namespace CodeToolsVsix
         Toolbox* toolboxPane_ = nullptr;
         DocumentOutline* documentOutlinePane_ = nullptr;
         PropertiesGrid* propertiesPane_ = nullptr;
+        PropertiesPanel* propertiesPanel_ = nullptr;
         newui::SubView* animationPane_ = nullptr;
         newui::SubView* statusBar_ = nullptr;
         newui::FrameProxy* frameProxy_ = nullptr;

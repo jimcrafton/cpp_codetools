@@ -40,6 +40,11 @@ namespace CodeToolsVsix
     NativeEditManager::NativeEditManager()
     {
         registerReflectionData();
+
+        newui::setDefaultPresentBackend(newui::PresentBackend::Dxgi);
+        newui::setDefaultRepaintMode(newui::RepaintMode::Dirty);   // Full to rule Dirty out
+        newui::setDefaultVerifyRepaint(false);
+
         PropertyEditorRegistry::instance().registerBuiltinEditors();
         ComponentEditorRegistry::instance().registerBuiltinEditors();
     }

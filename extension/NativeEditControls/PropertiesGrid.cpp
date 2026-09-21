@@ -93,6 +93,57 @@ namespace CodeToolsVsix
         model_.setSelection(selected);
     }
 
+    void PropertiesGrid::setFilterText(const std::string& text)
+    {
+        treeView_->clearSelection();
+        destroyLiveEditor();
+        model_.setFilter(text);
+        resetExpansion();
+    }
+
+    void PropertiesGrid::setAlphabetical(bool alphabetical)
+    {
+        treeView_->clearSelection();
+        destroyLiveEditor();
+        model_.setAlphabetical(alphabetical);
+        resetExpansion();
+    }
+
+    void PropertiesGrid::resetExpansion()
+    {
+        // TreeController remembers expansion by index path, which a filter or re-sort just
+        // re-pointed at different rows - so it is set afresh rather than trusted. (It has no
+        // "collapse everything", so walk the model.)
+        newui::TreeController& controller = treeView_->controller();
+        const bool filtering = !model_.filter().empty();
+        std::vector<std::size_t> path;
+
+        std::function<void(int)> visit = [&](int depth) {
+            const std::size_t count = model_.childCount(path);
+            const PropertiesModel::Node node = model_.nodeAt(path);
+            // The root has no row of its own. A row with nothing under it is still set (closed): the
+            // path may have been an open group before this change, and would reappear open if a
+            // group ever lands there again.
+            if (!path.empty()) {
+                controller.setExpanded(path, filtering && count > 0);
+            }
+            if (count == 0 || depth > 6) {
+                return;
+            }
+            // Filtering opens only the way to what matched: a group that matched by its own name
+            // opens one level to show its fields, but its sub-groups stay closed.
+            if (filtering && node.showAllChildren) {
+                return;
+            }
+            for (std::size_t i = 0; i < count; ++i) {
+                path.push_back(i);
+                visit(depth + 1);
+                path.pop_back();
+            }
+        };
+        visit(0);
+    }
+
     newui::SyncReturn PropertiesGrid::handleSelectionChanged(newui::TreeView& /*sender*/)
     {
         // Selecting a row no longer activates its editor by itself - only

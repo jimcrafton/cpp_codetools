@@ -105,6 +105,9 @@ namespace CodeToolsVsix
             // this matches that same resolution rather than inventing a finer one.
             bool readOnly = false;
             std::string readOnlyReason;
+            // Group nodes only: whether every child is listed (no filter, or this group's own name
+            // matched the filter) as opposed to only the children that match it - see setFilter().
+            bool showAllChildren = true;
         };
 
         // Re-points at a newly-selected object (nullptr clears to an empty
@@ -116,6 +119,23 @@ namespace CodeToolsVsix
         // PropertiesPanel::expandedGroups_ used.
         void setSelection(newui::SubView* selected);
         newui::SubView* selected() const { return selected_; }
+
+        // How the rows are presented - view settings that, unlike the selection, persist across
+        // setSelection() so the grid keeps its filter and order as different controls are picked.
+        // Each fires onChanged() when it actually changes.
+        //
+        // setFilter(): only properties whose name contains text (case-insensitive) are listed - a
+        // group is kept when its own name matches (then all of its fields show) or when any field
+        // inside it does (then only the matching ones show), so "margin" finds layoutParams >
+        // leftMargin. Nothing is filtered when text is blank. Sub-property rows (a Rect's x/y/width/
+        // height, a flags enum's bits) are matched by name but never filtered out of a kept group.
+        void setFilter(const std::string& text);
+        const std::string& filter() const { return filter_; }
+        // setAlphabetical(): rows are ordered A-Z by name instead of in reflection order - name and
+        // bounds first at the top level, the synthetic Parent row and the Delegates group where
+        // they always are. Groups are ordered the same way inside.
+        void setAlphabetical(bool alphabetical);
+        bool alphabetical() const { return alphabetical_; }
 
         std::size_t childCount(const std::vector<std::size_t>& path) const override;
 
@@ -132,6 +152,21 @@ namespace CodeToolsVsix
         // newui::DesignTimeFlags::ReadOnly (its owning control manages its state).
         Node childOf(const Node& container, std::size_t index) const;
         std::size_t childCountOf(const Node& node) const;
+
+        // Filter/order machinery - see setFilter()/setAlphabetical().
+        bool filterActive() const { return !filterLower_.empty(); }
+        bool matches(const std::string& name) const;
+        bool propertyPasses(const newui::reflection::Property* property,
+            const newui::reflection::Class* ownerClass, void* ownerInstance, int depth) const;
+        std::vector<const newui::reflection::Property*> listedProperties(
+            const newui::reflection::Class* cls, void* instance, bool showAll, bool topLevel) const;
+        std::vector<const newui::reflection::Delegate*> listedDelegates(const newui::reflection::Class* cls) const;
+        bool parentRowVisible() const;
+        bool delegatesHeaderVisible(const newui::reflection::Class* cls) const;
+        std::string filter_;
+        std::string filterLower_;
+        bool alphabetical_ = false;
+
         static Node classifyProperty(const newui::reflection::Property* property,
             const newui::reflection::Class* ownerClass, void* ownerInstance);
 

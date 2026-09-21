@@ -7,6 +7,7 @@
 #include <utility>
 #include <vector>
 
+#include <newui/layout.h>
 #include <newui/reflection.h>
 #include <newui/undostack.h>
 #include <newui/view.h>
@@ -70,6 +71,27 @@ namespace CodeToolsVsix
     private:
         void addTab();
         void removeLastTab();
+    };
+
+    // Row / column verbs for a view whose Layout is a GridLayout (view() is the container, not the
+    // layout - a layout is not a View). Add Row / Add Column append a star track; Remove Last Row /
+    // Column appear only while there is one to remove. Each is one undoable step. Children keep
+    // their cell numbers: one in a removed track is left where it was, as GridLayout already does
+    // for a cell outside its tracks.
+    class GridLayoutEditor : public ComponentEditor
+    {
+    public:
+        using ComponentEditor::ComponentEditor;
+
+        std::size_t verbCount() const override;
+        std::string verb(std::size_t index) const override;
+        void executeVerb(std::size_t index) override;
+
+    private:
+        enum class Verb { AddRow, AddColumn, RemoveRow, RemoveColumn };
+        std::vector<Verb> applicableVerbs() const;
+        newui::GridLayout* grid() const;
+        void changeTracks(bool rows, bool add);
     };
 
     // Keyed on const reflection::Class* alone - no generic/wildcard

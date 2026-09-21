@@ -92,6 +92,87 @@ namespace CodeToolsVsix
         runAction(std::move(action));
     }
 
+    newui::GridLayout* GridLayoutEditor::grid() const
+    {
+        return dynamic_cast<newui::GridLayout*>(view_->layout());
+    }
+
+    std::vector<GridLayoutEditor::Verb> GridLayoutEditor::applicableVerbs() const
+    {
+        std::vector<Verb> verbs = { Verb::AddRow, Verb::AddColumn };
+        if (newui::GridLayout* layout = grid()) {
+            if (!layout->rows().empty()) {
+                verbs.push_back(Verb::RemoveRow);
+            }
+            if (!layout->columns().empty()) {
+                verbs.push_back(Verb::RemoveColumn);
+            }
+        }
+        return verbs;
+    }
+
+    std::size_t GridLayoutEditor::verbCount() const
+    {
+        return grid() != nullptr ? applicableVerbs().size() : 0;
+    }
+
+    std::string GridLayoutEditor::verb(std::size_t index) const
+    {
+        std::vector<Verb> verbs = applicableVerbs();
+        if (index >= verbs.size()) {
+            return {};
+        }
+        switch (verbs[index]) {
+        case Verb::AddRow: return "Add Row";
+        case Verb::AddColumn: return "Add Column";
+        case Verb::RemoveRow: return "Remove Last Row";
+        case Verb::RemoveColumn: return "Remove Last Column";
+        }
+        return {};
+    }
+
+    void GridLayoutEditor::executeVerb(std::size_t index)
+    {
+        std::vector<Verb> verbs = applicableVerbs();
+        if (grid() == nullptr || index >= verbs.size()) {
+            return;
+        }
+        switch (verbs[index]) {
+        case Verb::AddRow: changeTracks(true, true); break;
+        case Verb::AddColumn: changeTracks(false, true); break;
+        case Verb::RemoveRow: changeTracks(true, false); break;
+        case Verb::RemoveColumn: changeTracks(false, false); break;
+        }
+    }
+
+    void GridLayoutEditor::changeTracks(bool rows, bool add)
+    {
+        newui::GridLayout* layout = grid();
+        std::vector<newui::GridTrack> before = rows ? layout->rows() : layout->columns();
+        std::vector<newui::GridTrack> after = before;
+        if (add) {
+            after.push_back(newui::GridTrack{ newui::GridTrackKind::Star, 1.0f });
+        } else if (!after.empty()) {
+            after.pop_back();
+        }
+
+        // The layout is re-fetched from the view each time, never held: it could have been swapped
+        // for another Layout between the do and its undo.
+        newui::View* view = view_;
+        auto apply = [view, rows](const std::vector<newui::GridTrack>& tracks) {
+            if (auto* current = dynamic_cast<newui::GridLayout*>(view->layout())) {
+                (rows ? current->rows() : current->columns()) = tracks;
+                view->updateLayout();
+            }
+        };
+
+        newui::UndoableAction action;
+        action.description = std::string(add ? "Add " : "Remove ") + (rows ? "Row" : "Column");
+        action.doIt = [apply, after] { apply(after); };
+        action.undoIt = [apply, before] { apply(before); };
+        runAction(std::move(action));
+    }
+
     ComponentEditorRegistry& ComponentEditorRegistry::instance()
     {
         static ComponentEditorRegistry registry;

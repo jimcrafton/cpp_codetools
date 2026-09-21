@@ -162,7 +162,12 @@ namespace CodeToolsVsix
 
     protected:
         std::any rawValue() const { return property_->get(instance_); }
-        void setRawValue(const std::any& value) const { property_->set(instance_, value); }
+        void setRawValue(const std::any& value) const { valueWriter()(value); }
+
+        // How a new value is stored - a self-contained function (it outlives this editor: the undo
+        // action holds it), by default property_->set(). A collection property can't be assigned
+        // through set() (reflection only reaches its live container), so its editor overrides this.
+        virtual std::function<void(const std::any&)> valueWriter() const;
 
         // Commits an already-built value - through undoStack() if one is
         // attached (undoable), or directly otherwise. Factored out of
@@ -209,6 +214,24 @@ namespace CodeToolsVsix
         using PropertyEditor::PropertyEditor;
         std::string valueAsString() const override;
         std::optional<std::any> parseValue(const std::string& text) const override;
+    };
+
+    // A GridLayout's rows / columns (std::vector<newui::GridTrack>) as one line of text, WPF-style:
+    // comma-separated, each track "Auto", a star weight ("*" is 1*, "2*", "0.5*") or fixed pixels ("40",
+    // "40px"). "40, *, 2*, Auto" is a fixed row, a star row, a double-weight star row and an auto row.
+    // An empty string is no tracks. Anything that doesn't parse is rejected whole (nothing changes).
+    class GridTracksPropertyEditor : public PropertyEditor
+    {
+    public:
+        using PropertyEditor::PropertyEditor;
+        std::string valueAsString() const override;
+        std::optional<std::any> parseValue(const std::string& text) const override;
+
+        // A GridLayout's rows / columns are collections, written through their live container.
+        std::function<void(const std::any&)> valueWriter() const override;
+
+        static std::string format(const std::vector<newui::GridTrack>& tracks);
+        static std::optional<std::vector<newui::GridTrack>> parse(const std::string& text);
     };
 
     class FloatPropertyEditor : public PropertyEditor
@@ -540,6 +563,10 @@ namespace CodeToolsVsix
         // (test_property_editor.cpp) - a global guard would have made
         // every such instance after the first come up empty.
         void registerBuiltinEditors();
+
+        // Whether a type-keyed editor (registerEditor(std::type_index, ...)) exists for type - lets the
+        // Properties grid show a collection-typed property only when something can edit it.
+        bool hasTypeEditor(std::type_index type) const;
 
     private:
         struct Entry

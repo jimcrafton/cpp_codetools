@@ -1,4 +1,7 @@
 #include "PropertiesModel.h"
+
+#include <algorithm>
+#include <cctype>
 #include "LayoutEditingPolicy.h"
 
 namespace CodeToolsVsix
@@ -10,15 +13,16 @@ namespace CodeToolsVsix
 
     namespace
     {
-        // The properties the grid lists for cls - allProperties() minus collections (childViews):
-        // a collection has no editor, and the tree it holds is edited on the canvas and in the
-        // Outline. It stays a real, serialized property; this only hides it from the grid.
+        // The properties the grid lists for cls - allProperties() minus collections that nothing
+        // can edit (childViews: the tree it holds is edited on the canvas and in the Outline). It
+        // stays a real, serialized property; this only hides it from the grid. A collection with a
+        // registered editor (a GridLayout's rows / columns) is listed like any other property.
         void gridProperties(const Class* cls, std::vector<const Property*>& out)
         {
             std::vector<const Property*> all;
             cls->allProperties(all);
             for (const Property* property : all) {
-                if (!property->isCollection()) {
+                if (!property->isCollection() || PropertyEditorRegistry::instance().hasTypeEditor(property->type())) {
                     out.push_back(property);
                 }
             }
@@ -54,6 +58,150 @@ namespace CodeToolsVsix
             reason = "Controlled by " + (layoutClass != nullptr ? layoutClass->name() : std::string("the parent's layout"));
             return true;
         }
+    }
+
+    namespace
+    {
+        std::string lowerCopy(const std::string& text)
+        {
+            std::string result = text;
+            for (char& c : result) {
+                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            }
+            return result;
+        }
+
+        std::string trimmed(const std::string& text)
+        {
+            std::size_t first = text.find_first_not_of(" \t");
+            if (first == std::string::npos) {
+                return std::string();
+            }
+            std::size_t last = text.find_last_not_of(" \t");
+            return text.substr(first, last - first + 1);
+        }
+    }
+
+    void PropertiesModel::setFilter(const std::string& text)
+    {
+        std::string clean = trimmed(text);
+        if (clean == filter_) {
+            return;
+        }
+        filter_ = clean;
+        filterLower_ = lowerCopy(clean);
+        onChanged(*this);
+    }
+
+    void PropertiesModel::setAlphabetical(bool alphabetical)
+    {
+        if (alphabetical == alphabetical_) {
+            return;
+        }
+        alphabetical_ = alphabetical;
+        onChanged(*this);
+    }
+
+    bool PropertiesModel::matches(const std::string& name) const
+    {
+        return !filterLower_.empty() && lowerCopy(name).find(filterLower_) != std::string::npos;
+    }
+
+    bool PropertiesModel::propertyPasses(const Property* property, const Class* ownerClass,
+        void* ownerInstance, int depth) const
+    {
+        if (!filterActive() || matches(property->name())) {
+            return true;
+        }
+        if (depth > 5) {
+            return false;
+        }
+        Node node = classifyProperty(property, ownerClass, ownerInstance);
+        if (node.kind == Kind::PropertyGroup) {
+            const Class* nested = property->getClass(ownerInstance);
+            void* nestedInstance = nested != nullptr ? property->address(ownerInstance) : nullptr;
+            if (nested == nullptr || nestedInstance == nullptr) {
+                return false;
+            }
+            std::vector<const Property*> children;
+            gridProperties(nested, children);
+            for (const Property* child : children) {
+                if (propertyPasses(child, nested, nestedInstance, depth + 1)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        if (node.kind == Kind::PropertySubGroup) {
+            auto editor = PropertyEditorRegistry::instance().createEditor(property, ownerClass, ownerInstance);
+            if (editor != nullptr) {
+                for (const std::string& name : editor->subPropertyNames()) {
+                    if (matches(name)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    std::vector<const Property*> PropertiesModel::listedProperties(const Class* cls, void* instance,
+        bool showAll, bool topLevel) const
+    {
+        std::vector<const Property*> all;
+        gridProperties(cls, all);
+
+        std::vector<const Property*> result;
+        for (const Property* property : all) {
+            if (showAll || propertyPasses(property, cls, instance, 0)) {
+                result.push_back(property);
+            }
+        }
+
+        if (alphabetical_) {
+            std::stable_sort(result.begin(), result.end(), [](const Property* a, const Property* b) {
+                return lowerCopy(a->name()) < lowerCopy(b->name());
+            });
+            if (topLevel) {
+                // "name" then "bounds" lead the list - the two you reach for most.
+                std::size_t next = 0;
+                for (const char* pinned : { "name", "bounds" }) {
+                    auto it = std::find_if(result.begin() + next, result.end(),
+                        [pinned](const Property* p) { return p->name() == pinned; });
+                    if (it != result.end()) {
+                        std::rotate(result.begin() + next, it, it + 1);
+                        ++next;
+                    }
+                }
+            }
+        }
+        return result;
+    }
+
+    std::vector<const Delegate*> PropertiesModel::listedDelegates(const Class* cls) const
+    {
+        std::vector<const Delegate*> all;
+        cls->allDelegates(all);
+        if (!filterActive() || matches("Delegates")) {
+            return all;
+        }
+        std::vector<const Delegate*> result;
+        for (const Delegate* delegate : all) {
+            if (matches(delegate->name())) {
+                result.push_back(delegate);
+            }
+        }
+        return result;
+    }
+
+    bool PropertiesModel::parentRowVisible() const
+    {
+        return showsParentPicker() && (!filterActive() || matches("Parent"));
+    }
+
+    bool PropertiesModel::delegatesHeaderVisible(const Class* cls) const
+    {
+        return !listedDelegates(cls).empty();
     }
 
     void PropertiesModel::setSelection(newui::SubView* selected)
@@ -128,7 +276,7 @@ namespace CodeToolsVsix
     {
         switch (container.kind) {
         case Kind::Root: {
-            std::size_t parentRow = showsParentPicker() ? 1 : 0;
+            std::size_t parentRow = parentRowVisible() ? 1 : 0;
             if (parentRow != 0 && index == 0) {
                 Node node;
                 node.kind = Kind::ParentPicker;
@@ -138,10 +286,11 @@ namespace CodeToolsVsix
             }
             std::size_t propertyIndex = index - parentRow;
 
-            std::vector<const Property*> properties;
-            gridProperties(container.ownerClass, properties);
+            std::vector<const Property*> properties =
+                listedProperties(container.ownerClass, container.ownerInstance, !filterActive(), true);
             if (propertyIndex < properties.size()) {
                 Node node = classifyProperty(properties[propertyIndex], container.ownerClass, container.ownerInstance);
+                node.showAllChildren = !filterActive() || matches(node.property->name());
                 std::string reason;
                 if (boundsReadOnlyReason(container.ownerInstance, node.property, reason)) {
                     node.readOnly = true;
@@ -149,9 +298,7 @@ namespace CodeToolsVsix
                 }
                 return node;
             }
-            std::vector<const Delegate*> delegates;
-            container.ownerClass->allDelegates(delegates);
-            if (propertyIndex == properties.size() && !delegates.empty()) {
+            if (propertyIndex == properties.size() && delegatesHeaderVisible(container.ownerClass)) {
                 Node node;
                 node.kind = Kind::DelegatesHeader;
                 node.ownerClass = container.ownerClass;
@@ -166,10 +313,12 @@ namespace CodeToolsVsix
             if (nested == nullptr || nestedInstance == nullptr) {
                 return Node();
             }
-            std::vector<const Property*> properties;
-            gridProperties(nested, properties);
+            std::vector<const Property*> properties =
+                listedProperties(nested, nestedInstance, container.showAllChildren, false);
             if (index < properties.size()) {
-                return classifyProperty(properties[index], nested, nestedInstance);
+                Node node = classifyProperty(properties[index], nested, nestedInstance);
+                node.showAllChildren = container.showAllChildren || matches(node.property->name());
+                return node;
             }
             return Node();
         }
@@ -194,8 +343,7 @@ namespace CodeToolsVsix
             return node;
         }
         case Kind::DelegatesHeader: {
-            std::vector<const Delegate*> delegates;
-            container.ownerClass->allDelegates(delegates);
+            std::vector<const Delegate*> delegates = listedDelegates(container.ownerClass);
             if (index < delegates.size()) {
                 Node node;
                 node.kind = Kind::DelegateEntry;
@@ -214,12 +362,10 @@ namespace CodeToolsVsix
     {
         switch (node.kind) {
         case Kind::Root: {
-            std::vector<const Property*> properties;
-            gridProperties(node.ownerClass, properties);
-            std::vector<const Delegate*> delegates;
-            node.ownerClass->allDelegates(delegates);
-            std::size_t parentRow = showsParentPicker() ? 1 : 0;
-            return parentRow + properties.size() + (delegates.empty() ? 0 : 1);
+            std::vector<const Property*> properties =
+                listedProperties(node.ownerClass, node.ownerInstance, !filterActive(), true);
+            std::size_t parentRow = parentRowVisible() ? 1 : 0;
+            return parentRow + properties.size() + (delegatesHeaderVisible(node.ownerClass) ? 1 : 0);
         }
         case Kind::PropertyGroup: {
             const Class* nested = node.property->getClass(node.ownerInstance);
@@ -227,20 +373,15 @@ namespace CodeToolsVsix
             if (nested == nullptr || nestedInstance == nullptr) {
                 return 0;
             }
-            std::vector<const Property*> properties;
-            gridProperties(nested, properties);
-            return properties.size();
+            return listedProperties(nested, nestedInstance, node.showAllChildren, false).size();
         }
         case Kind::PropertySubGroup: {
             auto editor = PropertyEditorRegistry::instance().createEditor(
                 node.property, node.ownerClass, node.ownerInstance);
             return editor != nullptr ? editor->subPropertyNames().size() : 0;
         }
-        case Kind::DelegatesHeader: {
-            std::vector<const Delegate*> delegates;
-            node.ownerClass->allDelegates(delegates);
-            return delegates.size();
-        }
+        case Kind::DelegatesHeader:
+            return listedDelegates(node.ownerClass).size();
         default:
             return 0;
         }
@@ -256,6 +397,7 @@ namespace CodeToolsVsix
         current.kind = Kind::Root;
         current.ownerClass = rootClass_;
         current.ownerInstance = static_cast<void*>(selected_);
+        current.showAllChildren = !filterActive();
 
         for (std::size_t index : path) {
             current = childOf(current, index);

@@ -6,7 +6,11 @@
     },
     "Profile 1": {
       "commandName": "Project",
-      "debugEngines": "managed-framework,native"
+      "environmentVariables": {
+        "NEWUI_PRESENT": "dxgi",
+        "NEWUI_VERIFY_REPAINT": "1"
+      },
+      "debugEngines": "managed-framework"
     }
   }
 }

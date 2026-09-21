@@ -140,6 +140,10 @@ namespace CodeToolsVsix
         // shortcuts above (and Delete) only act then. Decided by focus, which UIInputManager
         // resolves on every click - clicking the canvas clears it, clicking a field focuses that.
         bool canvasOwnsKeyboard() const;
+        // Undo / redo one step (the toolbar buttons, Ctrl+Z / Shift+Ctrl+Z, and the host's Edit
+        // commands all come here); false if there was nothing to undo/redo.
+        bool undo();
+        bool redo();
         bool copySelection();
         bool cutSelection();
         bool pasteFromClipboard();
@@ -175,6 +179,10 @@ namespace CodeToolsVsix
         // offers no verbs. Right-clicking a control shows these verbs as a context menu; public so
         // tests can run them without the blocking native popup.
         std::unique_ptr<ComponentEditor> createComponentEditorFor(newui::SubView* view);
+
+        // Every ComponentEditor that applies to view: the class's own (createComponentEditorFor()) and,
+        // when its Layout is a GridLayout, the row/column editor. The context menu lists each one's verbs.
+        std::vector<std::unique_ptr<ComponentEditor>> createComponentEditorsFor(newui::SubView* view);
 
         // Hover feedback for a Toolbox drag at rootLocalPt (this editor's root space): highlights
         // the target container and shows where the control would land - an insertion line (flex),

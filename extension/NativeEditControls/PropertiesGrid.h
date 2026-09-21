@@ -54,6 +54,14 @@ namespace CodeToolsVsix
         void setSelection(newui::SubView* selected);
         newui::SubView* selected() const { return model_.selected(); }
 
+        // Narrow the rows to properties whose name contains text, and/or order them A-Z - see
+        // PropertiesModel::setFilter()/setAlphabetical(). Either one changes which row is which, so
+        // the selected row and any open editor are dropped, and the expansion is reset: with a filter
+        // every group on the way to a match opens (so the matches are visible without hunting), and
+        // with none everything closes again.
+        void setFilterText(const std::string& text);
+        void setAlphabetical(bool alphabetical);
+
         // Attaches the UndoStack every live PropertyEditor this class
         // creates is given (PropertyEditor::setUndoStack()) - same
         // nullptr-means-direct-commit default as PropertyEditor itself.
@@ -138,6 +146,7 @@ namespace CodeToolsVsix
         // precondition rebuildLiveEditor()'s other branches share).
         void buildParentPickerLiveEditor(const PropertiesModel::Node& node, const newui::Rect& valueRect);
         void destroyLiveEditor();
+        void resetExpansion();   // see setFilterText()
 
         // Real, live-caught bug this exists to close: every live-editor commit path already marks
         // treeView_'s own style dirty (so the row's own text/swatch/checkbox updates), but nothing

@@ -708,3 +708,167 @@ TEST_F(PropertiesModelTest, ChangingCursorPathSwitchesTheKindToCustomAndUndoRest
 
     ::DeleteFileA(svg.c_str());
 }
+
+// ---------------------------------------------------------------------------
+// Filtering and A-Z ordering of the property rows (view settings that outlive the selection).
+// ---------------------------------------------------------------------------
+
+namespace
+{
+    std::vector<std::string> rootNames(PropertiesModel& model)
+    {
+        std::vector<std::string> names;
+        for (std::size_t i = 0; i < model.childCount({}); ++i) {
+            PropertiesModel::Node node = model.nodeAt({i});
+            names.push_back(node.property != nullptr ? node.property->name() : std::string("<") + std::to_string(int(node.kind)) + ">");
+        }
+        return names;
+    }
+
+    std::vector<std::string> childNames(PropertiesModel& model, std::size_t row)
+    {
+        std::vector<std::string> names;
+        for (std::size_t c = 0; c < model.childCount({row}); ++c) {
+            PropertiesModel::Node node = model.nodeAt({row, c});
+            names.push_back(node.property != nullptr ? node.property->name() : std::string("?"));
+        }
+        return names;
+    }
+}
+
+TEST_F(PropertiesModelTest, ABlankFilterListsEverythingAndSurroundingSpacesAreIgnored)
+{
+    std::size_t all = model_.childCount({});
+    model_.setFilter("   ");
+    EXPECT_EQ(model_.childCount({}), all);
+    EXPECT_EQ(model_.filter(), "");
+}
+
+TEST_F(PropertiesModelTest, AFilterKeepsAGroupWhoseFieldsMatchAndListsOnlyThoseFields)
+{
+    button_.setLayoutParams(std::make_unique<newui::AnchorLayoutParams>());
+    model_.setSelection(&button_);
+
+    model_.setFilter("  MARGIN ");   // case-insensitive, trimmed
+
+    EXPECT_EQ(rootNames(model_), (std::vector<std::string>{ "layoutParams" }));
+    EXPECT_EQ(childNames(model_, 0),
+        (std::vector<std::string>{ "leftMargin", "topMargin", "rightMargin", "bottomMargin" }));
+    EXPECT_FALSE(model_.nodeAt({0}).showAllChildren);
+}
+
+TEST_F(PropertiesModelTest, AFilterMatchingAGroupsOwnNameShowsAllOfItsFields)
+{
+    button_.setLayoutParams(std::make_unique<newui::AnchorLayoutParams>());
+    model_.setSelection(&button_);
+
+    model_.setFilter("layoutParams");
+
+    ASSERT_EQ(rootNames(model_), (std::vector<std::string>{ "layoutParams" }));
+    EXPECT_EQ(model_.childCount({0}), 7u);
+    EXPECT_TRUE(model_.nodeAt({0}).showAllChildren);
+}
+
+TEST_F(PropertiesModelTest, ASubPropertyNameMatchKeepsItsGroupWithAllItsSubRows)
+{
+    model_.setFilter("width");   // bounds > width, desiredSize > width, layout params width...
+
+    std::vector<std::string> names = rootNames(model_);
+    ASSERT_NE(std::find(names.begin(), names.end(), "bounds"), names.end());
+    std::size_t boundsRow = static_cast<std::size_t>(std::find(names.begin(), names.end(), "bounds") - names.begin());
+    EXPECT_EQ(model_.childCount({boundsRow}), 4u);   // x, y, width, height - never filtered out of a kept group
+    EXPECT_EQ(std::find(names.begin(), names.end(), "visible"), names.end());
+}
+
+TEST_F(PropertiesModelTest, AFilterThatMatchesNothingLeavesNoRows)
+{
+    model_.setFilter("zzzNoSuchProperty");
+    EXPECT_EQ(model_.childCount({}), 0u);
+}
+
+TEST_F(PropertiesModelTest, TheDelegatesGroupFollowsTheFilterToo)
+{
+    model_.setFilter("onClick");
+    std::vector<std::string> names = rootNames(model_);
+    ASSERT_EQ(names.size(), 1u);
+    EXPECT_EQ(model_.nodeAt({0}).kind, PropertiesModel::Kind::DelegatesHeader);
+    EXPECT_EQ(model_.childCount({0}), 1u);   // just onClick, not every delegate
+    EXPECT_EQ(std::any_cast<std::string>(model_.value(std::vector<std::size_t>{0, 0})), "onClick");
+
+    model_.setFilter("Delegates");   // the header's own name: all of its entries
+    EXPECT_GT(model_.childCount({0}), 1u);
+}
+
+TEST_F(PropertiesModelTest, AlphabeticalOrdersRowsAZWithNameAndBoundsFirst)
+{
+    model_.setAlphabetical(true);
+
+    std::vector<std::string> names = rootNames(model_);
+    ASSERT_GT(names.size(), 5u);
+    EXPECT_EQ(names[0], "name");
+    EXPECT_EQ(names[1], "bounds");
+
+    // Everything between the pinned pair and the Delegates group is ascending, case-insensitively.
+    auto lower = [](std::string s) { for (char& c : s) c = char(std::tolower(static_cast<unsigned char>(c))); return s; };
+    for (std::size_t i = 3; i + 1 < names.size(); ++i) {
+        EXPECT_LE(lower(names[i - 1]), lower(names[i])) << names[i - 1] << " / " << names[i];
+    }
+    EXPECT_EQ(model_.nodeAt({names.size() - 1}).kind, PropertiesModel::Kind::DelegatesHeader);   // still last
+}
+
+TEST_F(PropertiesModelTest, AlphabeticalAlsoOrdersAGroupsOwnFields)
+{
+    button_.setLayoutParams(std::make_unique<newui::AnchorLayoutParams>());
+    model_.setSelection(&button_);
+    model_.setAlphabetical(true);
+
+    std::vector<std::string> names = rootNames(model_);
+    std::size_t row = static_cast<std::size_t>(std::find(names.begin(), names.end(), "layoutParams") - names.begin());
+    EXPECT_EQ(childNames(model_, row),
+        (std::vector<std::string>{ "anchors", "bottomMargin", "height", "leftMargin", "rightMargin", "topMargin", "width" }));
+}
+
+TEST_F(PropertiesModelTest, FilterAndOrderPersistAcrossSelectionsAndOnlyNotifyOnRealChanges)
+{
+    int changed = 0;
+    model_.onChanged.add([&changed](newui::Model&) { ++changed; return newui::SyncReturn::Handled; });
+
+    model_.setFilter("margin");
+    model_.setFilter("margin");        // unchanged: silent
+    model_.setAlphabetical(true);
+    model_.setAlphabetical(true);      // unchanged: silent
+    EXPECT_EQ(changed, 2);
+
+    newui::Button other;
+    other.setLayoutParams(std::make_unique<newui::AnchorLayoutParams>());
+    model_.setSelection(&other);       // fires once for the new selection...
+    EXPECT_EQ(model_.filter(), "margin");     // ...and the view settings survive it
+    EXPECT_TRUE(model_.alphabetical());
+    EXPECT_EQ(rootNames(model_), (std::vector<std::string>{ "layoutParams" }));
+}
+
+TEST_F(PropertiesModelTest, AGridLayoutsRowsAndColumnsAreListedAsEditableLeavesButChildViewsStaysHidden)
+{
+    button_.setLayout(std::make_unique<newui::GridLayout>());
+    model_.setSelection(&button_);
+
+    std::size_t layoutRow = static_cast<std::size_t>(-1);
+    for (std::size_t i = 0; i < model_.childCount({}); ++i) {
+        PropertiesModel::Node node = model_.nodeAt({i});
+        ASSERT_TRUE(node.property == nullptr || node.property->name() != "childViews");
+        if (node.property != nullptr && node.property->name() == "layout") {
+            layoutRow = i;
+        }
+    }
+    ASSERT_NE(layoutRow, static_cast<std::size_t>(-1));
+
+    std::vector<std::string> names = childNames(model_, layoutRow);
+    EXPECT_NE(std::find(names.begin(), names.end(), "rows"), names.end());
+    EXPECT_NE(std::find(names.begin(), names.end(), "columns"), names.end());
+    for (std::size_t c = 0; c < model_.childCount({layoutRow}); ++c) {
+        PropertiesModel::Node child = model_.nodeAt({layoutRow, c});
+        if (child.property != nullptr && (child.property->name() == "rows" || child.property->name() == "columns")) {
+            EXPECT_EQ(child.kind, PropertiesModel::Kind::PropertyLeaf) << child.property->name();
+        }
+    }
+}

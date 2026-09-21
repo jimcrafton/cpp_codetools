@@ -2354,3 +2354,90 @@ TEST(DesignerEditorKeyboardOwnership, TheCanvasOwnsTheKeyboardOnlyWhileNothingIs
     root.setFocusedSubView(nullptr);                     // what a canvas click resolves to
     EXPECT_TRUE(editor.canvasOwnsKeyboard());
 }
+
+// Ctrl+Z / Shift+Ctrl+Z, the toolbar buttons and the host's Edit commands all go through undo()/redo().
+TEST(DesignerEditorUndoRedo, UndoAndRedoStepThroughTheStackAndKeepTheToolbarButtonsInStep)
+{
+    HoverFixture f;
+    auto* button = new newui::Button();
+    button->setBounds(newui::Rect(20, 30, 80, 24));
+    f.anchorBox->addChild(button);
+    f.editor.viewDesignerModel().refresh();
+    f.editor.viewDesignerController().selectExclusive(button);
+
+    EXPECT_FALSE(f.editor.undo());                                  // nothing yet
+    EXPECT_FALSE(f.editor.redo());
+
+    ASSERT_TRUE(f.editor.duplicateSelection());
+    ASSERT_EQ(f.anchorBox->childViews().size(), 2u);
+    EXPECT_TRUE(f.editor.workspace()->undoButton()->isEnabled());
+    EXPECT_FALSE(f.editor.workspace()->redoButton()->isEnabled());
+
+    EXPECT_TRUE(f.editor.undo());
+    EXPECT_EQ(f.anchorBox->childViews().size(), 1u);
+    EXPECT_FALSE(f.editor.workspace()->undoButton()->isEnabled());
+    EXPECT_TRUE(f.editor.workspace()->redoButton()->isEnabled());
+
+    EXPECT_TRUE(f.editor.redo());
+    EXPECT_EQ(f.anchorBox->childViews().size(), 2u);
+    EXPECT_FALSE(f.editor.redo());                                  // nothing further to redo
+}
+
+// ---------------------------------------------------------------------------
+// Grid row / column verbs.
+// ---------------------------------------------------------------------------
+
+TEST(DesignerEditorGridVerbs, AddAndRemoveRowsAndColumnsAreUndoableAndOnlyOfferWhatApplies)
+{
+    HoverFixture f;
+    auto* panel = new newui::SubView();
+    panel->setVisible(true);
+    panel->setBounds(newui::Rect(10, 250, 200, 100));
+    panel->setLayout(std::make_unique<newui::GridLayout>());
+    f.surface->addChild(panel);
+    f.editor.viewDesignerModel().refresh();
+    auto* grid = dynamic_cast<newui::GridLayout*>(panel->layout());
+
+    auto editors = f.editor.createComponentEditorsFor(panel);
+    ASSERT_EQ(editors.size(), 1u);
+    ASSERT_EQ(editors[0]->verbCount(), 2u);            // nothing to remove yet
+    EXPECT_EQ(editors[0]->verb(0), "Add Row");
+    EXPECT_EQ(editors[0]->verb(1), "Add Column");
+
+    editors[0]->executeVerb(0);
+    editors[0]->executeVerb(0);
+    editors[0]->executeVerb(1);
+    EXPECT_EQ(grid->rows().size(), 2u);
+    EXPECT_EQ(grid->columns().size(), 1u);
+    EXPECT_EQ(grid->rows()[0].kind, newui::GridTrackKind::Star);
+    EXPECT_EQ(f.editor.undoStack().undoDescription(), "Add Column");
+    EXPECT_TRUE(f.editor.isDirty());
+
+    ASSERT_EQ(editors[0]->verbCount(), 4u);            // remove appears once there is something to remove
+    EXPECT_EQ(editors[0]->verb(2), "Remove Last Row");
+    EXPECT_EQ(editors[0]->verb(3), "Remove Last Column");
+    editors[0]->executeVerb(2);
+    EXPECT_EQ(grid->rows().size(), 1u);
+    EXPECT_EQ(f.editor.undoStack().undoDescription(), "Remove Row");
+
+    f.editor.undoStack().undo();                        // the removal
+    EXPECT_EQ(grid->rows().size(), 2u);
+    f.editor.undoStack().undo();                        // the column
+    EXPECT_EQ(grid->columns().size(), 0u);
+    f.editor.undoStack().redo();
+    EXPECT_EQ(grid->columns().size(), 1u);
+}
+
+TEST(DesignerEditorGridVerbs, ViewsWithoutAGridLayoutGetNoGridVerbsAndAGridWithAClassEditorGetsBoth)
+{
+    CodeToolsVsix::ComponentEditorRegistry::instance().registerBuiltinEditors();
+    HoverFixture f;
+    EXPECT_TRUE(f.editor.createComponentEditorsFor(f.anchorBox).empty());   // Anchor layout, no class editor
+
+    auto* tabs = new newui::TabControl();
+    tabs->setBounds(newui::Rect(10, 10, 100, 60));
+    f.surface->addChild(tabs);
+    auto editors = f.editor.createComponentEditorsFor(tabs);
+    ASSERT_EQ(editors.size(), 1u);                       // TabControl's own; its layout is Flex, not Grid
+    EXPECT_NE(dynamic_cast<CodeToolsVsix::TabControlEditor*>(editors[0].get()), nullptr);
+}

@@ -91,11 +91,17 @@ namespace CodeToolsVsix
     void paintSwatch(BLContext& ctx, const newui::Rect& box, const newui::Color& fill, const newui::Color& border)
     {
         ctx.save();
-        ctx.set_fill_style(fill.toBLRgba32());
+        const bool none = fill.isNull();
+        // "No color" reads like Photoshop's: a white swatch struck through by a red diagonal slash.
+        ctx.set_fill_style(none ? BLRgba32(0xFF, 0xFF, 0xFF) : fill.toBLRgba32());
         ctx.fill_rect(BLRect(box.left(), box.top(), box.size().width, box.size().height));
         ctx.set_stroke_style(border.toBLRgba32());
         ctx.set_stroke_width(1.0);
         ctx.stroke_rect(BLRect(box.left(), box.top(), box.size().width, box.size().height));
+        if (none) {
+            ctx.set_stroke_style(BLRgba32(0xD0, 0x30, 0x30));
+            ctx.stroke_line(BLPoint(box.left() + 1.0, box.bottom() - 1.0), BLPoint(box.right() - 1.0, box.top() + 1.0));
+        }
         ctx.restore();
     }
     void paintCheckerboard(BLContext& ctx, const newui::Rect& rect, double tile, double radius)

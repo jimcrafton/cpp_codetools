@@ -1,4 +1,5 @@
 #include "../extension/NativeEditControls/ColorChoices.h"
+#include "../extension/NativeEditControls/PaintUtils.h"
 #include "../extension/NativeEditControls/PropertyEditor.h"
 
 #include <newui/color_constants.h>
@@ -35,27 +36,33 @@ namespace
     };
 }
 
-TEST(ColorChoices, SystemColorsComeFirstThenEveryNamedColor)
+TEST(ColorChoices, NoneComesFirstThenSystemColorsThenEveryNamedColor)
 {
     const auto& choices = CodeToolsVsix::colorChoices();
     constexpr std::size_t kSystemCount = 10;  // one per newui::UIColorRole
     constexpr std::size_t kNamedCount = sizeof(newui::kNamedColors) / sizeof(newui::kNamedColors[0]);
-    ASSERT_EQ(choices.size(), kSystemCount + kNamedCount);
+    // "none" replaces the CSS "transparent" (the same null color) - one entry each, not both.
+    ASSERT_EQ(choices.size(), 1 + kSystemCount + kNamedCount - 1);
 
-    for (std::size_t i = 0; i < kSystemCount; ++i) {
+    EXPECT_EQ(choices[0].name, "none");
+    EXPECT_FALSE(choices[0].isSystem);
+    for (std::size_t i = 1; i <= kSystemCount; ++i) {
         EXPECT_TRUE(choices[i].isSystem) << choices[i].name;
     }
-    for (std::size_t i = kSystemCount; i < choices.size(); ++i) {
+    for (std::size_t i = kSystemCount + 1; i < choices.size(); ++i) {
         EXPECT_FALSE(choices[i].isSystem) << choices[i].name;
     }
-    EXPECT_EQ(choices[0].name, "WindowBackground");
+    EXPECT_EQ(choices[1].name, "WindowBackground");
+    for (const auto& choice : choices) {
+        EXPECT_NE(choice.name, "transparent");
+    }
 }
 
 TEST(ColorChoices, EveryChoiceNameResolvesToAColor)
 {
     for (const auto& choice : CodeToolsVsix::colorChoices()) {
         newui::Color color;
-        EXPECT_TRUE(newui::Color::fromString(choice.name, color)) << choice.name;
+        EXPECT_TRUE(CodeToolsVsix::parseColorText(choice.name, color)) << choice.name;
     }
 }
 
@@ -109,6 +116,61 @@ TEST(ColorPropertyEditor, HasBothADropdownAndADialog)
 
     std::vector<std::string> values = editor.dropdownValues();
     ASSERT_FALSE(values.empty());
-    EXPECT_EQ(values.front(), "WindowBackground");
+    EXPECT_EQ(values.front(), "none");   // the null color heads the list, ahead of the system colors
+    EXPECT_NE(std::find(values.begin(), values.end(), "WindowBackground"), values.end());
     EXPECT_NE(std::find(values.begin(), values.end(), "cornflowerblue"), values.end());
+}
+
+// ---------------------------------------------------------------------------
+// The null color reads "none", not "#00000000".
+// ---------------------------------------------------------------------------
+
+TEST(ColorText, TheNullColorIsShownAsNoneAndEveryOtherColorKeepsItsHex)
+{
+    EXPECT_EQ(CodeToolsVsix::colorDisplayText(newui::Color::null()), "none");
+    EXPECT_EQ(CodeToolsVsix::colorDisplayText(newui::Color(0.0f, 0.0f, 0.0f, 1.0f)), newui::Color(0.0f, 0.0f, 0.0f, 1.0f).toString());   // opaque black
+    // Fully transparent but with real r/g/b is a real, deliberate color - not "unset".
+    newui::Color clearRed(1.0f, 0.0f, 0.0f, 0.0f);
+    EXPECT_EQ(CodeToolsVsix::colorDisplayText(clearRed), clearRed.toString());
+}
+
+TEST(ColorText, NoneAndNullParseToTheNullColorInAnyCaseAndOtherTextIsUnchanged)
+{
+    for (const char* text : { "none", "None", "NULL", " null ", "transparent" }) {
+        newui::Color color(1.0f, 1.0f, 1.0f, 1.0f);
+        ASSERT_TRUE(CodeToolsVsix::parseColorText(text, color)) << text;
+        EXPECT_TRUE(color.isNull()) << text;
+    }
+    newui::Color red;
+    ASSERT_TRUE(CodeToolsVsix::parseColorText("#ff0000ff", red));
+    EXPECT_FLOAT_EQ(red.r, 1.0f);
+    ASSERT_TRUE(CodeToolsVsix::parseColorText("cornflowerblue", red));
+    EXPECT_FALSE(CodeToolsVsix::parseColorText("not a color", red));
+    EXPECT_FALSE(CodeToolsVsix::parseColorText("", red));
+}
+
+TEST(ColorChoices, TheNullColorMapsBackToTheNoneChoice)
+{
+    EXPECT_EQ(CodeToolsVsix::colorChoiceNameFor(newui::Color::null()), "none");
+}
+
+// Real pixels: a white box with a red diagonal slash (Photoshop's "none") - not an invisible swatch.
+TEST(ColorText, ANullSwatchPaintsAWhiteBoxWithARedDiagonalSlash)
+{
+    BLImage image(20, 20, BL_FORMAT_PRGB32);
+    {
+        BLContext ctx(image);
+        ctx.clear_all();
+        CodeToolsVsix::paintSwatch(ctx, newui::Rect(2, 2, 16, 16), newui::Color::null(), newui::Color(0.0f, 0.0f, 0.0f, 1.0f));
+        ctx.end();
+    }
+    BLImageData data{};
+    ASSERT_EQ(image.get_data(&data), BL_SUCCESS);
+    auto pixelAt = [&](int x, int y) {
+        return reinterpret_cast<const std::uint32_t*>(static_cast<const std::uint8_t*>(data.pixel_data) + y * data.stride)[x];
+    };
+    EXPECT_EQ(pixelAt(5, 8), 0xFFFFFFFFu);         // inside the box, well off the slash: opaque white
+    const std::uint32_t onSlash = pixelAt(10, 10);  // the slash runs bottom-left to top-right through the middle
+    EXPECT_GT((onSlash >> 16) & 0xFF, ((onSlash >> 8) & 0xFF) + 20u);   // reddish (antialiased), not white
+    EXPECT_EQ(pixelAt(0, 0) >> 24, 0u);            // outside the box: untouched
 }

@@ -337,6 +337,105 @@ namespace CodeToolsVsix
         return std::nullopt;
     }
 
+    std::string GridTracksPropertyEditor::format(const std::vector<newui::GridTrack>& tracks)
+    {
+        std::string text;
+        for (const newui::GridTrack& track : tracks) {
+            if (!text.empty()) {
+                text += ", ";
+            }
+            switch (track.kind) {
+            case newui::GridTrackKind::Auto: text += "Auto"; break;
+            case newui::GridTrackKind::Star:
+                text += track.value == 1.0f ? std::string("*") : formatFloat(track.value) + "*";
+                break;
+            case newui::GridTrackKind::Fixed: text += formatFloat(track.value); break;
+            }
+        }
+        return text;
+    }
+
+    std::optional<std::vector<newui::GridTrack>> GridTracksPropertyEditor::parse(const std::string& text)
+    {
+        std::vector<newui::GridTrack> tracks;
+        bool blank = true;
+        for (char c : text) {
+            if (c != ' ' && c != '\t') {
+                blank = false;
+            }
+        }
+        if (blank) {
+            return tracks;
+        }
+
+        std::size_t start = 0;
+        while (start <= text.size()) {
+            std::size_t end = text.find(',', start);
+            if (end == std::string::npos) {
+                end = text.size();
+            }
+            std::string token = toLower(text.substr(start, end - start));
+            const std::size_t first = token.find_first_not_of(" \t");
+            const std::size_t last = token.find_last_not_of(" \t");
+            std::string trimmedToken = first == std::string::npos ? std::string() : token.substr(first, last - first + 1);
+            if (trimmedToken.empty()) {
+                return std::nullopt;   // "40,,*" - a track is missing
+            }
+
+            newui::GridTrack track;
+            if (trimmedToken == "auto") {
+                track = newui::GridTrack{ newui::GridTrackKind::Auto, 0.0f };
+            } else {
+                const bool star = trimmedToken.back() == '*';
+                std::string number = trimmedToken;
+                if (star) {
+                    number.pop_back();
+                } else if (number.size() > 2 && number.compare(number.size() - 2, 2, "px") == 0) {
+                    number.resize(number.size() - 2);
+                }
+                float value = 1.0f;
+                if (!number.empty()) {
+                    try {
+                        std::size_t consumed = 0;
+                        value = std::stof(number, &consumed);
+                        if (consumed != number.size()) {
+                            return std::nullopt;
+                        }
+                    } catch (const std::exception&) {
+                        return std::nullopt;
+                    }
+                } else if (!star) {
+                    return std::nullopt;
+                }
+                if (!(value >= 0.0f) || (star && value == 0.0f)) {
+                    return std::nullopt;   // negative sizes and a zero-weight star make no sense
+                }
+                track = newui::GridTrack{ star ? newui::GridTrackKind::Star : newui::GridTrackKind::Fixed, value };
+            }
+            tracks.push_back(track);
+
+            if (end == text.size()) {
+                break;
+            }
+            start = end + 1;
+        }
+        return tracks;
+    }
+
+    std::string GridTracksPropertyEditor::valueAsString() const
+    {
+        return format(std::any_cast<std::vector<newui::GridTrack>>(rawValue()));
+    }
+
+    std::optional<std::any> GridTracksPropertyEditor::parseValue(const std::string& text) const
+    {
+        std::optional<std::vector<newui::GridTrack>> tracks = parse(text);
+        if (!tracks.has_value()) {
+            return std::nullopt;
+        }
+        return std::any(*tracks);
+    }
+
     std::string FloatPropertyEditor::valueAsString() const
     {
         return std::to_string(std::any_cast<float>(rawValue()));
@@ -405,7 +504,7 @@ namespace CodeToolsVsix
 
     std::string ColorPropertyEditor::valueAsString() const
     {
-        return std::any_cast<newui::Color>(rawValue()).toString();
+        return colorDisplayText(std::any_cast<newui::Color>(rawValue()));
     }
 
     std::vector<std::string> ColorPropertyEditor::dropdownValues() const
@@ -440,7 +539,7 @@ namespace CodeToolsVsix
     std::optional<std::any> ColorPropertyEditor::parseValue(const std::string& text) const
     {
         newui::Color color;
-        if (newui::Color::fromString(text, color)) {
+        if (parseColorText(text, color)) {
             return std::any(color);
         }
         return std::nullopt;
@@ -449,10 +548,7 @@ namespace CodeToolsVsix
     void ColorPropertyEditor::paintValue(BLContext& ctx, const newui::Rect& rect, const newui::Color& textColor) const
     {
         newui::Rect box(rect.left(), rect.top() + (rect.size().height - kSwatchSize) * 0.5f, kSwatchSize, kSwatchSize);
-        newui::Color parsed;
-        if (newui::Color::fromString(valueAsString(), parsed)) {
-            paintSwatch(ctx, box, parsed, textColor);
-        }
+        paintSwatch(ctx, box, std::any_cast<newui::Color>(rawValue()), textColor);
         newui::Rect textRect(rect.left() + kSwatchSize + 6.0f, rect.top(),
             rect.size().width - kSwatchSize - 6.0f, rect.size().height);
         paintText(ctx, textRect, valueAsString(), textColor);
@@ -1014,6 +1110,23 @@ namespace CodeToolsVsix
         paintText(ctx, rect, subPropertyValueAsString(index), textColor);
     }
 
+    std::function<void(const std::any&)> PropertyEditor::valueWriter() const
+    {
+        const newui::reflection::Property* property = property_;
+        void* instance = instance_;
+        return [property, instance](const std::any& value) { property->set(instance, value); };
+    }
+
+    std::function<void(const std::any&)> GridTracksPropertyEditor::valueWriter() const
+    {
+        const newui::reflection::Property* property = property_;
+        void* instance = instance_;
+        return [property, instance](const std::any& value) {
+            *static_cast<std::vector<newui::GridTrack>*>(property->address(instance)) =
+                std::any_cast<std::vector<newui::GridTrack>>(value);
+        };
+    }
+
     void PropertyEditor::commitValue(const std::any& newValue) const
     {
         if (undoStack_ == nullptr) {
@@ -1024,22 +1137,21 @@ namespace CodeToolsVsix
             return;
         }
 
-        const newui::reflection::Property* property = property_;
-        void* instance = instance_;
         std::any oldValue = rawValue();
         PostCommitSync sync = postCommitSync_;
+        std::function<void(const std::any&)> write = valueWriter();
 
         newui::UndoableAction action;
         action.description = "Change " + property_->name();
-        // sync() (if any) runs after property->set() in *both* directions, reading whatever the
+        // sync() (if any) runs after the write in *both* directions, reading whatever the
         // property's own value now is - see setPostCommitSync()'s own comment for why this lives
         // here rather than in a per-instance side call outside the undo system.
-        action.doIt = [property, instance, newValue, sync] {
-            property->set(instance, newValue);
+        action.doIt = [write, newValue, sync] {
+            write(newValue);
             if (sync) { sync(); }
         };
-        action.undoIt = [property, instance, oldValue, sync] {
-            property->set(instance, oldValue);
+        action.undoIt = [write, oldValue, sync] {
+            write(oldValue);
             if (sync) { sync(); }
         };
         undoStack_->push(std::move(action));  // push() calls doIt() immediately
@@ -1122,6 +1234,16 @@ namespace CodeToolsVsix
         return best->factory(property, instance);
     }
 
+    bool PropertyEditorRegistry::hasTypeEditor(std::type_index type) const
+    {
+        for (const Entry& entry : entries_) {
+            if (entry.propertyType == type) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     void PropertyEditorRegistry::registerBuiltinEditors()
     {
         if (builtinsRegistered_) {
@@ -1135,6 +1257,8 @@ namespace CodeToolsVsix
             [](const newui::reflection::Property* p, void* instance) { return std::make_unique<IntPropertyEditor>(p, instance); });
         registerEditor(std::type_index(typeid(std::size_t)),
             [](const newui::reflection::Property* p, void* instance) { return std::make_unique<SizeTPropertyEditor>(p, instance); });
+        registerEditor(std::type_index(typeid(std::vector<newui::GridTrack>)),
+            [](const newui::reflection::Property* p, void* instance) { return std::make_unique<GridTracksPropertyEditor>(p, instance); });
         registerEditor(std::type_index(typeid(float)),
             [](const newui::reflection::Property* p, void* instance) { return std::make_unique<FloatPropertyEditor>(p, instance); });
         registerEditor(std::type_index(typeid(std::string)),

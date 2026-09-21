@@ -272,9 +272,13 @@ namespace CodeToolsVsix
         outlineBuilder.name("workspaceDocumentOutlinePane");
         documentOutlinePane_ = outlineBuilder.build();
 
-        newui::ViewBuilder<PropertiesGrid> propertiesBuilder;
-        propertiesBuilder.name("workspacePropertiesPane");
-        propertiesPane_ = propertiesBuilder.build();
+        // The grid sits under a slim filter/sort header (PropertiesPanel) - the right dock holds
+        // the panel, and propertiesPane_ stays the grid inside it, so every caller that drives the
+        // grid (selection, undo, reparent hooks) is unchanged.
+        propertiesPanel_ = new PropertiesPanel();
+        propertiesPanel_->setName("workspacePropertiesPanel");
+        propertiesPane_ = propertiesPanel_->grid();
+        propertiesPane_->setName("workspacePropertiesPane");
 
         // rightDock: documentOutlinePane_ over propertiesPane_, a vertical
         // split - fixedPane(First) is Splitter's own default (the Outline
@@ -290,7 +294,7 @@ namespace CodeToolsVsix
                 s.setSplitPosition(kDocumentOutlinePaneHeight);
                 s.setDividerThickness(kDividerThickness);
             });
-        rightDockBuilder.child(documentOutlinePane_).child(propertiesPane_);
+        rightDockBuilder.child(documentOutlinePane_).child(propertiesPanel_);
         newui::Splitter* rightDock = rightDockBuilder.build();
 
         // centerAndRight: canvasWell_ (holding the design space) |

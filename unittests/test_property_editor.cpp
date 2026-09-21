@@ -904,3 +904,95 @@ TEST(ViewStylePropertyEditorTest, ValueAsStringReflectsTheTrueRuntimeSubclassNot
     CodeToolsVsix::ViewStylePropertyEditor editor(prop, &button);
     EXPECT_EQ(editor.valueAsString(), "ThemedButtonStyle");
 }
+
+TEST_F(PropertyEditorTest, ColorEditorShowsTheNullColorAsNoneAndAcceptsNoneBack)
+{
+    const Property* prop = findProperty(widgetClass_, "tint");
+    auto editor = CodeToolsVsix::PropertyEditorRegistry::instance().createEditor(prop, widgetClass_, &widget_);
+    ASSERT_NE(editor, nullptr);
+
+    widget_.tint = newui::Color::null();
+    EXPECT_EQ(editor->valueAsString(), "none");
+
+    widget_.tint = newui::Color(1.0f, 0.0f, 0.0f, 1.0f);
+    EXPECT_NE(editor->valueAsString(), "none");
+    editor->setValueFromString("none");
+    EXPECT_TRUE(widget_.tint.isNull());
+    EXPECT_EQ(editor->valueAsString(), "none");
+
+    widget_.tint = newui::Color(1.0f, 0.0f, 0.0f, 1.0f);
+    editor->setValueFromString("Null");
+    EXPECT_TRUE(widget_.tint.isNull());
+}
+
+// ---------------------------------------------------------------------------
+// GridLayout rows / columns as one line of text.
+// ---------------------------------------------------------------------------
+
+TEST(GridTracksText, FormatsEachTrackKindAndParsesItBack)
+{
+    using CodeToolsVsix::GridTracksPropertyEditor;
+    std::vector<newui::GridTrack> tracks = {
+        { newui::GridTrackKind::Fixed, 40.0f },
+        { newui::GridTrackKind::Star, 1.0f },
+        { newui::GridTrackKind::Star, 2.0f },
+        { newui::GridTrackKind::Star, 0.5f },
+        { newui::GridTrackKind::Auto, 0.0f },
+    };
+    EXPECT_EQ(GridTracksPropertyEditor::format(tracks), "40, *, 2*, 0.5*, Auto");
+
+    auto parsed = GridTracksPropertyEditor::parse("40, *, 2*, 0.5*, Auto");
+    ASSERT_TRUE(parsed.has_value());
+    ASSERT_EQ(parsed->size(), tracks.size());
+    for (std::size_t i = 0; i < tracks.size(); ++i) {
+        EXPECT_EQ((*parsed)[i].kind, tracks[i].kind) << i;
+        EXPECT_FLOAT_EQ((*parsed)[i].value, tracks[i].value) << i;
+    }
+}
+
+TEST(GridTracksText, ParsingIsForgivingAboutCaseSpacesAndPixelUnitsButRejectsNonsenseWhole)
+{
+    using CodeToolsVsix::GridTracksPropertyEditor;
+    auto loose = GridTracksPropertyEditor::parse("  AUTO ,40px,  3* ");
+    ASSERT_TRUE(loose.has_value());
+    ASSERT_EQ(loose->size(), 3u);
+    EXPECT_EQ((*loose)[0].kind, newui::GridTrackKind::Auto);
+    EXPECT_EQ((*loose)[1].kind, newui::GridTrackKind::Fixed);
+    EXPECT_FLOAT_EQ((*loose)[1].value, 40.0f);
+    EXPECT_FLOAT_EQ((*loose)[2].value, 3.0f);
+
+    auto none = GridTracksPropertyEditor::parse("   ");
+    ASSERT_TRUE(none.has_value());
+    EXPECT_TRUE(none->empty());                       // blank = no tracks
+
+    for (const char* bad : { "40,,*", "abc", "-5", "0*", "*2", "40 60", "auto, nope", "," }) {
+        EXPECT_FALSE(GridTracksPropertyEditor::parse(bad).has_value()) << bad;
+    }
+}
+
+TEST(GridTracksText, TheEditorReadsAndWritesARealGridLayoutsTracksUndoably)
+{
+    CodeToolsVsix::PropertyEditorRegistry::instance().registerBuiltinEditors();
+    newui::GridLayout layout;
+    layout.addFixedRow(40.0f);
+
+    const Class* gridClass = classinfo(typeid(newui::GridLayout));
+    const Property* rows = findProperty(gridClass, "rows");
+    auto editor = CodeToolsVsix::PropertyEditorRegistry::instance().createEditor(rows, gridClass, &layout);
+    ASSERT_NE(editor, nullptr);
+    newui::UndoStack undo;
+    editor->setUndoStack(&undo);
+
+    EXPECT_EQ(editor->valueAsString(), "40");
+    editor->setValueFromString("Auto, *, 2*");
+    ASSERT_EQ(layout.rows().size(), 3u);
+    EXPECT_EQ(layout.rows()[0].kind, newui::GridTrackKind::Auto);
+    EXPECT_FLOAT_EQ(layout.rows()[2].value, 2.0f);
+
+    editor->setValueFromString("40,,");           // unparseable: nothing changes
+    EXPECT_EQ(layout.rows().size(), 3u);
+
+    undo.undo();
+    ASSERT_EQ(layout.rows().size(), 1u);
+    EXPECT_FLOAT_EQ(layout.rows()[0].value, 40.0f);
+}
