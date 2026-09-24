@@ -47,7 +47,7 @@ namespace CodeToolsVsix
 
         PropertyEditorRegistry::instance().registerBuiltinEditors();
         ComponentEditorRegistry::instance().registerBuiltinEditors();
-    }
+    }   
 
 	void NativeEditManager::startRunLoop()
 	{

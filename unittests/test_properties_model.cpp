@@ -551,6 +551,80 @@ TEST_F(PropertiesModelTest, FlexAndGridLayoutParamsExposeTheirFieldsToo)
     }
 }
 
+// A ListView's model is a group in the grid, holding the model's own properties - a
+// StringListModel's items are an editable row - so the designer works on the model directly.
+TEST_F(PropertiesModelTest, AListViewsStringListModelIsAGroupWithAnEditableItemsRow)
+{
+    newui::ListView list;
+    auto model = std::make_unique<newui::StringListModel>();
+    model->items() = { "a", "b" };
+    list.setModel(std::move(model));
+    PropertiesModel listModel;
+    listModel.setSelection(&list);
+
+    std::size_t row = static_cast<std::size_t>(-1);
+    for (std::size_t i = 0; i < listModel.childCount({}); ++i) {
+        PropertiesModel::Node node = listModel.nodeAt({i});
+        if (node.property != nullptr && node.property->name() == "model") {
+            row = i;
+        }
+    }
+    ASSERT_NE(row, static_cast<std::size_t>(-1)) << "ListView has no 'model' row";
+    EXPECT_EQ(listModel.nodeAt({row}).kind, PropertiesModel::Kind::PropertyGroup);
+
+    PropertiesModel::Node items = childNamed(listModel, row, "items");
+    ASSERT_EQ(items.kind, PropertiesModel::Kind::PropertyLeaf);
+    auto editor = CodeToolsVsix::PropertyEditorRegistry::instance()
+        .createEditor(items.property, items.ownerClass, items.ownerInstance);
+    ASSERT_NE(editor, nullptr);
+    EXPECT_EQ(editor->valueAsString(), "a; b");
+
+    editor->setValueFromString("x; y; z");
+    EXPECT_EQ(list.controller().itemCount(), 3u);   // the view saw the change
+
+    // With no model at all the row is still there, empty.
+    list.setModel(nullptr);
+    listModel.setSelection(&list);
+    EXPECT_EQ(listModel.childCount({row}), 0u);
+}
+
+// Same as the ListView test above, for TreeView + StringTreeModel's "rows" - nested rows are still
+// one editable text row, not one grid row per tree node.
+TEST_F(PropertiesModelTest, ATreeViewsStringTreeModelIsAGroupWithAnEditableRowsRow)
+{
+    newui::TreeView tree;
+    auto model = std::make_unique<newui::StringTreeModel>();
+    model->rows() = { { 0, "a" }, { 1, "b" } };
+    tree.setModel(std::move(model));
+    PropertiesModel treeModel;
+    treeModel.setSelection(&tree);
+
+    std::size_t row = static_cast<std::size_t>(-1);
+    for (std::size_t i = 0; i < treeModel.childCount({}); ++i) {
+        PropertiesModel::Node node = treeModel.nodeAt({i});
+        if (node.property != nullptr && node.property->name() == "model") {
+            row = i;
+        }
+    }
+    ASSERT_NE(row, static_cast<std::size_t>(-1)) << "TreeView has no 'model' row";
+    EXPECT_EQ(treeModel.nodeAt({row}).kind, PropertiesModel::Kind::PropertyGroup);
+
+    PropertiesModel::Node rows = childNamed(treeModel, row, "rows");
+    ASSERT_EQ(rows.kind, PropertiesModel::Kind::PropertyLeaf);
+    auto editor = CodeToolsVsix::PropertyEditorRegistry::instance()
+        .createEditor(rows.property, rows.ownerClass, rows.ownerInstance);
+    ASSERT_NE(editor, nullptr);
+    EXPECT_EQ(editor->valueAsString(), "a; >b");
+
+    editor->setValueFromString("x; >y; z");
+    EXPECT_EQ(tree.controller().visibleCount(), 2u);   // "x" (collapsed) + "z" - "y" starts nested
+
+    // With no model at all the row is still there, empty.
+    tree.setModel(nullptr);
+    treeModel.setSelection(&tree);
+    EXPECT_EQ(treeModel.childCount({row}), 0u);
+}
+
 TEST_F(PropertiesModelTest, GridLayoutParamsCellFieldsTakeUnsignedIntegersOnly)
 {
     auto* params = new newui::GridLayoutParams();

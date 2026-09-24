@@ -108,8 +108,8 @@ namespace CodeToolsVsix
         // whenever that tree structurally changes elsewhere (load()
         // below, Workspace's own Toolbox-add wiring via
         // onDesignSurfaceChanged).
-        ViewDesignerModel& viewDesignerModel() { return viewDesignerModel_; }
-        const ViewDesignerModel& viewDesignerModel() const { return viewDesignerModel_; }
+        ViewDesignerModel& viewDesignerModel() { return *viewDesignerModel_; }
+        const ViewDesignerModel& viewDesignerModel() const { return *viewDesignerModel_; }
 
         // Backs the toolbar's Undo/Redo buttons and PropertiesGrid's own
         // undo-aware property commits (PropertyEditor::setUndoStack(),
@@ -184,6 +184,13 @@ namespace CodeToolsVsix
         // when its Layout is a GridLayout, the row/column editor. The context menu lists each one's verbs.
         std::vector<std::unique_ptr<ComponentEditor>> createComponentEditorsFor(newui::SubView* view);
 
+        // Double-click default action: the first applicable editor (class's own, then GridLayout)
+        // that canEdit() opens its property in the Properties grid, selecting the property's owner
+        // first when that's a child (a tab page). rootPt is where the double-click landed, if it
+        // was one. Posted to the RunLoop when one is running, so the double-click's own focus
+        // change can't close the new editor. Public for tests.
+        void editComponent(newui::SubView* view, std::optional<newui::Point> rootPt = std::nullopt);
+
         // Hover feedback for a Toolbox drag at rootLocalPt (this editor's root space): highlights
         // the target container and shows where the control would land - an insertion line (flex),
         // cell (grid), or ghost outline (free position) - the same cues a canvas drag gets. Returns
@@ -241,6 +248,14 @@ namespace CodeToolsVsix
 
         // Blocks in a native popup until a verb is picked or the menu is dismissed.
         void showComponentContextMenu(newui::SubView* view, const newui::Point& rootLocalPt);
+
+        // The selectable control under root-local pt on the design surface (nullptr on empty
+        // canvas); false when pt isn't on the design surface at all.
+        bool hitTestDesignSurface(const newui::Point& pt, newui::SubView*& target) const;
+
+        // Left double-click on a control: editComponent().
+        newui::SyncReturn handleMouseDblClick(newui::View& sender, const newui::Point& pt,
+            std::uint32_t btnMask, std::uint32_t keyMask);
 
         // One authoritative onMouseMove/onMouseUp pair for root, covering both CanvasWell's
         // resize-guide drag and the canvas selection's own Move drag - deliberately NOT two
@@ -309,6 +324,8 @@ namespace CodeToolsVsix
         // wiring mutates rootViewProxy()'s children directly (see
         // Workspace::onDesignSurfaceChanged's own comment).
         newui::SyncReturn handleDesignSurfaceChanged(Workspace& sender);
+
+        newui::SyncReturn handleViewDesignerModelChanged(newui::Model& sender);
 
         // Toolbar handlers - New/Open/Save/Undo/Redo are a temporary
         // testing-phase convenience (see workspace()->newButton() etc.'s
@@ -492,7 +509,9 @@ namespace CodeToolsVsix
         Workspace* workspace_ = nullptr;
         SelectionOverlay* selectionOverlay_ = nullptr;
         ViewDesignerController viewDesignerController_;
-        ViewDesignerModel viewDesignerModel_;
+        ViewDesignerModel* viewDesignerModel_ = nullptr;   // owned by viewDesignerController_
         newui::UndoStack undoStack_;
+        // Cleared in the destructor; guards editComponent()'s posted task.
+        std::shared_ptr<bool> aliveFlag_ = std::make_shared<bool>(true);
     };
 }

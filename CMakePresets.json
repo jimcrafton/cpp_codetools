@@ -5,12 +5,13 @@
     "minor": 24,
     "patch": 0
   },
+  
   "configurePresets": [
     {
       "name": "build-dir-debug",
       "displayName": "Debug (build/)",
       "generator": "Visual Studio 18 2026",
-      "binaryDir": "${sourceDir}/build"
+      "binaryDir": "${sourceDir}/build"      
     }
   ],
   "buildPresets": [
@@ -18,6 +19,11 @@
       "name": "build-dir-debug",
       "configurePreset": "build-dir-debug",
       "configuration": "Debug"
+    },
+    {
+      "name": "build-dir-release",
+      "configurePreset": "build-dir-debug",
+      "configuration": "Release"
     }
   ]
 }

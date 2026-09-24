@@ -1,6 +1,8 @@
 #include "ToolboxRegistry.h"
 
+#include <newui/controls.h>
 #include <newui/layout.h>
+#include <newui/models.h>
 #include <newui/reflection.h>
 
 #include <memory>
@@ -35,11 +37,42 @@ namespace CodeToolsVsix
             return false;
         }
 
+        // A new ListView / DropDownList comes up with a few placeholder rows, or it would drop onto
+        // the canvas looking empty - and ListModelEditor / the "items" property edit them from there.
+        void seedListRows(newui::SubView* view)
+        {
+            auto model = std::make_unique<newui::StringListModel>();
+            model->items() = { "Item 1", "Item 2", "Item 3" };
+            if (auto* list = dynamic_cast<newui::ListView*>(view)) {
+                list->setModel(std::move(model));
+            } else if (auto* dropDown = dynamic_cast<newui::DropDownList*>(view)) {
+                dropDown->setModel(std::move(model));
+            }
+        }
+
+        // Same idea as seedListRows() above, for a new TreeView - flat (all depth 0), same
+        // reasoning as TreeModelEditor's own Add Item: nesting is set afterwards, in Properties.
+        void seedTreeRows(newui::SubView* view)
+        {
+            if (auto* tree = dynamic_cast<newui::TreeView*>(view)) {
+                auto model = std::make_unique<newui::StringTreeModel>();
+                model->rows() = {
+                    newui::TreeRow{ 0, "Item 1" }, newui::TreeRow{ 0, "Item 2" }, newui::TreeRow{ 0, "Item 3" },
+                };
+                tree->setModel(std::move(model));
+            }
+        }
+
         newui::SubView* createInstanceAsSubView(const newui::reflection::Class* clazz)
         {
             void* raw = nullptr;
             clazz->createInstance(&raw);
-            return static_cast<newui::SubView*>(raw);
+            auto* view = static_cast<newui::SubView*>(raw);
+            if (view != nullptr) {
+                seedListRows(view);
+                seedTreeRows(view);
+            }
+            return view;
         }
 
         ToolboxEntry flexLayoutEntry(std::string displayName, newui::Orientation orientation, std::string iconResourceName)
@@ -70,6 +103,7 @@ namespace CodeToolsVsix
                 {"SubView", "Images/icons/toolbox/subview.svg"},
                 {"ScrollView", "Images/icons/toolbox/scrollview.svg"},
                 {"TabControl", "Images/icons/toolbox/tabcontrol.svg"},
+                {"Splitter", "Images/icons/toolbox/splitter.svg"},
                 {"Button", "Images/icons/toolbox/button.svg"},
                 {"Toggle", "Images/icons/toolbox/toggle.svg"},
                 {"Label", "Images/icons/toolbox/label.svg"},

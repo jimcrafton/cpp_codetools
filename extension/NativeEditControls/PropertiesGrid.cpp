@@ -11,16 +11,6 @@
 
 namespace CodeToolsVsix
 {
-    std::any PropertiesGrid::StringListModel::value(const std::any& key)
-    {
-        if (const std::size_t* index = std::any_cast<std::size_t>(&key)) {
-            if (*index < rows.size()) {
-                return rows[*index];
-            }
-        }
-        return std::any();
-    }
-
     namespace
     {
         // A dropdown live editor's rect within valueRect: the full cell, or - for an editor that
@@ -45,7 +35,9 @@ namespace CodeToolsVsix
         treeView_->setName("propertiesTreeView");
         treeView_->setVisible(true);
         treeView_->setController(std::make_unique<PropertiesTreeController>());
-        treeView_->setModel(&model_);
+        auto model = std::make_unique<PropertiesModel>();
+        model_ = model.get();
+        treeView_->setModel(std::move(model));
         treeView_->onSelectionChanged.add(this, &PropertiesGrid::handleSelectionChanged);
         treeView_->onMouseDown.add(this, &PropertiesGrid::handleTreeMouseDown);
         treeView_->onMouseMove.add(this, &PropertiesGrid::handleTreeMouseMove);
@@ -90,22 +82,95 @@ namespace CodeToolsVsix
     {
         treeView_->clearSelection();
         destroyLiveEditor();
-        model_.setSelection(selected);
+        model_->setSelection(selected);
     }
 
     void PropertiesGrid::setFilterText(const std::string& text)
     {
         treeView_->clearSelection();
         destroyLiveEditor();
-        model_.setFilter(text);
+        model_->setFilter(text);
         resetExpansion();
+    }
+
+    bool PropertiesGrid::editProperty(const std::vector<std::string>& propertyNames)
+    {
+        std::vector<std::size_t> found;
+        std::vector<std::size_t> parent;
+        for (const std::string& name : propertyNames) {
+            std::optional<std::size_t> match;
+            const std::size_t count = model_->childCount(parent);
+            for (std::size_t i = 0; i < count && !match.has_value(); ++i) {
+                std::vector<std::size_t> childPath = parent;
+                childPath.push_back(i);
+                PropertiesModel::Node node = model_->nodeAt(childPath);
+                if (node.property != nullptr && node.kind != PropertiesModel::Kind::SubPropertyEntry
+                    && node.property->name() == name) {
+                    match = i;
+                }
+            }
+            if (!match.has_value()) {
+                break;
+            }
+            if (!found.empty()) {
+                treeView_->controller().setExpanded(found, true);
+            }
+            found.push_back(*match);
+            parent = found;
+        }
+        if (found.empty()) {
+            return false;
+        }
+
+        treeView_->setSelectedPath(found);
+
+        // Scroll now rather than waiting for TreeView::paint()'s own request - the live editor
+        // below is placed from rectForPath(), which has to see the scrolled position.
+        newui::TreeController& controller = treeView_->controller();
+        if (std::optional<std::size_t> index = controller.visibleIndexOf(found)) {
+            newui::Rect contentRect(0.0f, controller.itemOffset(*index), treeView_->bounds().size().width,
+                controller.itemHeight(*index));
+            treeView_->onRequestScrollIntoView(*treeView_, contentRect);
+        }
+        std::optional<newui::Rect> rowRect = treeView_->rectForPath(found);
+
+        PropertiesModel::Node node = model_->nodeAt(found);
+        if (node.readOnly || !rowRect.has_value()) {
+            treeView_->style().markDirty();
+            return true;
+        }
+        if (node.kind == PropertiesModel::Kind::PropertyGroup) {
+            openDialogEditorFor(node, treeView_->localToScreen(PropertyItem::ellipsisButtonRectFor(*rowRect)));
+            return true;
+        }
+        if (node.kind != PropertiesModel::Kind::PropertyLeaf) {
+            treeView_->style().markDirty();
+            return true;
+        }
+
+        auto editor = PropertyEditorRegistry::instance().createEditor(node.property, node.ownerClass, node.ownerInstance);
+        if (editor != nullptr && editor->hasDialog() && !editor->hasDropdown()) {
+            auto* propsController = dynamic_cast<PropertiesTreeController*>(&treeView_->controller());
+            float keyColumnFraction = propsController != nullptr
+                ? propsController->keyColumnFraction() : PropertiesTreeController::kDefaultKeyColumnFraction;
+            newui::Rect valueRect = PropertyItem::valueRectFor(*rowRect, found, keyColumnFraction);
+            openDialogEditorFor(node, treeView_->localToScreen(PropertyItem::ellipsisButtonRectFor(valueRect)));
+            return true;
+        }
+        rebuildLiveEditor();
+        // Ready to type over: rebuildLiveEditor() already focused it.
+        if (auto* textField = dynamic_cast<newui::TextField*>(liveEditorView_)) {
+            textField->controller().selectAll();
+        }
+        treeView_->style().markDirty();
+        return true;
     }
 
     void PropertiesGrid::setAlphabetical(bool alphabetical)
     {
         treeView_->clearSelection();
         destroyLiveEditor();
-        model_.setAlphabetical(alphabetical);
+        model_->setAlphabetical(alphabetical);
         resetExpansion();
     }
 
@@ -115,12 +180,12 @@ namespace CodeToolsVsix
         // re-pointed at different rows - so it is set afresh rather than trusted. (It has no
         // "collapse everything", so walk the model.)
         newui::TreeController& controller = treeView_->controller();
-        const bool filtering = !model_.filter().empty();
+        const bool filtering = !model_->filter().empty();
         std::vector<std::size_t> path;
 
         std::function<void(int)> visit = [&](int depth) {
-            const std::size_t count = model_.childCount(path);
-            const PropertiesModel::Node node = model_.nodeAt(path);
+            const std::size_t count = model_->childCount(path);
+            const PropertiesModel::Node node = model_->nodeAt(path);
             // The root has no row of its own. A row with nothing under it is still set (closed): the
             // path may have been an open group before this change, and would reappear open if a
             // group ever lands there again.
@@ -216,7 +281,7 @@ namespace CodeToolsVsix
 
     void PropertiesGrid::markSelectedViewDirty()
     {
-        refreshAfterPropertyChange(model_.selected());
+        refreshAfterPropertyChange(model_->selected());
     }
 
     void PropertiesGrid::rebuildLiveEditor()
@@ -228,7 +293,7 @@ namespace CodeToolsVsix
             return;
         }
 
-        PropertiesModel::Node node = model_.nodeAt(*path);
+        PropertiesModel::Node node = model_->nodeAt(*path);
         bool isSubProperty = node.kind == PropertiesModel::Kind::SubPropertyEntry;
         bool isParentPicker = node.kind == PropertiesModel::Kind::ParentPicker;
         if (node.kind != PropertiesModel::Kind::PropertyLeaf && !isSubProperty && !isParentPicker) {
@@ -274,12 +339,12 @@ namespace CodeToolsVsix
         // View's real parent affords free positioning) - keeps AnchorLayoutParams in sync with
         // whatever bounds() ends up being after this commit (or after an undo/redo of it), the
         // same real trap FreePositionPolicy::commit() already guards against for a canvas drag.
-        // model_.selected() is used here rather than node.ownerInstance precisely because this
+        // model_->selected() is used here rather than node.ownerInstance precisely because this
         // class already knows it's a real newui::SubView* - PropertyEditor/RectPropertyEditor
         // themselves deliberately don't assume that (see setPostCommitSync()'s own comment).
         // Every live-editor commit - and each undo/redo of it, PropertyEditor runs this both ways -
         // ends by refreshing whatever reads the edited view (see refreshAfterPropertyChange()).
-        newui::SubView* editedView = model_.selected();
+        newui::SubView* editedView = model_->selected();
         std::function<void()> boundsSync;
         if (node.property != nullptr && node.property->name() == "bounds") {
             boundsSync = [editedView]() {
@@ -330,7 +395,7 @@ namespace CodeToolsVsix
             ? !subDropdownValues.empty()
             : liveEditor_->hasDropdown();
         if (showsAsDropdown) {
-            dropdownModel_.rows = isSubProperty ? subDropdownValues : liveEditor_->dropdownValues();
+            const std::vector<std::string> dropdownRows = isSubProperty ? subDropdownValues : liveEditor_->dropdownValues();
             // What the dropdown highlights: valueAsString() for every plain dropdown, but a Color's
             // hex text is never a row - it's the matching preset's name, or nothing (custom color).
             if (!isSubProperty) {
@@ -345,10 +410,12 @@ namespace CodeToolsVsix
             if (!isSubProperty) {
                 liveEditor_->customizeDropdown(*dropdown);
             }
-            dropdown->setModel(&dropdownModel_);
+            auto dropdownModel = std::make_unique<newui::StringListModel>();
+            dropdownModel->items() = dropdownRows;
+            dropdown->setModel(std::move(dropdownModel));
 
-            for (std::size_t i = 0; i < dropdownModel_.rows.size(); ++i) {
-                if (dropdownModel_.rows[i] == initialText) {
+            for (std::size_t i = 0; i < dropdownRows.size(); ++i) {
+                if (dropdownRows[i] == initialText) {
                     dropdown->setSelectedIndex(i);
                     break;
                 }
@@ -391,16 +458,16 @@ namespace CodeToolsVsix
         }
         std::vector<std::pair<newui::SubView*, std::string>> candidates = parentCandidatesProvider_(view);
 
-        dropdownModel_.rows.clear();
+        auto parentRows = std::make_unique<newui::StringListModel>();
         parentPickerCandidates_.clear();
         for (const auto& [candidate, label] : candidates) {
-            dropdownModel_.rows.push_back(label);
+            parentRows->items().push_back(label);
             parentPickerCandidates_.push_back(candidate);
         }
 
         auto* dropdown = new newui::DropDownList();
         dropdown->setVisible(true);
-        dropdown->setModel(&dropdownModel_);
+        dropdown->setModel(std::move(parentRows));
 
         newui::View* currentParent = view->parent();
         for (std::size_t i = 0; i < parentPickerCandidates_.size(); ++i) {
@@ -443,7 +510,7 @@ namespace CodeToolsVsix
             return;
         }
 
-        PropertiesModel::Node node = model_.nodeAt(*path);
+        PropertiesModel::Node node = model_->nodeAt(*path);
         if (node.readOnly) {
             return;
         }
@@ -525,12 +592,12 @@ namespace CodeToolsVsix
         // commits (if at all) before editAsync() returns below.
         // Swapping the Layout must also re-kind every child's LayoutParams to match it (an
         // AnchorLayoutParams left under a FlexLayout is silently ignored) - before the refresh
-        // below, so it arranges with the right params. model_.selected() is read when this runs
+        // below, so it arranges with the right params. model_->selected() is read when this runs
         // (from the picker popup, later), not captured, so it never dangles.
         const bool swapsLayout = node.property != nullptr && node.property->name() == "layout";
         editor->setPostCommitSync([this, swapsLayout] {
-            if (swapsLayout && model_.selected() != nullptr) {
-                syncChildLayoutParams(*model_.selected());
+            if (swapsLayout && model_->selected() != nullptr) {
+                syncChildLayoutParams(*model_->selected());
             }
             markSelectedViewDirty();
             treeView_->style().markDirty();
@@ -554,7 +621,7 @@ namespace CodeToolsVsix
         // once it actually shows. Harmless timing-wise for a blocking editor (Color/Gradient/
         // FilePath's real showModal()/showOpenFile(), reached via the base editAsync() -> edit()
         // wrapper) - opening one tick later than the click that requested it is unobservable.
-        newui::SubView* owner = model_.selected();
+        newui::SubView* owner = model_->selected();
         std::shared_ptr<PropertyEditor> sharedEditor = std::move(editor);
         std::shared_ptr<bool> alive = aliveFlag_;
         auto openNow = [this, alive, sharedEditor, owner, anchorScreenRect] {
@@ -591,7 +658,7 @@ namespace CodeToolsVsix
             return newui::SyncReturn::Ignored;
         }
 
-        PropertiesModel::Node node = model_.nodeAt(*path);
+        PropertiesModel::Node node = model_->nodeAt(*path);
         if (node.readOnly) {
             return newui::SyncReturn::Ignored;
         }
@@ -777,7 +844,7 @@ namespace CodeToolsVsix
             if (index >= parentPickerCandidates_.size() || !path.has_value()) {
                 return newui::SyncReturn::Ignored;
             }
-            auto* view = static_cast<newui::SubView*>(model_.nodeAt(*path).ownerInstance);
+            auto* view = static_cast<newui::SubView*>(model_->nodeAt(*path).ownerInstance);
             newui::SubView* newParent = parentPickerCandidates_[index];
             if (view != nullptr && newParent != nullptr && parentChangeRequestedHandler_) {
                 parentChangeRequestedHandler_(view, newParent);

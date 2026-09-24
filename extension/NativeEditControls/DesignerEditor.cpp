@@ -8,6 +8,7 @@
 #include <newui/mouse_constants.h>
 #include <newui/rootview.h>
 #include <newui/rootviewproxy.h>
+#include <newui/runloop.h>
 #include <newui/cursor.h>
 #include <newui/layout.h>
 #include <newui/uicolormanager.h>
@@ -120,6 +121,7 @@ namespace CodeToolsVsix
 
     DesignerEditor::~DesignerEditor()
     {
+        *aliveFlag_ = false;
         // See this declaration's own doc comment (DesignerEditor.h) - must
         // run before viewDesignerController_'s own destruction, which an
         // implicit/defaulted destructor wouldn't guarantee relative to
@@ -223,6 +225,7 @@ namespace CodeToolsVsix
         root->onMouseDown.add(this, &DesignerEditor::handleMouseDownForSelection);
         root->onMouseMove.add(this, &DesignerEditor::handleMouseMove);
         root->onMouseUp.add(this, &DesignerEditor::handleMouseUp);
+        root->onMouseDblClick.add(this, &DesignerEditor::handleMouseDblClick);
 
         // root->onKeyDown fires for EVERY key (RootView::keyEvent() calls it first, then also
         // hands the key to focusedSubView_), so handleKeyDown() itself checks
@@ -242,12 +245,16 @@ namespace CodeToolsVsix
         // identity never changes for this editor's lifetime (only its
         // children do, over time - see refresh()'s own call sites below
         // and in load()).
-        viewDesignerModel_.setRoot(workspace_->rootViewProxy());
-        viewDesignerController_.setModel(&viewDesignerModel_);
-        workspace_->documentOutlinePane()->setViewDesignerModel(&viewDesignerModel_);
+        auto viewDesignerModel = std::make_unique<ViewDesignerModel>();
+        viewDesignerModel_ = viewDesignerModel.get();
+        viewDesignerModel_->setRoot(workspace_->rootViewProxy());
+        viewDesignerController_.setModel(std::move(viewDesignerModel));   // the controller owns it
+        workspace_->documentOutlinePane()->setViewDesignerModel(viewDesignerModel_);
         workspace_->documentOutlinePane()->onSelectionActivated.add(this, &DesignerEditor::handleOutlineSelectionActivated);
         workspace_->documentOutlinePane()->onDropRequested.add(this, &DesignerEditor::handleOutlineDropRequested);
         workspace_->onDesignSurfaceChanged.add(this, &DesignerEditor::handleDesignSurfaceChanged);
+		viewDesignerModel_->onChanged.add(this, &DesignerEditor::handleViewDesignerModelChanged);
+
 
         // A drop target on the design surface's root: COMDropTarget's hit-test walks up from
         // whichever View is under the cursor, so this catches a drop anywhere over the document,
@@ -331,7 +338,7 @@ namespace CodeToolsVsix
         for (auto& editor : editors) {
             editor->setUndoStack(&undoStack_);
             editor->setPostExecuteSync([this] {
-                viewDesignerModel_.refresh();
+                viewDesignerModel_->refresh();
                 markDirty();
                 getRootView()->markDirty();
             });
@@ -343,6 +350,55 @@ namespace CodeToolsVsix
     {
         std::vector<std::unique_ptr<ComponentEditor>> editors = createComponentEditorsFor(view);
         return editors.empty() ? nullptr : std::move(editors.front());
+    }
+
+    void DesignerEditor::editComponent(newui::SubView* view, std::optional<newui::Point> rootPt)
+    {
+        if (view == nullptr || workspace_ == nullptr || view->hasDesignTimeFlag(newui::DesignTimeFlags::Internal)
+            || view->hasDesignTimeFlag(newui::DesignTimeFlags::ReadOnly)) {
+            return;
+        }
+
+        // Unlike createComponentEditorsFor(), verbless editors count here - only the default
+        // property matters.
+        std::vector<std::unique_ptr<ComponentEditor>> editors;
+        const newui::reflection::Class* clazz = newui::reflection::classinfo(typeid(*view));
+        editors.push_back(ComponentEditorRegistry::instance().createEditor(clazz, view));
+        if (dynamic_cast<newui::GridLayout*>(view->layout()) != nullptr) {
+            editors.push_back(std::make_unique<GridLayoutEditor>(view));
+        }
+
+        for (auto& editor : editors) {
+            if (editor == nullptr || !editor->canEdit()) {
+                continue;
+            }
+            editor->setEditPropertyHandler([this](newui::View* target, const std::vector<std::string>& path) {
+                std::shared_ptr<bool> alive = aliveFlag_;
+                auto* targetView = dynamic_cast<newui::SubView*>(target);
+                auto open = [this, alive, targetView, path] {
+                    if (!*alive || workspace_ == nullptr || targetView == nullptr) {
+                        return;
+                    }
+                    if (workspace_->propertiesPane()->selected() != targetView) {
+                        viewDesignerController_.selectExclusive(targetView);
+                        getRootView()->markDirty();
+                    }
+                    workspace_->propertiesPane()->editProperty(path);
+                };
+                if (newui::RunLoop::current()) {
+                    newui::RunLoop::current().post(std::move(open));
+                } else {
+                    open();
+                }
+            });
+            if (rootPt.has_value()) {
+                editor->editAt(*rootPt);
+            } else {
+                editor->edit();
+            }
+            getRootView()->markDirty();
+            return;
+        }
     }
 
     void DesignerEditor::showComponentContextMenu(newui::SubView* view, const newui::Point& rootLocalPt)
@@ -427,6 +483,67 @@ namespace CodeToolsVsix
         contextMenu.show(hwnd, menu, screenPt.x, screenPt.y);
     }
 
+    bool DesignerEditor::hitTestDesignSurface(const newui::Point& pt, newui::SubView*& target) const
+    {
+        target = nullptr;
+        CanvasWell* canvasWell = workspace_ ? workspace_->canvasWell() : nullptr;
+        newui::Rect canvasWellBounds = canvasWell != nullptr ? SelectionOverlay::boundsInRootView(canvasWell) : newui::Rect();
+
+        // Gate on canvasWellBounds first, before ever consulting
+        // rootViewProxy()'s own bounds below - a real, reported bug
+        // otherwise (same root cause SelectionOverlay's own clipView_ was
+        // added to fix): frameProxy_ is a *fixed* 640x460 rect that can
+        // extend past canvasWell's own edge into the Toolbox/Properties
+        // panes' screen region once the window is narrow enough, so a
+        // click on e.g. a Properties row's own expand arrow could still
+        // satisfy surfaceBounds.contains(pt) below and silently change the
+        // canvas selection underneath it. canvasWell is the one view
+        // guaranteed never to overlap those panes, so nothing outside it
+        // can possibly be a real click on the design surface.
+        if (canvasWell == nullptr || !canvasWellBounds.contains(pt)) {
+            return false;
+        }
+
+        newui::RootViewProxy* surface = workspace_ ? workspace_->rootViewProxy() : nullptr;
+        if (surface == nullptr || !surface->isVisible()) {
+            return false;
+        }
+
+        // pt is already root-local (same space RootView::mouseDown() passes
+        // to onMouseDown), matching what boundsInRootView() computes - the
+        // canvasWellBounds gate above already excluded anything outside
+        // the visible canvas viewport; this one still matters on its own
+        // terms too (frameProxy_'s fixed size can leave real empty margin
+        // *inside* canvasWell around a smaller/centered canvas).
+        newui::Rect surfaceBounds = SelectionOverlay::boundsInRootView(surface);
+        if (!surfaceBounds.contains(pt)) {
+            return false;
+        }
+
+        newui::Point localPt(pt.x - surfaceBounds.left(), pt.y - surfaceBounds.top());
+        newui::Point unused;
+        target = surface->hitTestChildren(localPt, unused);
+        // Clicking a part that can't be selected (a tab button, a slider's thumb) selects the
+        // nearest selectable ancestor instead.
+        while (target != nullptr && !target->isSelectableAtDesignTime()) {
+            target = dynamic_cast<newui::SubView*>(target->parent());
+        }
+        return true;
+    }
+
+    newui::SyncReturn DesignerEditor::handleMouseDblClick(newui::View& /*sender*/, const newui::Point& pt,
+        std::uint32_t btnMask, std::uint32_t /*keyMask*/)
+    {
+        newui::SubView* target = nullptr;
+        if ((btnMask & newui::mbmLeftButton) == 0 || !hitTestDesignSurface(pt, target) || target == nullptr) {
+            return newui::SyncReturn::Ignored;
+        }
+        // The double-click's first click already selected target (handleMouseDownForSelection()).
+        viewDesignerController_.selectExclusive(target);
+        editComponent(target, pt);
+        return newui::SyncReturn::Handled;
+    }
+
     newui::SyncReturn DesignerEditor::handleMouseDownForSelection(newui::View& /*sender*/, const newui::Point& pt,
         std::uint32_t btnMask, std::uint32_t keyMask)
     {
@@ -443,44 +560,9 @@ namespace CodeToolsVsix
             }
         }
 
-        // Gate on canvasWellBounds first, before ever consulting
-        // rootViewProxy()'s own bounds below - a real, reported bug
-        // otherwise (same root cause SelectionOverlay's own clipView_ was
-        // added to fix): frameProxy_ is a *fixed* 640x460 rect that can
-        // extend past canvasWell's own edge into the Toolbox/Properties
-        // panes' screen region once the window is narrow enough, so a
-        // click on e.g. a Properties row's own expand arrow could still
-        // satisfy surfaceBounds.contains(pt) below and silently change the
-        // canvas selection underneath it. canvasWell is the one view
-        // guaranteed never to overlap those panes, so nothing outside it
-        // can possibly be a real click on the design surface.
-        if (canvasWell == nullptr || !canvasWellBounds.contains(pt)) {
+        newui::SubView* target = nullptr;
+        if (!hitTestDesignSurface(pt, target)) {
             return newui::SyncReturn::Ignored;
-        }
-
-        newui::RootViewProxy* surface = workspace_ ? workspace_->rootViewProxy() : nullptr;
-        if (surface == nullptr || !surface->isVisible()) {
-            return newui::SyncReturn::Ignored;
-        }
-
-        // pt is already root-local (same space RootView::mouseDown() passes
-        // to onMouseDown), matching what boundsInRootView() computes - the
-        // canvasWellBounds gate above already excluded anything outside
-        // the visible canvas viewport; this one still matters on its own
-        // terms too (frameProxy_'s fixed size can leave real empty margin
-        // *inside* canvasWell around a smaller/centered canvas).
-        newui::Rect surfaceBounds = SelectionOverlay::boundsInRootView(surface);
-        if (!surfaceBounds.contains(pt)) {
-            return newui::SyncReturn::Ignored;
-        }
-
-        newui::Point localPt(pt.x - surfaceBounds.left(), pt.y - surfaceBounds.top());
-        newui::Point unused;
-        newui::SubView* target = surface->hitTestChildren(localPt, unused);
-        // Clicking a part that can't be selected (a tab button, a slider's thumb) selects the
-        // nearest selectable ancestor instead.
-        while (target != nullptr && !target->isSelectableAtDesignTime()) {
-            target = dynamic_cast<newui::SubView*>(target->parent());
         }
 
         // Right-click: select what's under the cursor (unless it's already part of the selection -
@@ -719,21 +801,21 @@ namespace CodeToolsVsix
         newui::UndoableAction action;
         action.description = "Reparent Control";
         // Unlike an ordinary same-parent Move commit, this actually changes the tree's real
-        // structure (which parent owns view) - viewDesignerModel_.refresh() is what Document
+        // structure (which parent owns view) - viewDesignerModel_->refresh() is what Document
         // Outline's own TreeController re-derives its rows from (same call Add/Delete already
         // make for their own structural changes); without it, Outline keeps showing the
         // pre-reparent shape until something unrelated happens to trigger a refresh.
         action.doIt = [this, view, target, doIt = newPlacement.doIt]() {
             view->setParent(target);
             doIt();
-            viewDesignerModel_.refresh();
+            viewDesignerModel_->refresh();
             markDirty();
             getRootView()->markDirty();
         };
         action.undoIt = [this, view, oldParent, doIt = oldPlacement.doIt]() {
             view->setParent(oldParent);
             doIt();
-            viewDesignerModel_.refresh();
+            viewDesignerModel_->refresh();
             markDirty();
             getRootView()->markDirty();
         };
@@ -745,7 +827,7 @@ namespace CodeToolsVsix
         // before recursing into its children, so the whole subtree rooted at the View actually
         // being reparented (never a legal target for itself, per View::setParent()'s own cycle
         // guard) is skipped rather than just node itself. isRoot always includes
-        // viewDesignerModel_.root() (rootViewProxy()) regardless of ToolboxRegistry::isContainer()
+        // viewDesignerModel_->root() (rootViewProxy()) regardless of ToolboxRegistry::isContainer()
         // - it has no Layout of its own to satisfy that check, but Workspace's own Toolbox-add
         // fallback (targetParent = isContainer(selected) ? selected : rootViewProxy_) already
         // treats it as an always-valid container, so this matches that same convention.
@@ -774,7 +856,7 @@ namespace CodeToolsVsix
     std::vector<std::pair<newui::SubView*, std::string>> DesignerEditor::parentCandidatesFor(newui::SubView* view) const
     {
         std::vector<std::pair<newui::SubView*, std::string>> candidates;
-        collectParentCandidates(viewDesignerModel_.root(), std::string(), view, true, candidates);
+        collectParentCandidates(viewDesignerModel_->root(), std::string(), view, true, candidates);
         return candidates;
     }
 
@@ -895,7 +977,7 @@ namespace CodeToolsVsix
             for (const auto& [view, parent] : toDelete) {
                 parent->removeChild(view);
             }
-            viewDesignerModel_.refresh();
+            viewDesignerModel_->refresh();
             markDirty();
             getRootView()->markDirty();
         };
@@ -903,7 +985,7 @@ namespace CodeToolsVsix
             for (const auto& [view, parent] : toDelete) {
                 parent->addChild(view);
             }
-            viewDesignerModel_.refresh();
+            viewDesignerModel_->refresh();
             markDirty();
             getRootView()->markDirty();
         };
@@ -1157,13 +1239,13 @@ namespace CodeToolsVsix
             action.description = "Reorder Control";
             action.doIt = [this, dragged, newParent, targetIndex]() {
                 newParent->reorderChild(dragged, targetIndex);
-                viewDesignerModel_.refresh();
+                viewDesignerModel_->refresh();
                 markDirty();
                 getRootView()->markDirty();
             };
             action.undoIt = [this, dragged, oldParent, startIndex]() {
                 oldParent->reorderChild(dragged, startIndex);
-                viewDesignerModel_.refresh();
+                viewDesignerModel_->refresh();
                 markDirty();
                 getRootView()->markDirty();
             };
@@ -1209,7 +1291,7 @@ namespace CodeToolsVsix
             dragged->setParent(newParent);
             doIt();
             newParent->reorderChild(dragged, targetIndex);
-            viewDesignerModel_.refresh();
+            viewDesignerModel_->refresh();
             markDirty();
             getRootView()->markDirty();
         };
@@ -1217,7 +1299,7 @@ namespace CodeToolsVsix
             dragged->setParent(oldParent);
             doIt();
             oldParent->reorderChild(dragged, startIndex);
-            viewDesignerModel_.refresh();
+            viewDesignerModel_->refresh();
             markDirty();
             getRootView()->markDirty();
         };
@@ -1226,10 +1308,16 @@ namespace CodeToolsVsix
     }
 
     newui::SyncReturn DesignerEditor::handleDesignSurfaceChanged(Workspace& /*sender*/)
-    {
-        viewDesignerModel_.refresh();
+    {        
+        viewDesignerModel_->refresh();
         markDirty();
         return newui::SyncReturn::Ignored;
+    }
+
+    newui::SyncReturn DesignerEditor::handleViewDesignerModelChanged(newui::Model& sender)
+    {
+        workspace_->reloadDesignModel(sender);
+        return newui::SyncReturn::Handled;
     }
 
     newui::SyncReturn DesignerEditor::handleNewClicked(newui::Control& /*sender*/)
@@ -1394,13 +1482,13 @@ namespace CodeToolsVsix
         action.doIt = [this, created, target, doPlacement = placementAction.doIt]() {
             target->addChild(created);  // placement (reorder / anchor params / grid cell) needs it attached
             doPlacement();
-            viewDesignerModel_.refresh();
+            viewDesignerModel_->refresh();
             markDirty();
             getRootView()->markDirty();
         };
         action.undoIt = [this, created, target]() {
             target->removeChild(created);
-            viewDesignerModel_.refresh();
+            viewDesignerModel_->refresh();
             markDirty();
             getRootView()->markDirty();
         };
@@ -1456,7 +1544,7 @@ namespace CodeToolsVsix
                     change.parent->reorderChild(order[i], i);
                 }
             }
-            viewDesignerModel_.refresh();
+            viewDesignerModel_->refresh();
             markDirty();
             getRootView()->markDirty();
         };
@@ -1578,7 +1666,7 @@ namespace CodeToolsVsix
             for (newui::SubView* target : targets) {
                 syncChildLayoutParams(*target);   // e.g. Anchor params pasted under a FlexLayout
             }
-            viewDesignerModel_.refresh();
+            viewDesignerModel_->refresh();
             viewDesignerController_.setSelection(clones);
             markDirty();
             getRootView()->markDirty();
@@ -1588,7 +1676,7 @@ namespace CodeToolsVsix
             for (const Entry& entry : entries) {
                 entry.target->removeChild(entry.clone);
             }
-            viewDesignerModel_.refresh();
+            viewDesignerModel_->refresh();
             markDirty();
             getRootView()->markDirty();
         };
@@ -1688,7 +1776,7 @@ namespace CodeToolsVsix
 
         workspace_->frameProxy()->setTitle(std::string());
         workspace_->setCanvasFrameSize(newui::Size());  // back to the default blank-document size
-        viewDesignerModel_.refresh();
+        viewDesignerModel_->refresh();
         undoStack_.clear();
         refreshUndoRedoButtons();
         if (resetDocument) {
@@ -1900,7 +1988,7 @@ namespace CodeToolsVsix
         // refresh()'s own header comment documents) - Document Outline
         // (and anything else reading viewDesignerModel_) needs this to
         // pick up the freshly loaded tree.
-        viewDesignerModel_.refresh();
+        viewDesignerModel_->refresh();
 
         // A freshly loaded document has no undo history of its own - same
         // "New" already does (handleNewClicked()). Without this, a stale

@@ -196,7 +196,7 @@ namespace CodeToolsVsix
         // Exposed for testability - same convention Toolbox::treeView()
         // already uses.
         newui::TreeView* treeView() const { return treeView_; }
-        DocumentOutlineModel& model() { return model_; }
+        DocumentOutlineModel& model() { return *model_; }
 
     private:
         newui::SyncReturn handleTreeSelectionChanged(newui::TreeView& sender);
@@ -233,7 +233,7 @@ namespace CodeToolsVsix
         // dropTargetAt()).
         static constexpr float kEdgeZoneFraction = 0.25f;
 
-        DocumentOutlineModel model_;
+        DocumentOutlineModel* model_ = nullptr;   // owned by treeView_'s controller
         newui::TreeView* treeView_ = nullptr;
         DocumentOutlineController* outlineController_ = nullptr;
         bool applyingExternalSelection_ = false;

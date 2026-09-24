@@ -14,6 +14,7 @@
 #include <newui/geometry.h>
 #include <newui/graphics.h>
 #include <newui/layout.h>
+#include <newui/models.h>
 #include <newui/popuptool.h>
 #include <newui/dialogs.h>
 #include <newui/reflection.h>
@@ -232,6 +233,42 @@ namespace CodeToolsVsix
 
         static std::string format(const std::vector<newui::GridTrack>& tracks);
         static std::optional<std::vector<newui::GridTrack>> parse(const std::string& text);
+    };
+
+    // A StringListModel's items (std::vector<std::string>) as one line of text: the items separated by
+    // ';' ("Red; Green; Blue"), each trimmed, blank ones dropped. An item can't contain ';'. It is a
+    // collection, so it is written through the live container - after which the model is told it
+    // changed, so the view showing it repaints. Registered for StringListModel::items only.
+    class StringListPropertyEditor : public PropertyEditor
+    {
+    public:
+        using PropertyEditor::PropertyEditor;
+        std::string valueAsString() const override;
+        std::optional<std::any> parseValue(const std::string& text) const override;
+        std::function<void(const std::any&)> valueWriter() const override;
+
+        static std::string format(const std::vector<std::string>& items);
+        static std::vector<std::string> parse(const std::string& text);
+    };
+
+    // A StringTreeModel's rows (std::vector<newui::TreeRow>) as one line of text: rows separated by
+    // "; ", each prefixed by as many '>' as its depth ("Fruits; >Apple; >Banana; Vegetables") - the
+    // same flat depth-list newui::TreeRow itself already is, just in editable text form. Whatever
+    // depth a row is given, StringTreeModel::childCount()/value() resolve it into *some* valid tree
+    // (a depth jump of more than one nests under the nearest real ancestor - see StringTreeModel's
+    // own class comment); a first row with depth > 0, or any row whose only possible parent doesn't
+    // exist, is stored but never appears in the tree - forgiving, not validated, same spirit as
+    // StringListPropertyEditor. Registered for StringTreeModel::rows only.
+    class TreeRowsPropertyEditor : public PropertyEditor
+    {
+    public:
+        using PropertyEditor::PropertyEditor;
+        std::string valueAsString() const override;
+        std::optional<std::any> parseValue(const std::string& text) const override;
+        std::function<void(const std::any&)> valueWriter() const override;
+
+        static std::string format(const std::vector<newui::TreeRow>& rows);
+        static std::vector<newui::TreeRow> parse(const std::string& text);
     };
 
     class FloatPropertyEditor : public PropertyEditor

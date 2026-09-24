@@ -183,6 +183,7 @@ namespace CodeToolsVsix
             primarySelectionProvider_ = std::move(provider);
         }
 
+        void reloadDesignModel(newui::Model& model);
     private:
         newui::Toolbar* topBar_ = nullptr;
         CanvasWell* canvasWell_ = nullptr;
@@ -203,6 +204,11 @@ namespace CodeToolsVsix
         newui::Label* zoomLabel_ = nullptr;
         newui::Label* undoRedoStatusLabel_ = nullptr;
         newui::UndoStack* undoStack_ = nullptr;
+        newui::SubView* designerViews_ = nullptr;
+        newui::SubView* designSource_ = nullptr;
+		newui::TextControl* designSourceTxt_ = nullptr;
         std::function<newui::SubView*()> primarySelectionProvider_;
+
+        
     };
 }

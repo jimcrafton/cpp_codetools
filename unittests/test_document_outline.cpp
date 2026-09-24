@@ -234,11 +234,12 @@ TEST(DocumentOutlineController, IconForARealChildMatchesTheRegistrysOwnIconResou
 
     ViewDesignerModel source;
     source.setRoot(&root);
-    DocumentOutlineModel model;
+    auto modelOwner = std::make_unique<DocumentOutlineModel>();
+    DocumentOutlineModel& model = *modelOwner;
     model.setSource(&source);
 
     DocumentOutlineController controller;
-    controller.setModel(&model);
+    controller.setModel(std::move(modelOwner));
 
     auto icon = controller.iconFor(std::vector<std::size_t>{0, 0});
     ASSERT_TRUE(icon.has_value());
@@ -250,11 +251,12 @@ TEST(DocumentOutlineController, IconForAnOutOfRangePathIsNullopt)
     newui::SubView root;
     ViewDesignerModel source;
     source.setRoot(&root);
-    DocumentOutlineModel model;
+    auto modelOwner = std::make_unique<DocumentOutlineModel>();
+    DocumentOutlineModel& model = *modelOwner;
     model.setSource(&source);
 
     DocumentOutlineController controller;
-    controller.setModel(&model);
+    controller.setModel(std::move(modelOwner));
 
     EXPECT_FALSE(controller.iconFor(std::vector<std::size_t>{99}).has_value());
 }
@@ -273,11 +275,12 @@ TEST(DocumentOutlineItem, PaintARealIconBearingRowDoesNotCrash)
 
     ViewDesignerModel source;
     source.setRoot(&root);
-    DocumentOutlineModel model;
+    auto modelOwner = std::make_unique<DocumentOutlineModel>();
+    DocumentOutlineModel& model = *modelOwner;
     model.setSource(&source);
 
     DocumentOutlineController controller;
-    controller.setModel(&model);
+    controller.setModel(std::move(modelOwner));
     auto* item = static_cast<DocumentOutlineItem*>(controller.createItem({0, 0}));
     ASSERT_NE(item, nullptr);
 

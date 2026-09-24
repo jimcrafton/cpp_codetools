@@ -9,6 +9,7 @@
 #include <newui/application.h>
 #include <newui/controls.h>
 #include <newui/dialogs.h>
+#include <newui/models.h>
 #include <newui/rootview.h>
 #include <newui/uicolormanager.h>
 
@@ -434,6 +435,134 @@ namespace CodeToolsVsix
             return std::nullopt;
         }
         return std::any(*tracks);
+    }
+
+    std::string StringListPropertyEditor::format(const std::vector<std::string>& items)
+    {
+        std::string text;
+        for (std::size_t i = 0; i < items.size(); ++i) {
+            if (i > 0) {
+                text += "; ";
+            }
+            text += items[i];
+        }
+        return text;
+    }
+
+    std::vector<std::string> StringListPropertyEditor::parse(const std::string& text)
+    {
+        std::vector<std::string> items;
+        std::size_t start = 0;
+        while (start <= text.size()) {
+            std::size_t end = text.find(';', start);
+            if (end == std::string::npos) {
+                end = text.size();
+            }
+            std::size_t first = start;
+            std::size_t last = end;
+            while (first < last && std::isspace(static_cast<unsigned char>(text[first]))) {
+                ++first;
+            }
+            while (last > first && std::isspace(static_cast<unsigned char>(text[last - 1]))) {
+                --last;
+            }
+            if (last > first) {
+                items.push_back(text.substr(first, last - first));
+            }
+            start = end + 1;
+        }
+        return items;
+    }
+
+    std::string StringListPropertyEditor::valueAsString() const
+    {
+        return format(std::any_cast<std::vector<std::string>>(rawValue()));
+    }
+
+    std::optional<std::any> StringListPropertyEditor::parseValue(const std::string& text) const
+    {
+        return std::any(parse(text));
+    }
+
+    std::function<void(const std::any&)> StringListPropertyEditor::valueWriter() const
+    {
+        const newui::reflection::Property* property = property_;
+        void* instance = instance_;
+        return [property, instance](const std::any& value) {
+            *static_cast<std::vector<std::string>*>(property->address(instance)) =
+                std::any_cast<std::vector<std::string>>(value);
+            // Writing through the container bypasses the model's own notification.
+            auto* model = static_cast<newui::StringListModel*>(instance);
+            model->onChanged(*model);
+        };
+    }
+
+    std::string TreeRowsPropertyEditor::format(const std::vector<newui::TreeRow>& rows)
+    {
+        std::string text;
+        for (std::size_t i = 0; i < rows.size(); ++i) {
+            if (i > 0) {
+                text += "; ";
+            }
+            text += std::string(rows[i].depth, '>') + rows[i].text;
+        }
+        return text;
+    }
+
+    std::vector<newui::TreeRow> TreeRowsPropertyEditor::parse(const std::string& text)
+    {
+        std::vector<newui::TreeRow> rows;
+        std::size_t start = 0;
+        while (start <= text.size()) {
+            std::size_t end = text.find(';', start);
+            if (end == std::string::npos) {
+                end = text.size();
+            }
+            std::size_t first = start;
+            std::size_t last = end;
+            while (first < last && std::isspace(static_cast<unsigned char>(text[first]))) {
+                ++first;
+            }
+            while (last > first && std::isspace(static_cast<unsigned char>(text[last - 1]))) {
+                --last;
+            }
+            std::size_t depth = 0;
+            while (first < last && text[first] == '>') {
+                ++depth;
+                ++first;
+            }
+            while (first < last && std::isspace(static_cast<unsigned char>(text[first]))) {
+                ++first;
+            }
+            if (last > first) {
+                rows.push_back(newui::TreeRow{ depth, text.substr(first, last - first) });
+            }
+            start = end + 1;
+        }
+        return rows;
+    }
+
+    std::string TreeRowsPropertyEditor::valueAsString() const
+    {
+        return format(std::any_cast<std::vector<newui::TreeRow>>(rawValue()));
+    }
+
+    std::optional<std::any> TreeRowsPropertyEditor::parseValue(const std::string& text) const
+    {
+        return std::any(parse(text));
+    }
+
+    std::function<void(const std::any&)> TreeRowsPropertyEditor::valueWriter() const
+    {
+        const newui::reflection::Property* property = property_;
+        void* instance = instance_;
+        return [property, instance](const std::any& value) {
+            *static_cast<std::vector<newui::TreeRow>*>(property->address(instance)) =
+                std::any_cast<std::vector<newui::TreeRow>>(value);
+            // Writing through the container bypasses the model's own notification.
+            auto* model = static_cast<newui::StringTreeModel*>(instance);
+            model->onChanged(*model);
+        };
     }
 
     std::string FloatPropertyEditor::valueAsString() const
@@ -1259,6 +1388,16 @@ namespace CodeToolsVsix
             [](const newui::reflection::Property* p, void* instance) { return std::make_unique<SizeTPropertyEditor>(p, instance); });
         registerEditor(std::type_index(typeid(std::vector<newui::GridTrack>)),
             [](const newui::reflection::Property* p, void* instance) { return std::make_unique<GridTracksPropertyEditor>(p, instance); });
+        if (const newui::reflection::Class* stringListModelClass = newui::reflection::classinfo(typeid(newui::StringListModel))) {
+            registerEditor(std::type_index(typeid(std::vector<std::string>)),
+                [](const newui::reflection::Property* p, void* instance) { return std::make_unique<StringListPropertyEditor>(p, instance); },
+                stringListModelClass, "items");
+        }
+        if (const newui::reflection::Class* stringTreeModelClass = newui::reflection::classinfo(typeid(newui::StringTreeModel))) {
+            registerEditor(std::type_index(typeid(std::vector<newui::TreeRow>)),
+                [](const newui::reflection::Property* p, void* instance) { return std::make_unique<TreeRowsPropertyEditor>(p, instance); },
+                stringTreeModelClass, "rows");
+        }
         registerEditor(std::type_index(typeid(float)),
             [](const newui::reflection::Property* p, void* instance) { return std::make_unique<FloatPropertyEditor>(p, instance); });
         registerEditor(std::type_index(typeid(std::string)),

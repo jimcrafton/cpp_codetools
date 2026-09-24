@@ -83,10 +83,11 @@ TEST(ColorChoices, NoChoiceNameForACustomColor)
 // The real pixels, not just internal state: a row for "red" has to actually paint a red swatch.
 TEST(ColorChoices, SwatchRowPaintsTheNamedColorAsRealPixels)
 {
-    NameRowsModel model;
+    auto modelOwner = std::make_unique<NameRowsModel>();
+    NameRowsModel& model = *modelOwner;
     model.rows = { "red" };
     CodeToolsVsix::ColorListController controller;
-    controller.setModel(&model);
+    controller.setModel(std::move(modelOwner));
 
     BLImage image(200, 22, BL_FORMAT_PRGB32);
     {

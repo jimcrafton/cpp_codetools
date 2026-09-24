@@ -144,6 +144,12 @@ namespace CodeToolsVsix
         }
         Item::paint(ctx, rect);
 
+        // A stale row (the grid's cached row list outlived a change to the model) resolves to an
+        // empty Invalid node with no Property - nothing to draw.
+        if (node.kind == PropertiesModel::Kind::Invalid) {
+            return;
+        }
+
         if (isGroupLike) {
             // A second, slightly different panel shade (Main.dc.html's own
             // ".prop-cat"/".prop-group-head" background) sets a group/

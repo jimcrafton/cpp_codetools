@@ -167,7 +167,7 @@ namespace CodeToolsVsix
         treeView_->setName("toolboxTreeView");
         treeView_->setVisible(true);
         treeView_->setController(std::make_unique<ToolboxController>());
-        treeView_->setModel(&model_);
+        treeView_->setModel(std::make_unique<ToolboxModel>());   // owned by the view's controller
 
         // Every category always expanded on build - the mockup shows
         // them that way, and nothing here needs the collapsed state

@@ -119,7 +119,6 @@ namespace CodeToolsVsix
         newui::SyncReturn handleTreeDblClick(newui::View& sender, const newui::Point& pt,
             std::uint32_t btnMask, std::uint32_t keyMask);
 
-        ToolboxModel model_;
         newui::TreeView* treeView_ = nullptr;
     };
 }

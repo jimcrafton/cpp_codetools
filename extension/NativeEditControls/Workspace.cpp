@@ -4,10 +4,20 @@
 #include <newui/reflection.h>
 #include <newui/uicolormanager.h>
 #include <newui/viewbuilder.h>
+#include <newui/utils.h>
 
 #include <algorithm>
 #include <memory>
 #include <string>
+
+#include "newui/reflectionio.h"
+
+#include <json5/json5.hpp>
+#include <json5/json5_input.hpp>
+#include <json5/json5_output.hpp>
+
+
+
 
 namespace CodeToolsVsix
 {
@@ -95,15 +105,15 @@ namespace CodeToolsVsix
         topBuilder.name("workspaceTopBar").desiredSize(newui::Size(0.0f, kTopBarHeight));
         topBar_ = topBuilder.build();
 
-        // Fixed widths matching examples/controls1.cpp's own real
-        // ToolbarButton usage (50x24) - a ToolbarButton never
+        // Fixed 64x24 - wide enough for the icon plus label (the 50px
+        // examples/controls1.cpp uses is text-only). A ToolbarButton never
         // self-measures its own text the way this project's own Item-
         // based rows do (ToolbarButton::paint() just centers whatever
         // text within its already-assigned clientBounds()), so an
         // explicit desiredSize() is required, not optional.
         auto makeToolbarButton = [](const char* name, const std::string& text, const std::string& icon) {
             newui::ViewBuilder<newui::ToolbarButton> b;
-            b.name(name).desiredSize(newui::Size(50.0f, 24.0f))
+            b.name(name).desiredSize(newui::Size(64.0f, 24.0f))
                 .configure([&text, &icon](newui::ToolbarButton& btn) {
                     btn.setText(text);
                     btn.setIcon(icon);
@@ -139,11 +149,23 @@ namespace CodeToolsVsix
         modeControlBuilder.name("workspaceModeControl")
             .configure([](newui::SegmentedControl& control) {
                 control.setSegments({"Design", "Source", "Data Flow"});
-                control.setSegmentEnabled(Workspace::kSourceModeSegment, false);
+                control.setSegmentEnabled(Workspace::kSourceModeSegment, true);
                 control.setSegmentEnabled(Workspace::kDataFlowModeSegment, false);
             });
         modeControl_ = modeControlBuilder.build();
         modeControl_->setDesiredSize(modeControl_->naturalSize());
+
+
+        modeControl_->onSelectionChanged.add([this](newui::SegmentedControl& sender) {
+            auto idx = sender.selectedIndex();
+            
+            reinterpret_cast<newui::CardLayout*>(this->designerViews_->layout())->show(idx);
+			this->designerViews_->redraw();
+
+            return newui::SyncReturn::Handled;
+            });
+
+
 
         // "100%" (Main.dc.html's own ".tb-zoom") - a static placeholder,
         // not wired to anything real (no canvas zoom feature exists yet -
@@ -252,6 +274,43 @@ namespace CodeToolsVsix
         canvasWellBuilder.child(frameProxy_);
         canvasWell_ = canvasWellBuilder.build();
 
+
+
+        newui::ViewBuilder<newui::SubView> designerViewsBuilder;
+        designerViewsBuilder.name("workspaceDesignerViews")
+            .visible(true)
+            .layout<newui::CardLayout>();
+        
+        
+        newui::ViewBuilder<newui::SubView> designSourceBuilder;
+        designSourceBuilder.name("designSource")
+            .visible(true)
+            .bounds(newui::Rect(0.0f, 0.0f, 100, 100))
+            .layout<newui::AnchorLayout>()
+			.style<newui::ViewStyle>([](newui::ViewStyle& style) {
+			style.setBackgroundColor(newui::Color("red"));
+				});
+        designSource_ = designSourceBuilder.build();
+
+        newui::ViewBuilder<newui::TextControl> designSourceTxtBuilder;
+        designSourceTxtBuilder.name("designSourceTxt")
+            .visible(true)
+            .bounds(newui::Rect(0.0f, 0.0f, 100, 100))
+            .layoutParams<newui::AnchorLayoutParams>([](newui::AnchorLayoutParams& params) {
+            params.setAnchors(newui::Anchor::Left | newui::Anchor::Top
+                | newui::Anchor::Right | newui::Anchor::Bottom);
+                });
+        designSourceTxt_ = designSourceTxtBuilder.build();
+
+        designSource_->addChild(designSourceTxt_);
+
+        designerViews_ = designerViewsBuilder.build();
+		designerViews_->addChild(canvasWell_);
+
+        designerViews_->addChild(designSource_);
+		reinterpret_cast<newui::CardLayout*>(designerViews_->layout())->show(0);
+        
+
         // PropertiesGrid's own constructor already sets visible(true) and
         // its background color (matching FrameProxy/RootViewProxy/
         // Splitter's own convention of doing that in the constructor
@@ -311,7 +370,7 @@ namespace CodeToolsVsix
                 s.setSplitPosition(kPropertiesPaneWidth);
                 s.setDividerThickness(kDividerThickness);
             });
-        centerAndRightBuilder.child(canvasWell_).child(rightDock);
+        centerAndRightBuilder.child(designerViews_).child(rightDock);
         newui::Splitter* centerAndRight = centerAndRightBuilder.build();
 
         // Double-click an entry creates it and attaches it onto the current primary
@@ -431,5 +490,25 @@ namespace CodeToolsVsix
         statusBar_ = statusBuilder.build();
 
         self.child(topBar_).child(middle).child(statusBar_);
+    }    
+
+    void Workspace::reloadDesignModel(newui::Model& model)
+    {
+		ViewDesignerModel& designModel = static_cast<ViewDesignerModel&>(model);
+        
+
+        json5::document existingDoc;
+        std::string existingText;
+        
+        newui::reflection::ObjectWriter writer;
+        writer.setDesignMode(true);
+        writer.beginObject(std::string(), nullptr);  // stamps "meta"; depth_ -> 1
+
+        writer.writeNested("rootView", rootViewProxy_);
+        writer.endObject(std::string(), nullptr);
+
+        auto str = json5::to_string(writer.doc);
+
+		designSourceTxt_->model().setText(newui::utf8ToWide(str));
     }
 }

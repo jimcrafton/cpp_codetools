@@ -1,0 +1,255 @@
+{
+  meta: {
+    author: "",
+    date: "2026-09-21",
+    copyright: "",
+    version: "0.1.0.1724"
+  },
+  rootView: {
+    type: "RootView",
+    layoutParams: {
+      type: "AnchorLayoutParams",
+      anchors: [
+        "Left",
+        "Top",
+        "Right",
+        "Bottom"
+      ],
+      leftMargin: 0,
+      topMargin: 28,
+      rightMargin: 0,
+      bottomMargin: 0,
+      width: 0,
+      height: 0
+    },
+    bounds: {
+      type: "Rect",
+      pos: {
+        type: "Point",
+        x: 0,
+        y: 28
+      },
+      size: {
+        type: "Size",
+        width: 640,
+        height: 432
+      }
+    },
+    visible: true,
+    name: "rootview",
+    layout: {
+      type: "FlexLayout",
+      orientation: "Vertical",
+      mainAxisAlignment: "Start",
+      crossAxisAlignment: "Stretch",
+      spacing: 0,
+      padding: 0,
+      wrap: false,
+      lineSpacing: 0,
+      alignContent: "Start"
+    },
+    style: {
+      type: "ViewStyle",
+      backgroundFill: {
+        type: "Fill",
+        kind: "Color",
+        color: "#1c1d1fff",
+        gradient: {
+          type: "Gradient",
+          kind: "Linear",
+          linearStart: {
+            type: "Point",
+            x: 0,
+            y: 0
+          },
+          linearEnd: {
+            type: "Point",
+            x: 1,
+            y: 0
+          },
+          radialCenter: {
+            type: "Point",
+            x: 0.5,
+            y: 0.5
+          },
+          radialFocalOffset: {
+            type: "Point",
+            x: 0,
+            y: 0
+          },
+          radialRadius: 0.5,
+          conicCenter: {
+            type: "Point",
+            x: 0.5,
+            y: 0.5
+          },
+          conicAngle: 0,
+          conicRepeat: 1,
+          stops: [],
+          extendMode: "Pad",
+          points: [],
+          pointBlendPower: 2,
+          pointRasterMax: 64
+        },
+        imagePath: "",
+        opacity: 1
+      },
+      borderFill: "#00000000",
+      borderWidth: 0,
+      highlightFill: "#00000000",
+      strokeStyle: "StrokeColor",
+      imageFillMode: "Tile",
+      imageAlignment: "Center",
+      rectRadius: 0,
+      opacity: 1,
+      compositingOp: "CompSrcOver",
+      font: {
+        type: "Font",
+        name: "",
+        size: 12,
+        bold: false,
+        italic: false,
+        strikeThrough: false,
+        underlined: false
+      },
+      elevation: 0
+    },
+    highlighted: false,
+    focused: false,
+    desiredSize: {
+      type: "Size",
+      width: 380,
+      height: 574
+    },
+    desiredSizeOverride: true,
+    cursor: {
+      type: "Cursor",
+      kind: "Arrow",
+      path: ""
+    },
+    acceptsFocus: false,
+    focusScope: false,
+    wantsTabKey: false,
+    childViews: [
+      {
+        type: "ListView",
+        model: {
+          type: "StringListModel",
+          items: [
+            "s 1",
+            "Item 2",
+            "Item 3",
+            "Item 4",
+            "Item 5",
+            "Item 6"
+          ],
+          name: ""
+        },
+        hoverHighlightEnabled: true,
+        rowHeight: 20,
+        enabled: true,
+        bounds: {
+          type: "Rect",
+          pos: {
+            type: "Point",
+            x: 0,
+            y: 0
+          },
+          size: {
+            type: "Size",
+            width: 640,
+            height: 200
+          }
+        },
+        visible: true,
+        name: "listView1",
+        style: {
+          type: "ThemedEditStyle",
+          backgroundFill: {
+            type: "Fill",
+            kind: "None",
+            color: "#000000ff",
+            gradient: {
+              type: "Gradient",
+              kind: "Linear",
+              linearStart: {
+                type: "Point",
+                x: 0,
+                y: 0
+              },
+              linearEnd: {
+                type: "Point",
+                x: 1,
+                y: 0
+              },
+              radialCenter: {
+                type: "Point",
+                x: 0.5,
+                y: 0.5
+              },
+              radialFocalOffset: {
+                type: "Point",
+                x: 0,
+                y: 0
+              },
+              radialRadius: 0.5,
+              conicCenter: {
+                type: "Point",
+                x: 0.5,
+                y: 0.5
+              },
+              conicAngle: 0,
+              conicRepeat: 1,
+              stops: [],
+              extendMode: "Pad",
+              points: [],
+              pointBlendPower: 2,
+              pointRasterMax: 64
+            },
+            imagePath: "",
+            opacity: 1
+          },
+          borderFill: "#00000000",
+          borderWidth: 0,
+          highlightFill: "#00000000",
+          strokeStyle: "StrokeColor",
+          imageFillMode: "Tile",
+          imageAlignment: "Center",
+          rectRadius: 0,
+          opacity: 1,
+          compositingOp: "CompSrcOver",
+          font: {
+            type: "Font",
+            name: "",
+            size: 12,
+            bold: false,
+            italic: false,
+            strikeThrough: false,
+            underlined: false
+          },
+          elevation: 0,
+          focused: false,
+          readOnly: false,
+          enabled: true
+        },
+        highlighted: false,
+        focused: false,
+        desiredSize: {
+          type: "Size",
+          width: 640,
+          height: 200
+        },
+        desiredSizeOverride: true,
+        cursor: {
+          type: "Cursor",
+          kind: "Arrow",
+          path: ""
+        },
+        acceptsFocus: true,
+        focusScope: false,
+        wantsTabKey: false,
+        childViews: []
+      }
+    ]
+  }
+}

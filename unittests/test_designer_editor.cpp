@@ -1274,7 +1274,7 @@ TEST(DesignerEditorToolbar, TopBarHasFiveButtonsAndAModeControl)
     EXPECT_NE(editor.workspace()->modeControl(), nullptr);
 }
 
-TEST(DesignerEditorToolbar, ModeControlHasDesignSourceDataFlowWithOnlyDesignEnabled)
+TEST(DesignerEditorToolbar, ModeControlHasDesignSourceDataFlowWithDesignAndSourceEnabled)
 {
     newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
     CodeToolsVsix::DesignerEditor editor(&view);
@@ -1285,7 +1285,7 @@ TEST(DesignerEditorToolbar, ModeControlHasDesignSourceDataFlowWithOnlyDesignEnab
     EXPECT_EQ(mode->segments()[1], "Source");
     EXPECT_EQ(mode->segments()[2], "Data Flow");
     EXPECT_TRUE(mode->isSegmentEnabled(CodeToolsVsix::Workspace::kDesignModeSegment));
-    EXPECT_FALSE(mode->isSegmentEnabled(CodeToolsVsix::Workspace::kSourceModeSegment));
+    EXPECT_TRUE(mode->isSegmentEnabled(CodeToolsVsix::Workspace::kSourceModeSegment));
     EXPECT_FALSE(mode->isSegmentEnabled(CodeToolsVsix::Workspace::kDataFlowModeSegment));
     EXPECT_EQ(mode->selectedIndex(), CodeToolsVsix::Workspace::kDesignModeSegment);
 }
@@ -2055,6 +2055,7 @@ TEST(DesignerEditorToolboxHover, TheGhostOutlineIsActuallyPaintedByTheOverlayWit
 TEST(DesignerEditorComponentEditor, ATabControlsAddTabVerbIsUndoableRefreshesTheOutlineAndMarksDirty)
 {
     CodeToolsVsix::ComponentEditorRegistry::instance().registerBuiltinEditors();
+    CodeToolsVsix::PropertyEditorRegistry::instance().registerBuiltinEditors();
 
     newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
     CodeToolsVsix::DesignerEditor editor(&root);
@@ -2082,6 +2083,7 @@ TEST(DesignerEditorComponentEditor, ATabControlsAddTabVerbIsUndoableRefreshesThe
 TEST(DesignerEditorComponentEditor, AClassWithNoRegisteredEditorYieldsNone)
 {
     CodeToolsVsix::ComponentEditorRegistry::instance().registerBuiltinEditors();
+    CodeToolsVsix::PropertyEditorRegistry::instance().registerBuiltinEditors();
 
     newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
     CodeToolsVsix::DesignerEditor editor(&root);
@@ -2094,6 +2096,7 @@ TEST(DesignerEditorComponentEditor, AClassWithNoRegisteredEditorYieldsNone)
 TEST(DesignerEditorComponentEditor, InternalAndReadOnlyViewsGetNoComponentEditor)
 {
     CodeToolsVsix::ComponentEditorRegistry::instance().registerBuiltinEditors();
+    CodeToolsVsix::PropertyEditorRegistry::instance().registerBuiltinEditors();
 
     newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
     CodeToolsVsix::DesignerEditor editor(&root);
@@ -2113,6 +2116,7 @@ TEST(DesignerEditorComponentEditor, InternalAndReadOnlyViewsGetNoComponentEditor
 TEST_F(DesignerEditorFileFixture, TabsAddedInTheDesignerSurviveSaveAndReopen)
 {
     CodeToolsVsix::ComponentEditorRegistry::instance().registerBuiltinEditors();
+    CodeToolsVsix::PropertyEditorRegistry::instance().registerBuiltinEditors();
     std::wstring path = filePath();
     {
         newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
@@ -2431,6 +2435,7 @@ TEST(DesignerEditorGridVerbs, AddAndRemoveRowsAndColumnsAreUndoableAndOnlyOfferW
 TEST(DesignerEditorGridVerbs, ViewsWithoutAGridLayoutGetNoGridVerbsAndAGridWithAClassEditorGetsBoth)
 {
     CodeToolsVsix::ComponentEditorRegistry::instance().registerBuiltinEditors();
+    CodeToolsVsix::PropertyEditorRegistry::instance().registerBuiltinEditors();
     HoverFixture f;
     EXPECT_TRUE(f.editor.createComponentEditorsFor(f.anchorBox).empty());   // Anchor layout, no class editor
 
@@ -2440,4 +2445,94 @@ TEST(DesignerEditorGridVerbs, ViewsWithoutAGridLayoutGetNoGridVerbsAndAGridWithA
     auto editors = f.editor.createComponentEditorsFor(tabs);
     ASSERT_EQ(editors.size(), 1u);                       // TabControl's own; its layout is Flex, not Grid
     EXPECT_NE(dynamic_cast<CodeToolsVsix::TabControlEditor*>(editors[0].get()), nullptr);
+}
+
+TEST(DesignerEditor, EditComponentOpensTheDefaultPropertyInThePropertiesGrid)
+{
+    CodeToolsVsix::ComponentEditorRegistry::instance().registerBuiltinEditors();
+    CodeToolsVsix::PropertyEditorRegistry::instance().registerBuiltinEditors();
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&root);
+    ASSERT_NE(editor.workspace(), nullptr);
+    root.setBounds(newui::Rect(0, 0, 1400, 700));
+
+    auto* button = new newui::Button();
+    button->setText("OK");
+    button->setVisible(true);
+    button->setBounds(newui::Rect(10, 10, 80, 24));
+    editor.workspace()->rootViewProxy()->addChild(button);
+    editor.viewDesignerController().selectExclusive(button);
+
+    // No RunLoop in tests, so the grid edit runs inline.
+    editor.editComponent(button);
+
+    CodeToolsVsix::PropertiesGrid* grid = editor.workspace()->propertiesPane();
+    std::optional<std::vector<std::size_t>> path = grid->treeView()->selectedPath();
+    ASSERT_TRUE(path.has_value());
+    ASSERT_EQ(path->size(), 1u);
+    const newui::reflection::Property* property = grid->model().nodeAt(*path).property;
+    ASSERT_NE(property, nullptr);
+    EXPECT_EQ(property->name(), "text");
+    ASSERT_EQ(grid->treeView()->childViews().size(), 1u);
+    auto* field = dynamic_cast<newui::TextField*>(grid->treeView()->childViews()[0]);
+    ASSERT_NE(field, nullptr);
+    EXPECT_EQ(root.focusedSubView(), field);
+    ASSERT_EQ(field->selection().ranges().size(), 1u);
+    EXPECT_EQ(field->selection().ranges()[0].start(), 0u);
+    EXPECT_EQ(field->selection().ranges()[0].length(), 2u);
+}
+
+TEST(DesignerEditor, EditComponentOnATabSwitchesToItAndOpensItsPageTitle)
+{
+    CodeToolsVsix::ComponentEditorRegistry::instance().registerBuiltinEditors();
+    CodeToolsVsix::PropertyEditorRegistry::instance().registerBuiltinEditors();
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&root);
+    ASSERT_NE(editor.workspace(), nullptr);
+    root.setBounds(newui::Rect(0, 0, 1400, 700));
+
+    auto* tabs = new newui::TabControl();
+    tabs->setVisible(true);
+    tabs->setBounds(newui::Rect(10, 10, 300, 200));
+    editor.workspace()->rootViewProxy()->addChild(tabs);
+    for (int i = 0; i < 2; ++i) {
+        auto* page = new newui::TabPage();
+        page->setVisible(true);
+        tabs->addTab("Tab " + std::to_string(i + 1), page);
+    }
+    tabs->selectTab(0);
+    editor.viewDesignerController().selectExclusive(tabs);
+
+    newui::Rect secondTab = CodeToolsVsix::SelectionOverlay::boundsInRootView(tabs->tabButton(1));
+    ASSERT_GT(secondTab.size().width, 0.0f);
+    editor.editComponent(tabs, newui::Point(secondTab.left() + 2.0f, secondTab.top() + 2.0f));
+
+    EXPECT_EQ(tabs->selectedIndex(), 1u);
+    EXPECT_EQ(editor.viewDesignerController().primary(), tabs->page(1));
+    CodeToolsVsix::PropertiesGrid* grid = editor.workspace()->propertiesPane();
+    std::optional<std::vector<std::size_t>> path = grid->treeView()->selectedPath();
+    ASSERT_TRUE(path.has_value());
+    const newui::reflection::Property* property = grid->model().nodeAt(*path).property;
+    ASSERT_NE(property, nullptr);
+    EXPECT_EQ(property->name(), "title");
+}
+
+TEST(DesignerEditor, EditComponentOnATabControlWithNoTabsDoesNothing)
+{
+    CodeToolsVsix::ComponentEditorRegistry::instance().registerBuiltinEditors();
+    CodeToolsVsix::PropertyEditorRegistry::instance().registerBuiltinEditors();
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&root);
+    root.setBounds(newui::Rect(0, 0, 1400, 700));
+
+    auto* tabs = new newui::TabControl();
+    tabs->setVisible(true);
+    tabs->setBounds(newui::Rect(10, 10, 300, 200));
+    editor.workspace()->rootViewProxy()->addChild(tabs);
+    editor.viewDesignerController().selectExclusive(tabs);
+
+    editor.editComponent(tabs, newui::Point(20, 20));
+
+    EXPECT_EQ(editor.viewDesignerController().primary(), tabs);
+    EXPECT_FALSE(editor.workspace()->propertiesPane()->treeView()->selectedPath().has_value());
 }

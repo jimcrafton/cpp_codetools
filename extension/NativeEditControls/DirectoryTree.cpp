@@ -160,7 +160,9 @@ namespace CodeToolsVsix
         // the reflection pool - same "TreeItem" name ListController::ListController() already
         // sets via "ListItem" for its own plain-item case.
         treeView_->controller().setDefaultItemClassName("TreeItem");
-        treeView_->setModel(&model_);
+        auto model = std::make_unique<DirectoryTreeModel>();
+        model_ = model.get();
+        treeView_->setModel(std::move(model));
         treeView_->onMouseDblClick.add(this, &DirectoryTree::handleTreeDblClick);
 
         // ScrollView::addChild() redirects into its own viewport - not a second, separate
@@ -177,7 +179,7 @@ namespace CodeToolsVsix
             return newui::SyncReturn::Ignored;
         }
 
-        const DirectoryTreeModel::Entry* entry = model_.entryAt(*path);
+        const DirectoryTreeModel::Entry* entry = model_->entryAt(*path);
         if (entry == nullptr || entry->isDirectory) {
             // A directory row's double-click already expands/collapses it (TreeView's own
             // default handling) - nothing further to do here.

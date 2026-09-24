@@ -3,6 +3,7 @@
 #include <newui/controls.h>
 #include <newui/graphics.h>
 #include <newui/layout.h>
+#include <newui/models.h>
 #include <newui/reflection.h>
 #include <newui/subview.h>
 #include <newui/viewstyle.h>
@@ -995,4 +996,101 @@ TEST(GridTracksText, TheEditorReadsAndWritesARealGridLayoutsTracksUndoably)
     undo.undo();
     ASSERT_EQ(layout.rows().size(), 1u);
     EXPECT_FLOAT_EQ(layout.rows()[0].value, 40.0f);
+}
+
+TEST(StringListText, FormatsWithSemicolonsAndParsesTrimmingAndDroppingBlanks)
+{
+    using CodeToolsVsix::StringListPropertyEditor;
+    EXPECT_EQ(StringListPropertyEditor::format({ "Red", "Green", "Blue" }), "Red; Green; Blue");
+    EXPECT_EQ(StringListPropertyEditor::format({}), "");
+
+    EXPECT_EQ(StringListPropertyEditor::parse("Red; Green; Blue"),
+        (std::vector<std::string>{ "Red", "Green", "Blue" }));
+    EXPECT_EQ(StringListPropertyEditor::parse("  a ;; b  ;  "), (std::vector<std::string>{ "a", "b" }));
+    EXPECT_TRUE(StringListPropertyEditor::parse("   ").empty());
+    EXPECT_EQ(StringListPropertyEditor::parse("one item, with a comma"),
+        (std::vector<std::string>{ "one item, with a comma" }));
+}
+
+TEST(StringListText, TheEditorEditsAStringListModelsItemsUndoablyAndNotifiesTheModel)
+{
+    CodeToolsVsix::PropertyEditorRegistry::instance().registerBuiltinEditors();
+    newui::StringListModel model;
+    model.items() = { "a", "b" };
+    int changes = 0;
+    model.onChanged.add([&changes](newui::Model&) { ++changes; return newui::SyncReturn::Handled; });
+
+    const Class* modelClass = classinfo(typeid(newui::StringListModel));
+    const Property* items = findProperty(modelClass, "items");
+    auto editor = CodeToolsVsix::PropertyEditorRegistry::instance().createEditor(items, modelClass, &model);
+    ASSERT_NE(editor, nullptr);
+    EXPECT_NE(dynamic_cast<CodeToolsVsix::StringListPropertyEditor*>(editor.get()), nullptr);
+    newui::UndoStack undo;
+    editor->setUndoStack(&undo);
+
+    EXPECT_EQ(editor->valueAsString(), "a; b");
+    editor->setValueFromString("x; y; z");
+    EXPECT_EQ(model.items(), (std::vector<std::string>{ "x", "y", "z" }));
+    EXPECT_EQ(changes, 1);   // written through the container, so the editor must tell the model itself
+
+    undo.undo();
+    EXPECT_EQ(model.items(), (std::vector<std::string>{ "a", "b" }));
+    EXPECT_EQ(changes, 2);
+}
+
+TEST(TreeRowsText, FormatsWithDepthChevronsAndParsesThemBack)
+{
+    using CodeToolsVsix::TreeRowsPropertyEditor;
+    std::vector<newui::TreeRow> rows = {
+        { 0, "Fruits" }, { 1, "Apple" }, { 1, "Banana" }, { 0, "Vegetables" },
+    };
+    EXPECT_EQ(TreeRowsPropertyEditor::format(rows), "Fruits; >Apple; >Banana; Vegetables");
+    EXPECT_EQ(TreeRowsPropertyEditor::format({}), "");
+
+    auto parsed = TreeRowsPropertyEditor::parse("Fruits; >Apple; >Banana; Vegetables");
+    ASSERT_EQ(parsed.size(), rows.size());
+    for (std::size_t i = 0; i < rows.size(); ++i) {
+        EXPECT_EQ(parsed[i].depth, rows[i].depth) << i;
+        EXPECT_EQ(parsed[i].text, rows[i].text) << i;
+    }
+
+    auto deeper = TreeRowsPropertyEditor::parse("  Fruits ;  >> Gala ; ;  >Apple  ");
+    ASSERT_EQ(deeper.size(), 3u);   // the blank entry between ';;' is dropped, same as StringListText
+    EXPECT_EQ(deeper[0].depth, 0u);
+    EXPECT_EQ(deeper[0].text, "Fruits");
+    EXPECT_EQ(deeper[1].depth, 2u);
+    EXPECT_EQ(deeper[1].text, "Gala");
+    EXPECT_EQ(deeper[2].depth, 1u);
+    EXPECT_EQ(deeper[2].text, "Apple");
+
+    EXPECT_TRUE(TreeRowsPropertyEditor::parse("   ").empty());
+}
+
+TEST(TreeRowsText, TheEditorEditsAStringTreeModelsRowsUndoablyAndNotifiesTheModel)
+{
+    CodeToolsVsix::PropertyEditorRegistry::instance().registerBuiltinEditors();
+    newui::StringTreeModel model;
+    model.rows() = { { 0, "a" }, { 1, "b" } };
+    int changes = 0;
+    model.onChanged.add([&changes](newui::Model&) { ++changes; return newui::SyncReturn::Handled; });
+
+    const Class* modelClass = classinfo(typeid(newui::StringTreeModel));
+    const Property* rows = findProperty(modelClass, "rows");
+    auto editor = CodeToolsVsix::PropertyEditorRegistry::instance().createEditor(rows, modelClass, &model);
+    ASSERT_NE(editor, nullptr);
+    EXPECT_NE(dynamic_cast<CodeToolsVsix::TreeRowsPropertyEditor*>(editor.get()), nullptr);
+    newui::UndoStack undo;
+    editor->setUndoStack(&undo);
+
+    EXPECT_EQ(editor->valueAsString(), "a; >b");
+    editor->setValueFromString("x; >y; z");
+    ASSERT_EQ(model.rows().size(), 3u);
+    EXPECT_EQ(model.rows()[1].depth, 1u);
+    EXPECT_EQ(model.childCount({0}), 1u);   // "y" really nests under "x", not just three flat rows
+    EXPECT_EQ(changes, 1);   // written through the container, so the editor must tell the model itself
+
+    undo.undo();
+    ASSERT_EQ(model.rows().size(), 2u);
+    EXPECT_EQ(model.rows()[1].text, "b");
+    EXPECT_EQ(changes, 2);
 }

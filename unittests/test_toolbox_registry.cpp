@@ -3,6 +3,7 @@
 #include <newui/bundle.h>
 #include <newui/controls.h>
 #include <newui/layout.h>
+#include <newui/splitter.h>
 #include <newui/subview.h>
 #include <newui/controls.h>
 
@@ -101,6 +102,69 @@ TEST(ToolboxRegistry, ButtonFactoryBuildsARealButtonInstance) {
     newui::SubView* created = buttonEntry->factory();
     ASSERT_NE(created, nullptr);
     EXPECT_NE(dynamic_cast<newui::Button*>(created), nullptr);
+    delete created;
+}
+
+TEST(ToolboxRegistry, ANewListViewAndDropDownListComeUpWithPlaceholderRows) {
+    const auto& categories = CodeToolsVsix::ToolboxRegistry::categories();
+    const CodeToolsVsix::ToolboxEntry* listEntry = nullptr;
+    const CodeToolsVsix::ToolboxEntry* dropDownEntry = nullptr;
+    for (const auto& category : categories) {
+        if (const auto* e = findEntry(category, "ListView")) { listEntry = e; }
+        if (const auto* e = findEntry(category, "DropDownList")) { dropDownEntry = e; }
+    }
+    ASSERT_NE(listEntry, nullptr);
+    ASSERT_NE(dropDownEntry, nullptr);
+
+    auto* list = dynamic_cast<newui::ListView*>(listEntry->factory());
+    ASSERT_NE(list, nullptr);
+    auto* listModel = dynamic_cast<newui::StringListModel*>(list->model());
+    ASSERT_NE(listModel, nullptr);
+    EXPECT_EQ(listModel->items().size(), 3u);
+    EXPECT_EQ(list->controller().itemCount(), 3u);
+    list->destroy();
+    delete list;
+
+    auto* dropDown = dynamic_cast<newui::DropDownList*>(dropDownEntry->factory());
+    ASSERT_NE(dropDown, nullptr);
+    EXPECT_NE(dynamic_cast<newui::StringListModel*>(dropDown->model()), nullptr);
+    dropDown->destroy();
+    delete dropDown;
+}
+
+TEST(ToolboxRegistry, ANewTreeViewComesUpWithThreeFlatPlaceholderRows) {
+    const auto& categories = CodeToolsVsix::ToolboxRegistry::categories();
+    const CodeToolsVsix::ToolboxEntry* treeEntry = nullptr;
+    for (const auto& category : categories) {
+        if (const auto* e = findEntry(category, "TreeView")) { treeEntry = e; }
+    }
+    ASSERT_NE(treeEntry, nullptr);
+
+    auto* tree = dynamic_cast<newui::TreeView*>(treeEntry->factory());
+    ASSERT_NE(tree, nullptr);
+    auto* treeModel = dynamic_cast<newui::StringTreeModel*>(tree->model());
+    ASSERT_NE(treeModel, nullptr);
+    ASSERT_EQ(treeModel->rows().size(), 3u);
+    for (const newui::TreeRow& row : treeModel->rows()) {
+        EXPECT_EQ(row.depth, 0u);
+    }
+    EXPECT_EQ(tree->controller().visibleCount(), 3u);
+    tree->destroy();
+    delete tree;
+}
+
+TEST(ToolboxRegistry, SplitterIsInContainersAndItsFactoryBuildsARealSplitter) {
+    const auto& containers = CodeToolsVsix::ToolboxRegistry::categories()[0];
+
+    const CodeToolsVsix::ToolboxEntry* splitterEntry = findEntry(containers, "Splitter");
+    ASSERT_NE(splitterEntry, nullptr);
+    EXPECT_FALSE(splitterEntry->iconResourceName.empty());
+    EXPECT_FALSE(newui::Bundle::instance().resourcePath(splitterEntry->iconResourceName).empty())
+        << "iconResourceName '" << splitterEntry->iconResourceName << "' doesn't resolve to a real file";
+
+    newui::SubView* created = splitterEntry->factory();
+    ASSERT_NE(created, nullptr);
+    EXPECT_NE(dynamic_cast<newui::Splitter*>(created), nullptr);
     delete created;
 }
 

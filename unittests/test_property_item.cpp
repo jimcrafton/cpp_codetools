@@ -56,8 +56,10 @@ class PropertyItemTest : public ::testing::Test {
 protected:
     void SetUp() override {
         CodeToolsVsix::PropertyEditorRegistry::instance().registerBuiltinEditors();
-        model_.setSelection(&button_);
-        controller_.setModel(&model_);
+        auto model = std::make_unique<PropertiesModel>();
+        model_ = model.get();
+        model_->setSelection(&button_);
+        controller_.setModel(std::move(model));   // the controller owns it
 
         ASSERT_EQ(surface_.create(200, 24, BL_FORMAT_PRGB32), BL_SUCCESS);
     }
@@ -76,7 +78,7 @@ protected:
     }
 
     newui::Button button_;
-    PropertiesModel model_;
+    PropertiesModel* model_ = nullptr;   // owned by controller_
     newui::TreeController controller_;
     BLImage surface_;
     bool lastPaintedSelected_ = false;
@@ -93,7 +95,7 @@ TEST_F(PropertyItemTest, LeafPropertyRowPaintsSomething)
     // be.
     std::size_t leafIndex = properties.size();
     for (std::size_t i = 0; i < properties.size(); ++i) {
-        if (model_.nodeAt({i}).kind == PropertiesModel::Kind::PropertyLeaf) {
+        if (model_->nodeAt({i}).kind == PropertiesModel::Kind::PropertyLeaf) {
             leafIndex = i;
             break;
         }
@@ -109,7 +111,7 @@ TEST_F(PropertyItemTest, PropertyGroupRowForcesSelectedFalseAndPaintsALabel)
 
     std::size_t groupIndex = properties.size();
     for (std::size_t i = 0; i < properties.size(); ++i) {
-        if (model_.nodeAt({i}).kind == PropertiesModel::Kind::PropertyGroup) {
+        if (model_->nodeAt({i}).kind == PropertiesModel::Kind::PropertyGroup) {
             groupIndex = i;
             break;
         }
@@ -141,9 +143,32 @@ TEST_F(PropertyItemTest, PropertyGroupRowWithNoLiveInstanceAttachedStillPaints)
     }
     ASSERT_LT(layoutIndex, properties.size());
     ASSERT_EQ(button_.layout(), nullptr);
-    ASSERT_EQ(model_.nodeAt({layoutIndex}).kind, PropertiesModel::Kind::PropertyGroup);
+    ASSERT_EQ(model_->nodeAt({layoutIndex}).kind, PropertiesModel::Kind::PropertyGroup);
 
     EXPECT_TRUE(paintPath({layoutIndex}));
+}
+
+// A row the grid still lists after the model changed under it (here: a child of a group whose
+// target is null) resolves to an Invalid node with no Property. Painting it used to dereference
+// that null Property in PropertyEditorRegistry::createEditor().
+TEST_F(PropertyItemTest, StaleRowUnderAGroupWithNoLiveInstanceIsSkippedNotDereferenced)
+{
+    std::vector<const newui::reflection::Property*> properties = listedProperties();
+
+    std::size_t layoutIndex = properties.size();
+    for (std::size_t i = 0; i < properties.size(); ++i) {
+        if (properties[i]->name() == "layout") {
+            layoutIndex = i;
+            break;
+        }
+    }
+    ASSERT_LT(layoutIndex, properties.size());
+    ASSERT_EQ(button_.layout(), nullptr);
+    ASSERT_EQ(model_->childCount({layoutIndex}), 0u);
+    ASSERT_EQ(model_->nodeAt({layoutIndex, 0}).kind, PropertiesModel::Kind::Invalid);
+
+    EXPECT_NO_FATAL_FAILURE(paintPath({layoutIndex, 0}));
+    EXPECT_NO_FATAL_FAILURE(paintPath({9999}));   // a row past the end
 }
 
 // "style" is the same Layout-shaped case as "layout" above, just with a real, never-null live
@@ -163,7 +188,7 @@ TEST_F(PropertyItemTest, StyleGroupHeaderWithATypeSwapEditorStillPaintsItsEllips
         }
     }
     ASSERT_LT(styleIndex, properties.size());
-    ASSERT_EQ(model_.nodeAt({styleIndex}).kind, PropertiesModel::Kind::PropertyGroup);
+    ASSERT_EQ(model_->nodeAt({styleIndex}).kind, PropertiesModel::Kind::PropertyGroup);
 
     EXPECT_TRUE(paintPath({styleIndex}));
 }
@@ -210,7 +235,7 @@ TEST_F(PropertyItemTest, UnsupportedPropertyRowPaintsKeyAndPlaceholder)
 
     std::size_t unsupportedIndex = properties.size();
     for (std::size_t i = 0; i < properties.size(); ++i) {
-        if (model_.nodeAt({i}).kind == PropertiesModel::Kind::PropertyUnsupported) {
+        if (model_->nodeAt({i}).kind == PropertiesModel::Kind::PropertyUnsupported) {
             unsupportedIndex = i;
             break;
         }
@@ -277,9 +302,9 @@ TEST_F(PropertyItemTest, ParentPickerRowPaintsTheKeyAndTheCurrentParentsName)
     newui::SubView container;
     container.setName("container");
     container.addChild(&button_);
-    model_.setSelection(&button_);
+    model_->setSelection(&button_);
 
-    ASSERT_EQ(model_.nodeAt({0}).kind, PropertiesModel::Kind::ParentPicker);
+    ASSERT_EQ(model_->nodeAt({0}).kind, PropertiesModel::Kind::ParentPicker);
     EXPECT_TRUE(paintPath({0}));
 
     container.removeChild(&button_);
@@ -294,8 +319,8 @@ TEST_F(PropertyItemTest, ParentPickerRowStillPaintsWithNoParentButtonIsNeverGive
     // ParentPicker row at all, which is itself the behavior worth asserting:
     // path {0} must resolve to a real property, never Invalid/ParentPicker.
     ASSERT_EQ(button_.parent(), nullptr);
-    EXPECT_NE(model_.nodeAt({0}).kind, PropertiesModel::Kind::ParentPicker);
-    EXPECT_NE(model_.nodeAt({0}).kind, PropertiesModel::Kind::Invalid);
+    EXPECT_NE(model_->nodeAt({0}).kind, PropertiesModel::Kind::ParentPicker);
+    EXPECT_NE(model_->nodeAt({0}).kind, PropertiesModel::Kind::Invalid);
 }
 
 TEST(PropertyItemGroupTypeName, NamesTheClassOrElseTheEnumNeverAQuestionMark)

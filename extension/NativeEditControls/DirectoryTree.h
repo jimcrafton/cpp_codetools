@@ -76,9 +76,9 @@ namespace CodeToolsVsix
     public:
         DirectoryTree();
 
-        void setRootPath(const std::string& path) { model_.setRootPath(path); }
-        const std::string& rootPath() const { return model_.rootPath(); }
-        void refresh() { model_.refresh(); }
+        void setRootPath(const std::string& path) { model_->setRootPath(path); }
+        const std::string& rootPath() const { return model_->rootPath(); }
+        void refresh() { model_->refresh(); }
 
         // Fired when the user double-clicks a file row (never a directory - double-clicking a
         // directory just expands/collapses it, TreeView's own default) - carries the real
@@ -95,7 +95,7 @@ namespace CodeToolsVsix
         newui::SyncReturn handleTreeDblClick(newui::View& sender, const newui::Point& pt,
             std::uint32_t btnMask, std::uint32_t keyMask);
 
-        DirectoryTreeModel model_;
+        DirectoryTreeModel* model_ = nullptr;   // owned by treeView_'s controller
         newui::TreeView* treeView_ = nullptr;
     };
 }

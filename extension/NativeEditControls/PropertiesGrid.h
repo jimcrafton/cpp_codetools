@@ -52,7 +52,7 @@ namespace CodeToolsVsix
         // path from a previous object would otherwise silently resolve
         // against completely different data at that same index).
         void setSelection(newui::SubView* selected);
-        newui::SubView* selected() const { return model_.selected(); }
+        newui::SubView* selected() const { return model_->selected(); }
 
         // Narrow the rows to properties whose name contains text, and/or order them A-Z - see
         // PropertiesModel::setFilter()/setAlphabetical(). Either one changes which row is which, so
@@ -67,10 +67,15 @@ namespace CodeToolsVsix
         // nullptr-means-direct-commit default as PropertyEditor itself.
         void setUndoStack(newui::UndoStack* undoStack) { undoStack_ = undoStack; }
 
+        // Selects the row reached by following propertyNames down from the selection (expanding
+        // groups on the way, scrolling it into view), then opens its editor: the "..." dialog if it
+        // has one, else the live editor. Stops at the deepest row found; false if not even the first.
+        bool editProperty(const std::vector<std::string>& propertyNames);
+
         // Exposed for testability - same convention Toolbox::treeView()
         // already uses.
         newui::TreeView* treeView() const { return treeView_; }
-        PropertiesModel& model() { return model_; }
+        PropertiesModel& model() { return *model_; }
 
         // PropertiesModel::Kind::ParentPicker's own live editor - not a PropertyEditor at all (see
         // that Kind's own comment for why parent()/setParent() can't be a real registered
@@ -91,17 +96,6 @@ namespace CodeToolsVsix
         void setParentChangeRequestedHandler(ParentChangeRequestedHandler handler) { parentChangeRequestedHandler_ = std::move(handler); }
 
     private:
-        // Minimal newui::ListModel over a plain string list - mirrors
-        // PropertyRow::StringListModel exactly (same reasoning: local to
-        // one class, not exported).
-        class StringListModel : public newui::ListModel
-        {
-        public:
-            std::vector<std::string> rows;
-            std::any value(const std::any& key) override;
-            std::size_t size() const override { return rows.size(); }
-        };
-
         newui::SyncReturn handleSelectionChanged(newui::TreeView& sender);
         // Commits the typed text (rebuildLiveEditor()'s own TextField),
         // then closes the editor - a lost-focus event fires for *any*
@@ -259,19 +253,18 @@ namespace CodeToolsVsix
         // dismiss()'s own doc comment) - never called directly.
         newui::SyncReturn handleTypePickerDismissed(newui::PopupTool& sender);
 
-        PropertiesModel model_;
+        PropertiesModel* model_ = nullptr;   // owned by treeView_'s controller
         newui::TreeView* treeView_ = nullptr;
         newui::UndoStack* undoStack_ = nullptr;
         bool draggingDivider_ = false;
 
         std::unique_ptr<PropertyEditor> liveEditor_;
         newui::SubView* liveEditorView_ = nullptr;
-        StringListModel dropdownModel_;
 
         ParentCandidatesProvider parentCandidatesProvider_;
         ParentChangeRequestedHandler parentChangeRequestedHandler_;
-        // Parallel to dropdownModel_.rows (same index) while liveEditorView_ is a ParentPicker's
-        // own DropDownList - dropdownModel_ itself only ever holds plain display strings
+        // Parallel to the rows of the model (same index) while liveEditorView_ is a ParentPicker's
+        // own DropDownList - that model itself only ever holds plain display strings
         // (newui::ListModel's own generic contract), so this is where the real newui::SubView*
         // each row actually refers to lives. Cleared by destroyLiveEditor() same as every other
         // live-editor-only state.

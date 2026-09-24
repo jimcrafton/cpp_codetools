@@ -77,8 +77,9 @@ TEST(ToolboxItem, PaintACategoryHeaderRowDoesNotCrash) {
 
 TEST(ToolboxItem, PaintARealIconBearingEntryRowDoesNotCrash) {
     CodeToolsVsix::ToolboxController controller;
-    CodeToolsVsix::ToolboxModel model;
-    controller.setModel(&model);
+    auto modelOwner = std::make_unique<CodeToolsVsix::ToolboxModel>();
+    CodeToolsVsix::ToolboxModel& model = *modelOwner;
+    controller.setModel(std::move(modelOwner));
     auto* item = static_cast<CodeToolsVsix::ToolboxItem*>(controller.createItem({1, 0}));
     ASSERT_NE(item, nullptr);
 

@@ -300,7 +300,9 @@ namespace CodeToolsVsix
         auto controller = std::make_unique<DocumentOutlineController>();
         outlineController_ = controller.get();
         treeView_->setController(std::move(controller));
-        treeView_->setModel(&model_);
+        auto model = std::make_unique<DocumentOutlineModel>();
+        model_ = model.get();
+        treeView_->setModel(std::move(model));
         treeView_->onSelectionChanged.add(this, &DocumentOutline::handleTreeSelectionChanged);
 
         // A second, independent set of listeners alongside TreeView's own private mouse
@@ -320,7 +322,7 @@ namespace CodeToolsVsix
 
     void DocumentOutline::setViewDesignerModel(ViewDesignerModel* model)
     {
-        model_.setSource(model);
+        model_->setSource(model);
         // Root's own direct children start expanded - matches
         // Main.dc.html's own outline (fileMenu/textControl_/
         // outlineControl_ visible with no click needed); deeper nesting
@@ -331,20 +333,20 @@ namespace CodeToolsVsix
 
     void DocumentOutline::refresh()
     {
-        if (model_.source() != nullptr) {
-            model_.source()->refresh();
+        if (model_->source() != nullptr) {
+            model_->source()->refresh();
         }
     }
 
     void DocumentOutline::setSelection(const std::vector<newui::SubView*>& views)
     {
-        if (model_.source() == nullptr) {
+        if (model_->source() == nullptr) {
             return;
         }
 
         std::set<std::vector<std::size_t>> targetPaths;
         for (newui::SubView* view : views) {
-            if (auto path = model_.source()->pathFor(view)) {
+            if (auto path = model_->source()->pathFor(view)) {
                 targetPaths.insert(*path);
             }
         }
@@ -396,11 +398,11 @@ namespace CodeToolsVsix
     {
         draggedView_ = nullptr;
         dragStarted_ = false;
-        if (model_.source() == nullptr) {
+        if (model_->source() == nullptr) {
             return newui::SyncReturn::Ignored;
         }
         if (auto path = rowPathAt(pt)) {
-            draggedView_ = model_.source()->viewAt(*path);
+            draggedView_ = model_->source()->viewAt(*path);
             dragStartPt_ = pt;
         }
         // Never claims the event - TreeView's own row-selection handling (a separate listener
@@ -410,14 +412,14 @@ namespace CodeToolsVsix
 
     std::optional<DocumentOutlineDropTarget> DocumentOutline::dropTargetAt(const newui::Point& localPt) const
     {
-        if (draggedView_ == nullptr || model_.source() == nullptr) {
+        if (draggedView_ == nullptr || model_->source() == nullptr) {
             return std::nullopt;
         }
         auto path = rowPathAt(localPt);
         if (!path) {
             return std::nullopt;
         }
-        newui::SubView* hit = model_.source()->viewAt(*path);
+        newui::SubView* hit = model_->source()->viewAt(*path);
         if (hit == nullptr) {
             return std::nullopt;
         }
@@ -506,10 +508,10 @@ namespace CodeToolsVsix
         treeView_->cursor().setCursorKind(newui::CursorKind::Arrow);
         treeView_->redraw();
 
-        if (!started || dragged == nullptr || !target.has_value() || model_.source() == nullptr) {
+        if (!started || dragged == nullptr || !target.has_value() || model_->source() == nullptr) {
             return newui::SyncReturn::Ignored;
         }
-        newui::SubView* referenceRow = model_.source()->viewAt(target->path);
+        newui::SubView* referenceRow = model_->source()->viewAt(target->path);
         if (referenceRow == nullptr) {
             return newui::SyncReturn::Ignored;
         }
@@ -519,13 +521,13 @@ namespace CodeToolsVsix
 
     newui::SyncReturn DocumentOutline::handleTreeSelectionChanged(newui::TreeView& sender)
     {
-        if (applyingExternalSelection_ || model_.source() == nullptr) {
+        if (applyingExternalSelection_ || model_->source() == nullptr) {
             return newui::SyncReturn::Ignored;
         }
 
         std::vector<newui::SubView*> views;
         for (const auto& path : sender.selectedPaths()) {
-            if (newui::SubView* view = model_.source()->viewAt(path)) {
+            if (newui::SubView* view = model_->source()->viewAt(path)) {
                 views.push_back(view);
             }
         }

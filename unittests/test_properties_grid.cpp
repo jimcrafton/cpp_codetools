@@ -686,3 +686,57 @@ TEST_F(PropertiesGridParentPickerTest, PickingADifferentEntryFiresTheHandlerNotA
     // button_'s own real parent() is untouched by picking a dropdown entry.
     EXPECT_EQ(button_.parent(), &container_);
 }
+
+TEST_F(PropertiesGridTest, EditPropertySelectsTheNamedRowAndOpensItsLiveEditor)
+{
+    grid_->setSelection(&button_);
+    const std::size_t textIndex = indexOfChildNamed({}, "text");
+    ASSERT_LT(textIndex, grid_->model().childCount({}));
+
+    EXPECT_TRUE(grid_->editProperty({ "text" }));
+
+    EXPECT_EQ(grid_->treeView()->selectedPath(), std::optional<std::vector<std::size_t>>({ textIndex }));
+    ASSERT_EQ(grid_->treeView()->childViews().size(), 1u);
+    EXPECT_NE(dynamic_cast<newui::TextField*>(grid_->treeView()->childViews()[0]), nullptr);
+}
+
+TEST_F(PropertiesGridTest, EditPropertyExpandsGroupsOnTheWayToANestedRow)
+{
+    auto* list = new newui::ListView();
+    auto model = std::make_unique<newui::StringListModel>();
+    model->items() = { "a", "b" };
+    list->setModel(std::move(model));
+    grid_->setSelection(list);
+
+    EXPECT_TRUE(grid_->editProperty({ "model", "items" }));
+
+    const std::size_t modelIndex = indexOfChildNamed({}, "model");
+    ASSERT_LT(modelIndex, grid_->model().childCount({}));
+    const std::size_t itemsIndex = indexOfChildNamed({ modelIndex }, "items");
+    EXPECT_TRUE(grid_->treeView()->controller().isExpanded({ modelIndex }));
+    EXPECT_EQ(grid_->treeView()->selectedPath(), std::optional<std::vector<std::size_t>>({ modelIndex, itemsIndex }));
+    ASSERT_EQ(grid_->treeView()->childViews().size(), 1u);
+    EXPECT_NE(dynamic_cast<newui::TextField*>(grid_->treeView()->childViews()[0]), nullptr);
+
+    grid_->setSelection(nullptr);
+    list->destroy();
+    delete list;
+}
+
+TEST_F(PropertiesGridTest, EditPropertyStopsAtTheDeepestRowFound)
+{
+    grid_->setSelection(&button_);
+    const std::size_t textIndex = indexOfChildNamed({}, "text");
+
+    EXPECT_TRUE(grid_->editProperty({ "text", "noSuchChild" }));
+    EXPECT_EQ(grid_->treeView()->selectedPath(), std::optional<std::vector<std::size_t>>({ textIndex }));
+}
+
+TEST_F(PropertiesGridTest, EditPropertyWithAnUnknownNameDoesNothing)
+{
+    grid_->setSelection(&button_);
+
+    EXPECT_FALSE(grid_->editProperty({ "noSuchProperty" }));
+    EXPECT_FALSE(grid_->treeView()->selectedPath().has_value());
+    EXPECT_TRUE(grid_->treeView()->childViews().empty());
+}

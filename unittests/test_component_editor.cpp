@@ -2,6 +2,7 @@
 
 #include <newui/subview.h>
 #include <newui/controls.h>
+#include <newui/splitter.h>
 #include <newui/undostack.h>
 
 #include <gtest/gtest.h>
@@ -253,4 +254,582 @@ TEST(TabControlEditorTest, RemoveLastTabOnAnEmptyControlDoesNothing)
 
     editor->executeVerb(1);
     EXPECT_FALSE(undo.canUndo());
+}
+
+// ---------------------------------------------------------------------------
+// ToolbarEditor
+// ---------------------------------------------------------------------------
+
+namespace
+{
+    std::unique_ptr<CodeToolsVsix::ComponentEditor> toolbarEditorFor(newui::Toolbar* toolbar)
+    {
+        CodeToolsVsix::ComponentEditorRegistry registry;
+        registry.registerBuiltinEditors();
+        return registry.createEditor(classinfo(typeid(newui::Toolbar)), toolbar);
+    }
+
+    struct ToolbarFixture
+    {
+        ToolbarFixture() : toolbar(new newui::Toolbar()) {}
+        ~ToolbarFixture()
+        {
+            toolbar->destroy();
+            delete toolbar;
+        }
+        newui::Toolbar* toolbar;
+    };
+}
+
+TEST(ToolbarEditorTest, RegisteredForToolbarWithRemoveOnlyOnceThereIsAnItem)
+{
+    ToolbarFixture f;
+    auto editor = toolbarEditorFor(f.toolbar);
+    ASSERT_NE(editor, nullptr);
+    EXPECT_NE(dynamic_cast<CodeToolsVsix::ToolbarEditor*>(editor.get()), nullptr);
+
+    EXPECT_EQ(editor->verbCount(), 2u);
+    EXPECT_EQ(editor->verb(0), "Add Button");
+    EXPECT_EQ(editor->verb(1), "Add Separator");
+
+    editor->executeVerb(0);
+    EXPECT_EQ(editor->verbCount(), 3u);
+    EXPECT_EQ(editor->verb(2), "Remove Last Item");
+}
+
+TEST(ToolbarEditorTest, AddsNumberedSizedButtonsAndSeparators)
+{
+    ToolbarFixture f;
+    auto editor = toolbarEditorFor(f.toolbar);
+
+    editor->executeVerb(0);
+    editor->executeVerb(1);
+    editor->executeVerb(0);
+
+    ASSERT_EQ(f.toolbar->childViews().size(), 3u);
+    auto* first = dynamic_cast<newui::ToolbarButton*>(f.toolbar->childViews()[0]);
+    auto* sep = dynamic_cast<newui::ToolbarSeparator*>(f.toolbar->childViews()[1]);
+    auto* second = dynamic_cast<newui::ToolbarButton*>(f.toolbar->childViews()[2]);
+    ASSERT_NE(first, nullptr);
+    ASSERT_NE(sep, nullptr);
+    ASSERT_NE(second, nullptr);
+    EXPECT_EQ(first->name(), "Button 1");
+    EXPECT_EQ(second->name(), "Button 2");
+    EXPECT_EQ(sep->name(), "Separator 1");
+    EXPECT_GT(first->desiredSize().width, 0.0f);
+    EXPECT_GT(first->desiredSize().height, 0.0f);
+    EXPECT_TRUE(sep->isHorizontal());
+}
+
+TEST(ToolbarEditorTest, VerticalToolbarGetsVerticalSeparator)
+{
+    ToolbarFixture f;
+    f.toolbar->setOrientation(newui::Orientation::Vertical);
+    auto editor = toolbarEditorFor(f.toolbar);
+
+    editor->executeVerb(1);
+
+    auto* sep = dynamic_cast<newui::ToolbarSeparator*>(f.toolbar->childViews()[0]);
+    ASSERT_NE(sep, nullptr);
+    EXPECT_FALSE(sep->isHorizontal());
+}
+
+TEST(ToolbarEditorTest, AddButtonIsUndoableAndRedoRestoresTheSameButton)
+{
+    ToolbarFixture f;
+    newui::UndoStack undo;
+    auto editor = toolbarEditorFor(f.toolbar);
+    editor->setUndoStack(&undo);
+    int syncs = 0;
+    editor->setPostExecuteSync([&syncs] { ++syncs; });
+
+    editor->executeVerb(0);
+    ASSERT_EQ(f.toolbar->childViews().size(), 1u);
+    newui::SubView* button = f.toolbar->childViews()[0];
+    EXPECT_EQ(undo.undoDescription(), "Add Button");
+    EXPECT_EQ(syncs, 1);
+
+    undo.undo();
+    EXPECT_TRUE(f.toolbar->childViews().empty());
+    EXPECT_EQ(syncs, 2);
+
+    undo.redo();
+    ASSERT_EQ(f.toolbar->childViews().size(), 1u);
+    EXPECT_EQ(f.toolbar->childViews()[0], button);
+}
+
+TEST(ToolbarEditorTest, RemoveLastItemIsUndoableAndKeepsOrder)
+{
+    ToolbarFixture f;
+    newui::UndoStack undo;
+    auto editor = toolbarEditorFor(f.toolbar);
+    editor->executeVerb(0);
+    editor->executeVerb(1);
+    newui::SubView* last = f.toolbar->childViews()[1];
+
+    editor->setUndoStack(&undo);
+    editor->executeVerb(2);
+    EXPECT_EQ(undo.undoDescription(), "Remove Toolbar Item");
+    ASSERT_EQ(f.toolbar->childViews().size(), 1u);
+
+    undo.undo();
+    ASSERT_EQ(f.toolbar->childViews().size(), 2u);
+    EXPECT_EQ(f.toolbar->childViews()[1], last);
+
+    undo.redo();
+    EXPECT_EQ(f.toolbar->childViews().size(), 1u);
+    last->destroy();  // detached again by redo - nothing owns it now
+    delete last;
+}
+
+// ---------------------------------------------------------------------------
+// SplitterEditor
+// ---------------------------------------------------------------------------
+
+namespace
+{
+    std::unique_ptr<CodeToolsVsix::ComponentEditor> splitterEditorFor(newui::Splitter* splitter)
+    {
+        CodeToolsVsix::ComponentEditorRegistry registry;
+        registry.registerBuiltinEditors();
+        return registry.createEditor(classinfo(typeid(newui::Splitter)), splitter);
+    }
+
+    struct SplitterFixture
+    {
+        SplitterFixture() : splitter(new newui::Splitter())
+        {
+            splitter->setBounds(newui::Rect(0, 0, 400, 200));
+        }
+        ~SplitterFixture()
+        {
+            splitter->destroy();
+            delete splitter;
+        }
+        newui::Splitter* splitter;
+    };
+}
+
+TEST(SplitterEditorTest, VerbsFollowThePaneCount)
+{
+    SplitterFixture f;
+    auto editor = splitterEditorFor(f.splitter);
+    ASSERT_NE(editor, nullptr);
+    EXPECT_NE(dynamic_cast<CodeToolsVsix::SplitterEditor*>(editor.get()), nullptr);
+
+    ASSERT_EQ(editor->verbCount(), 1u);
+    EXPECT_EQ(editor->verb(0), "Add Pane");
+
+    editor->executeVerb(0);
+    ASSERT_EQ(editor->verbCount(), 2u);
+    EXPECT_EQ(editor->verb(0), "Add Pane");
+    EXPECT_EQ(editor->verb(1), "Remove Last Pane");
+
+    editor->executeVerb(0);
+    ASSERT_EQ(editor->verbCount(), 2u);
+    EXPECT_EQ(editor->verb(0), "Remove Last Pane");
+    EXPECT_EQ(editor->verb(1), "Swap Panes");
+}
+
+TEST(SplitterEditorTest, AddPaneCreatesTwoDroppableArrangedPanes)
+{
+    SplitterFixture f;
+    auto editor = splitterEditorFor(f.splitter);
+
+    editor->executeVerb(0);
+    editor->executeVerb(0);
+
+    ASSERT_EQ(f.splitter->childViews().size(), 2u);
+    newui::SubView* a = f.splitter->childViews()[0];
+    newui::SubView* b = f.splitter->childViews()[1];
+    EXPECT_EQ(a->name(), "Pane 1");
+    EXPECT_EQ(b->name(), "Pane 2");
+    EXPECT_NE(a->layout(), nullptr);
+    EXPECT_NE(b->layout(), nullptr);
+    EXPECT_GT(a->bounds().size().width, 0.0f);
+    EXPECT_GT(b->bounds().size().width, 0.0f);
+    EXPECT_LT(a->bounds().left(), b->bounds().left());
+}
+
+TEST(SplitterEditorTest, AddPaneIsUndoable)
+{
+    SplitterFixture f;
+    newui::UndoStack undo;
+    auto editor = splitterEditorFor(f.splitter);
+    editor->setUndoStack(&undo);
+
+    editor->executeVerb(0);
+    ASSERT_EQ(f.splitter->childViews().size(), 1u);
+    newui::SubView* pane = f.splitter->childViews()[0];
+    EXPECT_EQ(undo.undoDescription(), "Add Pane");
+
+    undo.undo();
+    EXPECT_TRUE(f.splitter->childViews().empty());
+
+    undo.redo();
+    ASSERT_EQ(f.splitter->childViews().size(), 1u);
+    EXPECT_EQ(f.splitter->childViews()[0], pane);
+}
+
+TEST(SplitterEditorTest, RemoveLastPaneIsUndoable)
+{
+    SplitterFixture f;
+    newui::UndoStack undo;
+    auto editor = splitterEditorFor(f.splitter);
+    editor->executeVerb(0);
+    editor->executeVerb(0);
+    newui::SubView* second = f.splitter->childViews()[1];
+
+    editor->setUndoStack(&undo);
+    editor->executeVerb(0);   // with two panes the verbs are Remove Last Pane, Swap Panes
+    EXPECT_EQ(undo.undoDescription(), "Remove Pane");
+    ASSERT_EQ(f.splitter->childViews().size(), 1u);
+
+    undo.undo();
+    ASSERT_EQ(f.splitter->childViews().size(), 2u);
+    EXPECT_EQ(f.splitter->childViews()[1], second);
+
+    undo.redo();
+    EXPECT_EQ(f.splitter->childViews().size(), 1u);
+    second->destroy();  // detached again by redo - nothing owns it now
+    delete second;
+}
+
+TEST(SplitterEditorTest, SwapPanesReordersRearrangesAndUndoesToTheOriginal)
+{
+    SplitterFixture f;
+    newui::UndoStack undo;
+    auto editor = splitterEditorFor(f.splitter);
+    editor->executeVerb(0);
+    editor->executeVerb(0);
+    newui::SubView* a = f.splitter->childViews()[0];
+    newui::SubView* b = f.splitter->childViews()[1];
+    const float aLeftBefore = a->bounds().left();
+    const float bLeftBefore = b->bounds().left();
+
+    editor->setUndoStack(&undo);
+    ASSERT_EQ(editor->verb(1), "Swap Panes");
+    editor->executeVerb(1);
+    EXPECT_EQ(undo.undoDescription(), "Swap Panes");
+    EXPECT_EQ(f.splitter->childViews()[0], b);
+    EXPECT_EQ(f.splitter->childViews()[1], a);
+    EXPECT_EQ(b->bounds().left(), aLeftBefore);   // panes actually re-laid-out, not just reordered
+    EXPECT_EQ(a->bounds().left(), bLeftBefore);
+
+    undo.undo();
+    EXPECT_EQ(f.splitter->childViews()[0], a);
+    EXPECT_EQ(f.splitter->childViews()[1], b);
+    EXPECT_EQ(a->bounds().left(), aLeftBefore);
+}
+
+// ---------------------------------------------------------------------------
+// ListModelEditor
+// ---------------------------------------------------------------------------
+
+namespace
+{
+    std::unique_ptr<CodeToolsVsix::ComponentEditor> listEditorFor(newui::View* view, const std::type_info& type)
+    {
+        CodeToolsVsix::ComponentEditorRegistry registry;
+        registry.registerBuiltinEditors();
+        return registry.createEditor(classinfo(type), view);
+    }
+
+    // A model the editor must leave alone - not a StringListModel.
+    class OtherListModel : public newui::ListModel
+    {
+    public:
+        std::size_t size() const override { return 2; }
+    };
+
+    struct ListFixture
+    {
+        ListFixture() : list(new newui::ListView()) {}
+        ~ListFixture()
+        {
+            list->destroy();
+            delete list;
+        }
+        newui::ListView* list;
+    };
+}
+
+TEST(ListModelEditorTest, RegisteredForListViewAndDropDownList)
+{
+    ListFixture f;
+    auto listEditor = listEditorFor(f.list, typeid(newui::ListView));
+    EXPECT_NE(dynamic_cast<CodeToolsVsix::ListModelEditor*>(listEditor.get()), nullptr);
+
+    auto* dropDown = new newui::DropDownList();
+    auto dropDownEditor = listEditorFor(dropDown, typeid(newui::DropDownList));
+    EXPECT_NE(dynamic_cast<CodeToolsVsix::ListModelEditor*>(dropDownEditor.get()), nullptr);
+    dropDown->destroy();
+    delete dropDown;
+}
+
+TEST(ListModelEditorTest, AddItemOnAViewWithNoModelAttachesAStringListModelAndUndoRemovesIt)
+{
+    ListFixture f;
+    newui::UndoStack undo;
+    auto editor = listEditorFor(f.list, typeid(newui::ListView));
+    editor->setUndoStack(&undo);
+    int syncs = 0;
+    editor->setPostExecuteSync([&syncs] { ++syncs; });
+
+    ASSERT_EQ(editor->verbCount(), 1u);
+    EXPECT_EQ(editor->verb(0), "Add Item");
+    ASSERT_EQ(f.list->model(), nullptr);
+
+    editor->executeVerb(0);
+    auto* model = dynamic_cast<newui::StringListModel*>(f.list->model());
+    ASSERT_NE(model, nullptr);
+    EXPECT_EQ(model->items(), (std::vector<std::string>{ "Item 1" }));
+    EXPECT_EQ(f.list->controller().itemCount(), 1u);
+    EXPECT_EQ(undo.undoDescription(), "Add Item");
+    EXPECT_EQ(syncs, 1);
+
+    undo.undo();
+    EXPECT_EQ(f.list->model(), nullptr);   // the model it created goes away with the item
+    EXPECT_EQ(syncs, 2);
+
+    undo.redo();
+    model = dynamic_cast<newui::StringListModel*>(f.list->model());
+    ASSERT_NE(model, nullptr);
+    EXPECT_EQ(model->items(), (std::vector<std::string>{ "Item 1" }));
+}
+
+TEST(ListModelEditorTest, ItemsAreNumberedRemovedFromTheEndAndBothAreUndoable)
+{
+    ListFixture f;
+    newui::UndoStack undo;
+    auto model = std::make_unique<newui::StringListModel>();
+    model->items() = { "a", "b" };
+    newui::StringListModel* raw = model.get();
+    f.list->setModel(std::move(model));
+
+    auto editor = listEditorFor(f.list, typeid(newui::ListView));
+    editor->setUndoStack(&undo);
+    ASSERT_EQ(editor->verbCount(), 2u);
+    EXPECT_EQ(editor->verb(1), "Remove Last Item");
+
+    editor->executeVerb(0);
+    EXPECT_EQ(raw->items(), (std::vector<std::string>{ "a", "b", "Item 3" }));
+
+    editor->executeVerb(1);
+    EXPECT_EQ(raw->items(), (std::vector<std::string>{ "a", "b" }));
+    EXPECT_EQ(undo.undoDescription(), "Remove Item");
+
+    undo.undo();
+    EXPECT_EQ(raw->items(), (std::vector<std::string>{ "a", "b", "Item 3" }));
+    undo.undo();
+    EXPECT_EQ(raw->items(), (std::vector<std::string>{ "a", "b" }));
+    EXPECT_EQ(f.list->model(), raw);   // a model that was already there is never replaced
+}
+
+TEST(ListModelEditorTest, AViewShowingSomeOtherKindOfModelGetsNoVerbs)
+{
+    ListFixture f;
+    f.list->setModel(std::make_unique<OtherListModel>());
+
+    auto editor = listEditorFor(f.list, typeid(newui::ListView));
+    EXPECT_EQ(editor->verbCount(), 0u);
+    editor->executeVerb(0);   // must not touch the model
+    EXPECT_EQ(f.list->controller().itemCount(), 2u);
+}
+
+TEST(ListModelEditorTest, WorksOnADropDownListToo)
+{
+    auto* dropDown = new newui::DropDownList();
+    auto editor = listEditorFor(dropDown, typeid(newui::DropDownList));
+
+    editor->executeVerb(0);
+    editor->executeVerb(0);
+
+    auto* model = dynamic_cast<newui::StringListModel*>(dropDown->model());
+    ASSERT_NE(model, nullptr);
+    EXPECT_EQ(model->items(), (std::vector<std::string>{ "Item 1", "Item 2" }));
+    dropDown->destroy();
+    delete dropDown;
+}
+
+// ---------------------------------------------------------------------------
+// TreeModelEditor
+// ---------------------------------------------------------------------------
+
+namespace
+{
+    // A model the editor must leave alone - not a StringTreeModel.
+    class OtherTreeModel : public newui::TreeModel
+    {
+    public:
+        std::size_t childCount(const std::vector<std::size_t>& path) const override {
+            return path.empty() ? 2 : 0;
+        }
+    };
+
+    struct TreeFixture
+    {
+        TreeFixture() : tree(new newui::TreeView()) {}
+        ~TreeFixture()
+        {
+            tree->destroy();
+            delete tree;
+        }
+        newui::TreeView* tree;
+    };
+}
+
+TEST(TreeModelEditorTest, RegisteredForTreeView)
+{
+    TreeFixture f;
+    auto editor = listEditorFor(f.tree, typeid(newui::TreeView));
+    EXPECT_NE(dynamic_cast<CodeToolsVsix::TreeModelEditor*>(editor.get()), nullptr);
+}
+
+TEST(TreeModelEditorTest, AddItemOnAViewWithNoModelAttachesAStringTreeModelAndUndoRemovesIt)
+{
+    TreeFixture f;
+    newui::UndoStack undo;
+    auto editor = listEditorFor(f.tree, typeid(newui::TreeView));
+    editor->setUndoStack(&undo);
+    int syncs = 0;
+    editor->setPostExecuteSync([&syncs] { ++syncs; });
+
+    ASSERT_EQ(editor->verbCount(), 1u);
+    EXPECT_EQ(editor->verb(0), "Add Item");
+    ASSERT_EQ(f.tree->model(), nullptr);
+
+    editor->executeVerb(0);
+    auto* model = dynamic_cast<newui::StringTreeModel*>(f.tree->model());
+    ASSERT_NE(model, nullptr);
+    ASSERT_EQ(model->rows().size(), 1u);
+    EXPECT_EQ(model->rows()[0].depth, 0u);
+    EXPECT_EQ(model->rows()[0].text, "Item 1");
+    EXPECT_EQ(f.tree->controller().visibleCount(), 1u);
+    EXPECT_EQ(undo.undoDescription(), "Add Item");
+    EXPECT_EQ(syncs, 1);
+
+    undo.undo();
+    EXPECT_EQ(f.tree->model(), nullptr);   // the model it created goes away with the item
+    EXPECT_EQ(syncs, 2);
+
+    undo.redo();
+    model = dynamic_cast<newui::StringTreeModel*>(f.tree->model());
+    ASSERT_NE(model, nullptr);
+    EXPECT_EQ(model->rows().size(), 1u);
+}
+
+TEST(TreeModelEditorTest, ItemsAreNumberedRemovedFromTheEndPreservingDepthAndBothAreUndoable)
+{
+    TreeFixture f;
+    newui::UndoStack undo;
+    auto model = std::make_unique<newui::StringTreeModel>();
+    model->rows() = { { 0, "a" }, { 1, "b" } };   // "b" nests under "a"
+    newui::StringTreeModel* raw = model.get();
+    f.tree->setModel(std::move(model));
+
+    auto editor = listEditorFor(f.tree, typeid(newui::TreeView));
+    editor->setUndoStack(&undo);
+    ASSERT_EQ(editor->verbCount(), 2u);
+    EXPECT_EQ(editor->verb(1), "Remove Last Item");
+
+    editor->executeVerb(0);   // Add Item always appends a root row, never a child
+    ASSERT_EQ(raw->rows().size(), 3u);
+    EXPECT_EQ(raw->rows()[2].depth, 0u);
+    EXPECT_EQ(raw->rows()[2].text, "Item 3");
+
+    editor->executeVerb(1);
+    ASSERT_EQ(raw->rows().size(), 2u);
+    EXPECT_EQ(undo.undoDescription(), "Remove Item");
+
+    // Removing "b" (depth 1) and undoing must restore it exactly, nesting included.
+    editor->executeVerb(1);
+    ASSERT_EQ(raw->rows().size(), 1u);
+    undo.undo();
+    ASSERT_EQ(raw->rows().size(), 2u);
+    EXPECT_EQ(raw->rows()[1].depth, 1u);
+    EXPECT_EQ(raw->rows()[1].text, "b");
+    EXPECT_EQ(raw->childCount({0}), 1u);
+
+    undo.undo();
+    ASSERT_EQ(raw->rows().size(), 3u);
+    EXPECT_EQ(f.tree->model(), raw);   // a model that was already there is never replaced
+}
+
+TEST(TreeModelEditorTest, AViewShowingSomeOtherKindOfModelGetsNoVerbs)
+{
+    TreeFixture f;
+    f.tree->setModel(std::make_unique<OtherTreeModel>());
+
+    auto editor = listEditorFor(f.tree, typeid(newui::TreeView));
+    EXPECT_EQ(editor->verbCount(), 0u);
+    editor->executeVerb(0);   // must not touch the model
+    EXPECT_EQ(f.tree->controller().visibleCount(), 2u);
+}
+
+// ---------------------------------------------------------------------------
+// Double-click default property (edit())
+// ---------------------------------------------------------------------------
+
+namespace
+{
+    std::vector<std::string> defaultPathFor(const std::type_info& type, newui::View* view)
+    {
+        CodeToolsVsix::ComponentEditorRegistry registry;
+        registry.registerBuiltinEditors();
+        auto editor = registry.createEditor(classinfo(type), view);
+        return editor != nullptr ? editor->defaultPropertyPath() : std::vector<std::string>();
+    }
+}
+
+TEST(ComponentEditorEditTest, BuiltinsNameTheirDefaultProperty)
+{
+    newui::Button button;
+    newui::Label label;
+    newui::Image image;
+    EXPECT_EQ(defaultPathFor(typeid(newui::Button), &button), std::vector<std::string>({ "text" }));
+    EXPECT_EQ(defaultPathFor(typeid(newui::Label), &label), std::vector<std::string>({ "text" }));
+    EXPECT_EQ(defaultPathFor(typeid(newui::Image), &image), std::vector<std::string>({ "imagePath" }));
+
+    ListFixture list;
+    EXPECT_EQ(defaultPathFor(typeid(newui::ListView), list.list), std::vector<std::string>({ "model", "items" }));
+}
+
+TEST(ComponentEditorEditTest, VerblessDefaultPropertyEditorsStayOutOfTheContextMenu)
+{
+    newui::Button button;
+    CodeToolsVsix::ComponentEditorRegistry registry;
+    registry.registerBuiltinEditors();
+    auto editor = registry.createEditor(classinfo(typeid(newui::Button)), &button);
+    ASSERT_NE(editor, nullptr);
+    EXPECT_EQ(editor->verbCount(), 0u);
+}
+
+TEST(ComponentEditorEditTest, EditHandsTheViewAndPathToTheHandler)
+{
+    newui::Button button;
+    CodeToolsVsix::DefaultPropertyEditor editor(&button, { "text" });
+    newui::View* seenView = nullptr;
+    std::vector<std::string> seenPath;
+    editor.setEditPropertyHandler([&](newui::View* view, const std::vector<std::string>& path) {
+        seenView = view;
+        seenPath = path;
+    });
+
+    editor.edit();
+
+    EXPECT_EQ(seenView, &button);
+    EXPECT_EQ(seenPath, std::vector<std::string>({ "text" }));
+}
+
+TEST(ComponentEditorEditTest, EditWithoutAPathNeverCallsTheHandler)
+{
+    newui::SubView view;
+    CodeToolsVsix::ComponentEditor editor(&view);
+    bool called = false;
+    editor.setEditPropertyHandler([&](newui::View*, const std::vector<std::string>&) { called = true; });
+
+    editor.edit();
+
+    EXPECT_FALSE(called);
 }
