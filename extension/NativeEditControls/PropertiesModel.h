@@ -117,8 +117,9 @@ namespace CodeToolsVsix
         // expand/collapse stays exactly as the TreeController already
         // tracks it, same "sticky across selection" convention
         // PropertiesPanel::expandedGroups_ used.
-        void setSelection(newui::SubView* selected);
-        newui::SubView* selected() const { return selected_; }
+        // Any reflected Component - a View, or a non-View part of one such as a MenuItem.
+        void setSelection(newui::Component* selected);
+        newui::Component* selected() const { return selected_; }
 
         // How the rows are presented - view settings that, unlike the selection, persist across
         // setSelection() so the grid keeps its filter and order as different controls are picked.
@@ -187,7 +188,7 @@ namespace CodeToolsVsix
         }
 
         Node childOfUnflagged(const Node& container, std::size_t index) const;
-        newui::SubView* selected_ = nullptr;
+        newui::Component* selected_ = nullptr;
         const newui::reflection::Class* rootClass_ = nullptr;
     };
 }

@@ -3,6 +3,7 @@
 
 #include <newui/controls.h>
 #include <newui/layout.h>
+#include <newui/menus.h>
 #include <newui/reflection.h>
 #include <newui/rootview.h>
 #include <newui/undostack.h>
@@ -739,4 +740,47 @@ TEST_F(PropertiesGridTest, EditPropertyWithAnUnknownNameDoesNothing)
     EXPECT_FALSE(grid_->editProperty({ "noSuchProperty" }));
     EXPECT_FALSE(grid_->treeView()->selectedPath().has_value());
     EXPECT_TRUE(grid_->treeView()->childViews().empty());
+}
+
+TEST_F(PropertiesGridTest, AMenuItemSelectionListsItsEditableProperties)
+{
+    newui::MenuItem item("File");
+    grid_->setSelection(&item);
+
+    EXPECT_EQ(grid_->selected(), &item);
+    for (const char* name : { "text", "shortcutText", "checked", "separator", "name" }) {
+        const std::size_t index = indexOfChildNamed({}, name);
+        ASSERT_LT(index, grid_->model().childCount({})) << name;
+        EXPECT_EQ(grid_->model().nodeAt({ index }).kind, PropertiesModel::Kind::PropertyLeaf) << name;
+    }
+    grid_->setSelection(nullptr);
+}
+
+TEST_F(PropertiesGridTest, EditPropertyOnAMenuItemOpensItsTextWithTheCurrentValue)
+{
+    newui::MenuItem item("File");
+    grid_->setSelection(&item);
+
+    EXPECT_TRUE(grid_->editProperty({ "text" }));
+
+    ASSERT_EQ(grid_->treeView()->childViews().size(), 1u);
+    auto* field = dynamic_cast<newui::TextField*>(grid_->treeView()->childViews()[0]);
+    ASSERT_NE(field, nullptr);
+    EXPECT_EQ(field->text(), L"File");
+    grid_->setSelection(nullptr);
+}
+
+TEST_F(PropertiesGridTest, AMenuItemPropertyEditorWritesThroughItsSetter)
+{
+    newui::MenuItem item("File");
+    grid_->setSelection(&item);
+    const std::size_t index = indexOfChildNamed({}, "shortcutText");
+    PropertiesModel::Node node = grid_->model().nodeAt({ index });
+    auto editor = CodeToolsVsix::PropertyEditorRegistry::instance().createEditor(node.property, node.ownerClass, node.ownerInstance);
+    ASSERT_NE(editor, nullptr);
+
+    editor->setValueFromString("Ctrl+F");
+
+    EXPECT_EQ(item.shortcutText(), "Ctrl+F");
+    grid_->setSelection(nullptr);
 }

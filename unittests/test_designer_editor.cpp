@@ -2536,3 +2536,519 @@ TEST(DesignerEditor, EditComponentOnATabControlWithNoTabsDoesNothing)
     EXPECT_EQ(editor.viewDesignerController().primary(), tabs);
     EXPECT_FALSE(editor.workspace()->propertiesPane()->treeView()->selectedPath().has_value());
 }
+
+namespace
+{
+    // A designer with a MenuBar on its surface: File (Open, Recent > a.txt, -, Exit) and Edit.
+    struct MenuDesignerFixture
+    {
+        MenuDesignerFixture() : root(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot"), editor(&root)
+        {
+            CodeToolsVsix::PropertyEditorRegistry::instance().registerBuiltinEditors();
+            root.setBounds(newui::Rect(0, 0, 1400, 700));
+            bar = new newui::MenuBar();
+            bar->setBounds(newui::Rect(10, 10, 400, 28));
+            file = new newui::MenuItem("&File");
+            open = file->addChild(std::make_unique<newui::MenuItem>("Open"));
+            recent = file->addChild(std::make_unique<newui::MenuItem>("Recent"));
+            recent->addChild(std::make_unique<newui::MenuItem>("a.txt"));
+            file->addChild(newui::MenuItem::Separator());
+            file->addChild(std::make_unique<newui::MenuItem>("Exit"));
+            bar->addMenu(file);
+            edit = new newui::MenuItem("Edit");
+            bar->addMenu(edit);
+            editor.workspace()->rootViewProxy()->addChild(bar);
+            bar->updateLayout();
+        }
+
+        CodeToolsVsix::MenuDesigner& designer() { return *editor.menuDesigner(); }
+
+        newui::RootView root;
+        CodeToolsVsix::DesignerEditor editor;
+        newui::MenuBar* bar = nullptr;
+        newui::MenuItem* file = nullptr;
+        newui::MenuItem* open = nullptr;
+        newui::MenuItem* recent = nullptr;
+        newui::MenuItem* edit = nullptr;
+    };
+}
+
+TEST(MenuDesigner, SelectingAMenuBarOpensItWithAPlaceholderAfterTheLastMenu)
+{
+    MenuDesignerFixture f;
+    f.editor.viewDesignerController().selectExclusive(f.bar);
+
+    ASSERT_TRUE(f.designer().isOpen());
+    EXPECT_EQ(f.designer().menuBar(), f.bar);
+    EXPECT_TRUE(f.designer().visibleColumns().empty());
+    ASSERT_NE(f.designer().barPlaceholder(), nullptr);
+    ASSERT_TRUE(f.designer().barPlaceholder()->isVisible());
+
+    newui::Rect lastButton = CodeToolsVsix::SelectionOverlay::boundsInRootView(f.bar->childViews().back());
+    newui::Rect placeholder = CodeToolsVsix::SelectionOverlay::boundsInRootView(f.designer().barPlaceholder());
+    EXPECT_GE(placeholder.left(), lastButton.right());
+    EXPECT_TRUE(f.designer().contains(newui::Point(placeholder.left() + 4, placeholder.top() + 4)));
+}
+
+TEST(MenuDesigner, SelectingATopLevelMenuShowsItsItemsBelowItsButtonAndInTheGrid)
+{
+    MenuDesignerFixture f;
+    f.editor.viewDesignerController().selectExclusive(f.bar);
+
+    f.designer().select(f.file);
+
+    std::vector<CodeToolsVsix::MenuColumnView*> columns = f.designer().visibleColumns();
+    ASSERT_EQ(columns.size(), 1u);
+    EXPECT_EQ(columns[0]->menu(), f.file);
+    newui::Rect fileButton = CodeToolsVsix::SelectionOverlay::boundsInRootView(f.bar->childViews()[0]);
+    newui::Rect column = CodeToolsVsix::SelectionOverlay::boundsInRootView(columns[0]);
+    EXPECT_FLOAT_EQ(column.left(), fileButton.left());
+    EXPECT_FLOAT_EQ(column.top(), CodeToolsVsix::SelectionOverlay::boundsInRootView(f.bar).bottom());
+
+    EXPECT_EQ(f.editor.workspace()->propertiesPane()->selected(), f.file);
+    EXPECT_EQ(f.editor.viewDesignerController().primary(), f.bar) << "the canvas selection stays on the bar";
+}
+
+TEST(MenuDesigner, SelectingAnItemWithASubmenuOpensItBesideItsRow)
+{
+    MenuDesignerFixture f;
+    f.editor.viewDesignerController().selectExclusive(f.bar);
+
+    f.designer().select(f.recent);
+
+    std::vector<CodeToolsVsix::MenuColumnView*> columns = f.designer().visibleColumns();
+    ASSERT_EQ(columns.size(), 2u);
+    EXPECT_EQ(columns[0]->menu(), f.file);
+    EXPECT_EQ(columns[1]->menu(), f.recent);
+    newui::Rect first = CodeToolsVsix::SelectionOverlay::boundsInRootView(columns[0]);
+    newui::Rect second = CodeToolsVsix::SelectionOverlay::boundsInRootView(columns[1]);
+    EXPECT_LT(second.left(), first.right());   // overlaps by a hair, like a native cascade
+    EXPECT_FLOAT_EQ(second.top(), first.top() + columns[0]->rowTop(1) - 2.0f);
+}
+
+TEST(MenuDesigner, SelectingALeafOpensNoSubmenu)
+{
+    MenuDesignerFixture f;
+    f.editor.viewDesignerController().selectExclusive(f.bar);
+
+    f.designer().select(f.open);
+
+    ASSERT_EQ(f.designer().visibleColumns().size(), 1u);
+    EXPECT_EQ(f.designer().visibleColumns()[0]->menu(), f.file);
+    EXPECT_EQ(f.editor.workspace()->propertiesPane()->selected(), f.open);
+}
+
+TEST(MenuDesigner, SelectingAnotherControlClosesIt)
+{
+    MenuDesignerFixture f;
+    auto* other = new newui::SubView();
+    other->setVisible(true);
+    other->setBounds(newui::Rect(10, 200, 50, 50));
+    f.editor.workspace()->rootViewProxy()->addChild(other);
+    f.editor.viewDesignerController().selectExclusive(f.bar);
+    f.designer().select(f.recent);
+
+    f.editor.viewDesignerController().selectExclusive(other);
+
+    EXPECT_FALSE(f.designer().isOpen());
+    EXPECT_TRUE(f.designer().visibleColumns().empty());
+    EXPECT_FALSE(f.designer().barPlaceholder()->isVisible());
+    EXPECT_EQ(f.editor.workspace()->propertiesPane()->selected(), other);
+}
+
+TEST(MenuDesigner, TopLevelMenuAtMapsBarButtonsToTheirMenus)
+{
+    MenuDesignerFixture f;
+    f.editor.viewDesignerController().selectExclusive(f.bar);
+
+    newui::Rect editButton = CodeToolsVsix::SelectionOverlay::boundsInRootView(f.bar->childViews()[1]);
+    EXPECT_EQ(f.designer().topLevelMenuAt(newui::Point(editButton.left() + 3, editButton.top() + 3)), f.edit);
+    EXPECT_EQ(f.designer().topLevelMenuAt(newui::Point(5, 600)), nullptr);
+}
+
+TEST(MenuDesigner, AColumnRowMapsPointsToItemsAndThePlaceholder)
+{
+    MenuDesignerFixture f;
+    f.editor.viewDesignerController().selectExclusive(f.bar);
+    f.designer().select(f.file);
+    CodeToolsVsix::MenuColumnView* column = f.designer().visibleColumns()[0];
+
+    EXPECT_EQ(column->rowAt(newui::Point(10, column->rowTop(1) + 2)), 1u);
+    EXPECT_EQ(column->rowAt(newui::Point(10, column->rowTop(4) + 2)), 4u) << "row 4 is the Type Here placeholder";
+    EXPECT_LT(column->rowTop(3) - column->rowTop(2), CodeToolsVsix::MenuColumnView::kRowHeight) << "row 2 is a separator";
+}
+
+TEST(MenuDesignerEditing, TypingIntoTheBarPlaceholderCreatesAMenuAndMovesIntoIt)
+{
+    MenuDesignerFixture f;
+    f.editor.viewDesignerController().selectExclusive(f.bar);
+    const std::size_t before = f.bar->menus().size();
+
+    f.designer().beginEdit(&f.bar->root(), before);
+    ASSERT_TRUE(f.designer().isEditing());
+    newui::TextField* field = f.designer().editField();
+    EXPECT_EQ(f.root.focusedSubView(), field);
+    EXPECT_EQ(field->bounds(), f.designer().barPlaceholder()->bounds()) << "the field sits over the placeholder";
+
+    field->setText(L"View");
+    f.designer().commitEdit(true);
+
+    ASSERT_EQ(f.bar->menus().size(), before + 1);
+    newui::MenuItem* view = f.bar->menus().back();
+    EXPECT_EQ(view->text(), "View");
+    EXPECT_EQ(f.bar->childViews().size(), before + 1) << "a button for the new menu";
+    EXPECT_EQ(f.designer().selectedItem(), view);
+    EXPECT_TRUE(f.designer().isEditing()) << "Enter moves on to the new menu's first placeholder";
+    EXPECT_TRUE(f.editor.isDirty());
+
+    field->setText(L"Zoom");
+    f.designer().commitEdit(true);
+    field->setText(L"-");
+    f.designer().commitEdit(true);
+    field->setText(L"");
+    f.designer().commitEdit(true);   // empty: nothing more, editing ends
+
+    ASSERT_EQ(view->children().size(), 2u);
+    EXPECT_EQ(view->children()[0]->text(), "Zoom");
+    EXPECT_TRUE(view->children()[1]->isSeparator());
+    EXPECT_FALSE(f.designer().isEditing());
+    EXPECT_NE(f.root.focusedSubView(), field);
+}
+
+TEST(MenuDesignerEditing, AddingAnItemIsUndoableAndRedoable)
+{
+    MenuDesignerFixture f;
+    f.editor.viewDesignerController().selectExclusive(f.bar);
+
+    newui::MenuItem* help = f.designer().insertItem(&f.bar->root(), f.bar->menus().size(), "Help");
+    ASSERT_EQ(f.bar->menus().size(), 3u);
+
+    ASSERT_TRUE(f.editor.undoStack().canUndo());
+    f.editor.undoStack().undo();
+    EXPECT_EQ(f.bar->menus().size(), 2u);
+    EXPECT_EQ(f.bar->childViews().size(), 2u);
+
+    f.editor.undoStack().redo();
+    ASSERT_EQ(f.bar->menus().size(), 3u);
+    EXPECT_EQ(f.bar->menus()[2], help);
+}
+
+TEST(MenuDesignerEditing, RenamingAnItemIsUndoable)
+{
+    MenuDesignerFixture f;
+    f.editor.viewDesignerController().selectExclusive(f.bar);
+    f.designer().select(f.file);
+
+    f.designer().beginEdit(f.file, 0);   // "Open"
+    ASSERT_TRUE(f.designer().isEditing());
+    EXPECT_EQ(f.designer().editField()->text(), L"Open");
+    EXPECT_EQ(f.designer().selectedItem(), f.open);
+    f.designer().editField()->setText(L"Open...");
+    f.designer().commitEdit(false);
+
+    EXPECT_EQ(f.open->text(), "Open...");
+    EXPECT_FALSE(f.designer().isEditing());
+    f.editor.undoStack().undo();
+    EXPECT_EQ(f.open->text(), "Open");
+}
+
+TEST(MenuDesignerEditing, CancelLeavesTheMenuUnchanged)
+{
+    MenuDesignerFixture f;
+    f.editor.viewDesignerController().selectExclusive(f.bar);
+    f.designer().select(f.file);
+    const std::size_t count = f.file->children().size();
+
+    f.designer().beginEdit(f.file, count);
+    f.designer().editField()->setText(L"Print");
+    f.designer().cancelEdit();
+
+    EXPECT_EQ(f.file->children().size(), count);
+    EXPECT_FALSE(f.designer().isEditing());
+    EXPECT_FALSE(f.editor.undoStack().canUndo());
+}
+
+TEST(MenuDesignerEditing, RenamingATopLevelMenuRelabelsItsButton)
+{
+    MenuDesignerFixture f;
+    f.editor.viewDesignerController().selectExclusive(f.bar);
+
+    f.designer().renameItem(f.edit, "Edit2");
+
+    EXPECT_EQ(f.bar->childViews()[1]->name(), "Edit2");
+}
+
+TEST(MenuDesignerStructure, DeleteRemovesTheItemSelectsTheNextAndUndoRestoresItInPlace)
+{
+    MenuDesignerFixture f;
+    f.editor.viewDesignerController().selectExclusive(f.bar);
+    f.designer().select(f.open);
+
+    f.designer().deleteItem(f.open);
+
+    ASSERT_EQ(f.file->children().size(), 3u);
+    EXPECT_EQ(f.file->children()[0], f.recent);
+    EXPECT_EQ(f.designer().selectedItem(), f.recent);
+    EXPECT_TRUE(f.editor.isDirty());
+
+    f.editor.undoStack().undo();
+    ASSERT_EQ(f.file->children().size(), 4u);
+    EXPECT_EQ(f.file->children()[0], f.open);
+}
+
+TEST(MenuDesignerStructure, DeletingATopLevelMenuRemovesItsButton)
+{
+    MenuDesignerFixture f;
+    f.editor.viewDesignerController().selectExclusive(f.bar);
+    f.designer().select(f.edit);
+
+    f.designer().deleteItem(f.edit);
+
+    EXPECT_EQ(f.bar->menus().size(), 1u);
+    EXPECT_EQ(f.bar->childViews().size(), 1u);
+    EXPECT_EQ(f.designer().selectedItem(), f.file);
+}
+
+TEST(MenuDesignerStructure, InsertBeforeAddsANewItemAboveAndStartsRenamingIt)
+{
+    MenuDesignerFixture f;
+    f.editor.viewDesignerController().selectExclusive(f.bar);
+    f.designer().select(f.recent);
+
+    newui::MenuItem* created = f.designer().insertBefore(f.recent);
+
+    ASSERT_NE(created, nullptr);
+    EXPECT_EQ(f.file->children()[1], created);
+    EXPECT_EQ(f.file->children()[2], f.recent);
+    EXPECT_EQ(created->text(), "New Item");
+    EXPECT_EQ(f.designer().selectedItem(), created);
+    ASSERT_TRUE(f.designer().isEditing());
+    EXPECT_EQ(f.designer().editField()->text(), L"New Item");
+
+    f.designer().editField()->setText(L"Save");
+    f.designer().commitEdit(false);
+    EXPECT_EQ(created->text(), "Save");
+}
+
+TEST(MenuDesignerStructure, InsertSeparatorAddsOneAboveAndKeepsTheSelection)
+{
+    MenuDesignerFixture f;
+    f.editor.viewDesignerController().selectExclusive(f.bar);
+    f.designer().select(f.recent);
+
+    newui::MenuItem* created = f.designer().insertBefore(f.recent, true);
+
+    ASSERT_NE(created, nullptr);
+    EXPECT_TRUE(created->isSeparator());
+    EXPECT_EQ(f.file->children()[1], created);
+    EXPECT_EQ(f.designer().selectedItem(), f.recent);
+    EXPECT_FALSE(f.designer().isEditing());
+}
+
+TEST(MenuDesignerStructure, CreateSubmenuOnALeafAddsAFirstItemAndRenamesIt)
+{
+    MenuDesignerFixture f;
+    f.editor.viewDesignerController().selectExclusive(f.bar);
+    f.designer().select(f.open);
+
+    f.designer().createSubmenu(f.open);
+
+    ASSERT_EQ(f.open->children().size(), 1u);
+    EXPECT_EQ(f.designer().selectedItem(), f.open->children()[0]);
+    EXPECT_TRUE(f.designer().isEditing());
+    ASSERT_EQ(f.designer().visibleColumns().size(), 2u);
+    EXPECT_EQ(f.designer().visibleColumns()[1]->menu(), f.open);
+}
+
+TEST(MenuDesignerStructure, CreateSubmenuOnAnItemWithOneSelectsItsFirstItem)
+{
+    MenuDesignerFixture f;
+    f.editor.viewDesignerController().selectExclusive(f.bar);
+    f.designer().select(f.recent);
+
+    f.designer().createSubmenu(f.recent);
+
+    EXPECT_EQ(f.recent->children().size(), 1u);
+    EXPECT_EQ(f.designer().selectedItem(), f.recent->children()[0]);
+    EXPECT_FALSE(f.designer().isEditing());
+    EXPECT_FALSE(f.editor.undoStack().canUndo());
+}
+
+TEST(MenuDesignerStructure, ArrowNavigationSkipsSeparatorsWrapsAndCrossesMenus)
+{
+    MenuDesignerFixture f;
+    using D = CodeToolsVsix::MenuDesigner::Direction;
+    newui::MenuItem* exitItem = f.file->children()[3];
+    newui::MenuItem* aTxt = f.recent->children()[0];
+    f.editor.viewDesignerController().selectExclusive(f.bar);
+
+    f.designer().select(f.file);
+    f.designer().moveSelection(D::Down);
+    EXPECT_EQ(f.designer().selectedItem(), f.open) << "Down from a bar menu opens it";
+    f.designer().moveSelection(D::Down);
+    EXPECT_EQ(f.designer().selectedItem(), f.recent);
+    f.designer().moveSelection(D::Down);
+    EXPECT_EQ(f.designer().selectedItem(), exitItem) << "skips the separator";
+    f.designer().moveSelection(D::Down);
+    EXPECT_EQ(f.designer().selectedItem(), f.open) << "wraps";
+    f.designer().moveSelection(D::Up);
+    EXPECT_EQ(f.designer().selectedItem(), exitItem);
+
+    f.designer().select(f.recent);
+    f.designer().moveSelection(D::Right);
+    EXPECT_EQ(f.designer().selectedItem(), aTxt) << "Right enters a submenu";
+    f.designer().moveSelection(D::Left);
+    EXPECT_EQ(f.designer().selectedItem(), f.recent) << "Left leaves it";
+
+    f.designer().select(f.open);
+    f.designer().moveSelection(D::Right);
+    EXPECT_EQ(f.designer().selectedItem(), f.edit) << "Right on a leaf moves to the next bar menu";
+    f.designer().moveSelection(D::Left);
+    EXPECT_EQ(f.designer().selectedItem(), f.file);
+}
+
+TEST(MenuDesignerDrag, MoveItemReordersWithinAMenuAndUndoRestores)
+{
+    MenuDesignerFixture f;
+    newui::MenuItem* exitItem = f.file->children()[3];
+    f.editor.viewDesignerController().selectExclusive(f.bar);
+
+    f.designer().moveItem(f.open, f.file, 4);   // after Exit (index counted before the move)
+    EXPECT_EQ(f.file->children().back(), f.open);
+    EXPECT_EQ(f.file->children()[2], exitItem);
+
+    f.designer().moveItem(f.open, f.file, 0);   // back to the top
+    EXPECT_EQ(f.file->children()[0], f.open);
+
+    f.editor.undoStack().undo();
+    EXPECT_EQ(f.file->children().back(), f.open);
+    f.editor.undoStack().undo();
+    EXPECT_EQ(f.file->children()[0], f.open);
+}
+
+TEST(MenuDesignerDrag, MoveItemCarriesAnItemIntoAnotherMenuOrOntoTheBar)
+{
+    MenuDesignerFixture f;
+    f.editor.viewDesignerController().selectExclusive(f.bar);
+
+    f.designer().moveItem(f.open, f.edit, 0);
+    EXPECT_EQ(f.open->parent(), f.edit);
+    EXPECT_EQ(f.file->children().size(), 3u);
+
+    f.designer().moveItem(f.recent, &f.bar->root(), 1);   // between File and Edit
+    ASSERT_EQ(f.bar->menus().size(), 3u);
+    EXPECT_EQ(f.bar->menus()[1], f.recent);
+    EXPECT_EQ(f.bar->childViews().size(), 3u) << "a button for the new top-level menu";
+
+    f.editor.undoStack().undo();
+    EXPECT_EQ(f.recent->parent(), f.file);
+    EXPECT_EQ(f.bar->childViews().size(), 2u);
+}
+
+TEST(MenuDesignerDrag, MoveItemRefusesADropIntoItsOwnSubmenu)
+{
+    MenuDesignerFixture f;
+    f.editor.viewDesignerController().selectExclusive(f.bar);
+
+    f.designer().moveItem(f.file, f.recent, 0);
+
+    EXPECT_EQ(f.file->parent(), &f.bar->root());
+    EXPECT_FALSE(f.editor.undoStack().canUndo());
+}
+
+TEST(MenuDesignerDrag, DropTargetsFollowRowHalvesAndBarButtonHalves)
+{
+    MenuDesignerFixture f;
+    f.editor.viewDesignerController().selectExclusive(f.bar);
+    f.designer().select(f.open);
+    CodeToolsVsix::MenuColumnView* column = f.designer().visibleColumns()[0];
+    const newui::Rect c = CodeToolsVsix::SelectionOverlay::boundsInRootView(column);
+    f.designer().armDrag(f.open, newui::Point(c.left() + 10, c.top() + 10));
+
+    auto upperOfRecent = f.designer().dropTargetAt(newui::Point(c.left() + 20, c.top() + column->rowTop(1) + 3));
+    ASSERT_TRUE(upperOfRecent.has_value());
+    EXPECT_EQ(upperOfRecent->parent, f.file);
+    EXPECT_EQ(upperOfRecent->index, 1u);
+    auto lowerOfRecent = f.designer().dropTargetAt(newui::Point(c.left() + 20, c.top() + column->rowTop(2) - 3));
+    ASSERT_TRUE(lowerOfRecent.has_value());
+    EXPECT_EQ(lowerOfRecent->index, 2u);
+
+    const newui::Rect editButton = CodeToolsVsix::SelectionOverlay::boundsInRootView(f.bar->childViews()[1]);
+    auto leftOfEdit = f.designer().dropTargetAt(newui::Point(editButton.left() + 2, editButton.top() + 5));
+    ASSERT_TRUE(leftOfEdit.has_value());
+    EXPECT_EQ(leftOfEdit->parent, &f.bar->root());
+    EXPECT_EQ(leftOfEdit->index, 1u);
+
+    EXPECT_FALSE(f.designer().dropTargetAt(newui::Point(5, 650)).has_value()) << "nowhere near the menus";
+    f.designer().cancelDrag();
+}
+
+TEST(MenuDesignerDrag, ADragMovesTheItemShowsAMarkAndAShortPressIsJustAClick)
+{
+    MenuDesignerFixture f;
+    f.editor.viewDesignerController().selectExclusive(f.bar);
+    f.designer().select(f.open);
+    CodeToolsVsix::MenuColumnView* column = f.designer().visibleColumns()[0];
+    const newui::Rect c = CodeToolsVsix::SelectionOverlay::boundsInRootView(column);
+    const newui::Point press(c.left() + 20, c.top() + column->rowTop(0) + 5);
+
+    f.designer().armDrag(f.open, press);
+    f.designer().dragTo(newui::Point(press.x + 1, press.y + 1));
+    EXPECT_FALSE(f.designer().isDragActive()) << "under the threshold";
+    f.designer().endDrag(newui::Point(press.x + 1, press.y + 1));
+    EXPECT_EQ(f.file->children()[0], f.open);
+    EXPECT_FALSE(f.editor.undoStack().canUndo());
+
+    const newui::Point belowExit(c.left() + 20, c.top() + column->rowTop(4) - 2);
+    f.designer().armDrag(f.open, press);
+    f.designer().dragTo(belowExit);
+    EXPECT_TRUE(f.designer().isDragActive());
+    ASSERT_NE(f.designer().dropMark(), nullptr);
+    EXPECT_TRUE(f.designer().dropMark()->isVisible());
+    f.designer().endDrag(belowExit);
+
+    EXPECT_EQ(f.file->children().back(), f.open);
+    EXPECT_FALSE(f.designer().dropMark()->isVisible());
+    EXPECT_EQ(f.designer().selectedItem(), f.open);
+}
+
+TEST(MenuDesignerPolish, TheOpenMenusBarButtonIsHighlighted)
+{
+    MenuDesignerFixture f;
+    f.editor.viewDesignerController().selectExclusive(f.bar);
+    f.designer().select(f.recent);
+
+    ASSERT_NE(f.designer().barHighlight(), nullptr);
+    EXPECT_TRUE(f.designer().barHighlight()->isVisible());
+    EXPECT_EQ(CodeToolsVsix::SelectionOverlay::boundsInRootView(f.designer().barHighlight()),
+        CodeToolsVsix::SelectionOverlay::boundsInRootView(f.bar->childViews()[0]));
+
+    f.designer().select(nullptr);
+    EXPECT_FALSE(f.designer().barHighlight()->isVisible());
+}
+
+// testharness destroys the editor on close, then the frame destroys its RootView (canvas well and
+// all). That teardown used to lay the tree out again and reach a canvas-well listener pointing at
+// the dead editor.
+TEST(MenuDesigner, TheEditorCanBeDestroyedWhileItsRootViewLivesOn)
+{
+    CodeToolsVsix::PropertyEditorRegistry::instance().registerBuiltinEditors();
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    auto* editor = new CodeToolsVsix::DesignerEditor(&root);
+    root.setBounds(newui::Rect(0, 0, 1400, 700));
+
+    auto* bar = new newui::MenuBar();
+    bar->setBounds(newui::Rect(10, 10, 400, 28));
+    auto* file = new newui::MenuItem("File");
+    file->addChild(std::make_unique<newui::MenuItem>("Open"));
+    bar->addMenu(file);
+    editor->workspace()->rootViewProxy()->addChild(bar);
+    editor->viewDesignerController().selectExclusive(bar);
+    editor->menuDesigner()->select(file);
+    editor->menuDesigner()->beginEdit(file, 1);   // an edit left open
+    editor->menuDesigner()->editField()->setText(L"Unsaved");
+
+    delete editor;
+    EXPECT_EQ(file->children().size(), 1u) << "an open edit is dropped, not committed, on teardown";
+    root.destroy();   // what the frame does next - its teardown used to lay out the canvas well
+}

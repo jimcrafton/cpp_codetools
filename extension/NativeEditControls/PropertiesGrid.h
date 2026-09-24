@@ -51,8 +51,13 @@ namespace CodeToolsVsix
         // PropertiesPanel::setSelection() used to (a leftover selected
         // path from a previous object would otherwise silently resolve
         // against completely different data at that same index).
-        void setSelection(newui::SubView* selected);
-        newui::SubView* selected() const { return model_->selected(); }
+        void setSelection(newui::Component* selected);
+        newui::Component* selected() const { return model_->selected(); }
+
+        // Runs after every property commit and each undo/redo of one, with the edited object -
+        // for whatever else shows it (a MenuItem's MenuBar buttons).
+        using AfterCommitHandler = std::function<void(newui::Component* edited)>;
+        void setAfterCommitHandler(AfterCommitHandler handler) { afterCommitHandler_ = std::move(handler); }
 
         // Narrow the rows to properties whose name contains text, and/or order them A-Z - see
         // PropertiesModel::setFilter()/setAlphabetical(). Either one changes which row is which, so
@@ -152,6 +157,9 @@ namespace CodeToolsVsix
         // selected (matches this project's own "guard the corresponding real state, don't assume"
         // convention, e.g. ViewStyle::markDirty()'s own null checks).
         void markSelectedViewDirty();
+        // Refreshes whatever shows edited (layout and repaint for a View), then the after-commit
+        // handler.
+        void refreshAfterCommit(newui::Component* edited);
 
         // Explicitly claims real keyboard focus for liveEditorView_ - a
         // real, reported bug otherwise: this View is created *during* the
@@ -256,6 +264,7 @@ namespace CodeToolsVsix
         PropertiesModel* model_ = nullptr;   // owned by treeView_'s controller
         newui::TreeView* treeView_ = nullptr;
         newui::UndoStack* undoStack_ = nullptr;
+        AfterCommitHandler afterCommitHandler_;
         bool draggingDivider_ = false;
 
         std::unique_ptr<PropertyEditor> liveEditor_;

@@ -9,6 +9,7 @@
 
 #include "ComponentEditor.h"
 #include "DesignerArrange.h"
+#include "MenuDesigner.h"
 #include "NativeEditor.h"
 #include "SelectionOverlay.h"
 #include "ViewDesignerController.h"
@@ -191,6 +192,9 @@ namespace CodeToolsVsix
         // change can't close the new editor. Public for tests.
         void editComponent(newui::SubView* view, std::optional<newui::Point> rootPt = std::nullopt);
 
+        // Menu editing on the design surface - open while a MenuBar is selected.
+        MenuDesigner* menuDesigner() const { return menuDesigner_.get(); }
+
         // Hover feedback for a Toolbox drag at rootLocalPt (this editor's root space): highlights
         // the target container and shows where the control would land - an insertion line (flex),
         // cell (grid), or ghost outline (free position) - the same cues a canvas drag gets. Returns
@@ -276,6 +280,13 @@ namespace CodeToolsVsix
             std::uint32_t btnMask, std::uint32_t keyMask);
         newui::SyncReturn handleMouseUp(newui::View& sender, const newui::Point& pt,
             std::uint32_t btnMask, std::uint32_t keyMask);
+        newui::SyncReturn handleMouseUpCore(newui::View& sender, const newui::Point& pt,
+            std::uint32_t btnMask, std::uint32_t keyMask);
+
+        // A MenuItem picked in the menu designer (nullptr: back to the MenuBar itself).
+        void handleMenuItemSelected(newui::MenuItem* item);
+        // Keeps the menu designer's columns on the bar as the canvas resizes.
+        newui::SyncReturn handleCanvasWellSizeChanged(newui::View& sender, const newui::Size& size);
 
         // Deletes the current canvas selection (viewDesignerController_.
         // selected()) as one undo-aware step - only fires when the canvas
@@ -513,5 +524,9 @@ namespace CodeToolsVsix
         newui::UndoStack undoStack_;
         // Cleared in the destructor; guards editComponent()'s posted task.
         std::shared_ptr<bool> aliveFlag_ = std::make_shared<bool>(true);
+        std::unique_ptr<MenuDesigner> menuDesigner_;
+        // Removed in the destructor - the canvas well (in the root's tree) can outlive this editor
+        // and keep laying out while the root is torn down.
+        newui::Connection canvasWellSizeConnection_;
     };
 }

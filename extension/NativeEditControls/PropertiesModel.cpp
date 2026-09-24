@@ -204,7 +204,7 @@ namespace CodeToolsVsix
         return !listedDelegates(cls).empty();
     }
 
-    void PropertiesModel::setSelection(newui::SubView* selected)
+    void PropertiesModel::setSelection(newui::Component* selected)
     {
         selected_ = selected;
         rootClass_ = selected_ != nullptr ? classinfo(typeid(*selected_)) : nullptr;
@@ -396,7 +396,8 @@ namespace CodeToolsVsix
         Node current;
         current.kind = Kind::Root;
         current.ownerClass = rootClass_;
-        current.ownerInstance = static_cast<void*>(selected_);
+        // The most-derived object - what reflection's instance pointers always address.
+        current.ownerInstance = dynamic_cast<void*>(selected_);
         current.showAllChildren = !filterActive();
 
         for (std::size_t index : path) {

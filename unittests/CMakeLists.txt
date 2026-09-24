@@ -55,6 +55,7 @@ add_executable(nativeeditcontrols_tests
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/PaintUtils.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/ColorChoices.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/ComponentEditor.cpp"
+    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/MenuDesigner.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/DesignerClipboard.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/DesignerArrange.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/ToolboxRegistry.cpp"

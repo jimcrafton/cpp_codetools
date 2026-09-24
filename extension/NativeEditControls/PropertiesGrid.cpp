@@ -78,7 +78,7 @@ namespace CodeToolsVsix
         }
     }
 
-    void PropertiesGrid::setSelection(newui::SubView* selected)
+    void PropertiesGrid::setSelection(newui::Component* selected)
     {
         treeView_->clearSelection();
         destroyLiveEditor();
@@ -281,7 +281,15 @@ namespace CodeToolsVsix
 
     void PropertiesGrid::markSelectedViewDirty()
     {
-        refreshAfterPropertyChange(model_->selected());
+        refreshAfterCommit(model_->selected());
+    }
+
+    void PropertiesGrid::refreshAfterCommit(newui::Component* edited)
+    {
+        refreshAfterPropertyChange(dynamic_cast<newui::SubView*>(edited));
+        if (edited != nullptr && afterCommitHandler_) {
+            afterCommitHandler_(edited);
+        }
     }
 
     void PropertiesGrid::rebuildLiveEditor()
@@ -344,7 +352,8 @@ namespace CodeToolsVsix
         // themselves deliberately don't assume that (see setPostCommitSync()'s own comment).
         // Every live-editor commit - and each undo/redo of it, PropertyEditor runs this both ways -
         // ends by refreshing whatever reads the edited view (see refreshAfterPropertyChange()).
-        newui::SubView* editedView = model_->selected();
+        newui::Component* edited = model_->selected();
+        auto* editedView = dynamic_cast<newui::SubView*>(edited);
         std::function<void()> boundsSync;
         if (node.property != nullptr && node.property->name() == "bounds") {
             boundsSync = [editedView]() {
@@ -356,11 +365,11 @@ namespace CodeToolsVsix
                 }
             };
         }
-        liveEditor_->setPostCommitSync([editedView, boundsSync]() {
+        liveEditor_->setPostCommitSync([this, edited, boundsSync]() {
             if (boundsSync) {
                 boundsSync();
             }
-            refreshAfterPropertyChange(editedView);
+            refreshAfterCommit(edited);
         });
 
         std::string initialText = isSubProperty
@@ -596,8 +605,9 @@ namespace CodeToolsVsix
         // (from the picker popup, later), not captured, so it never dangles.
         const bool swapsLayout = node.property != nullptr && node.property->name() == "layout";
         editor->setPostCommitSync([this, swapsLayout] {
-            if (swapsLayout && model_->selected() != nullptr) {
-                syncChildLayoutParams(*model_->selected());
+            auto* selectedView = dynamic_cast<newui::SubView*>(model_->selected());
+            if (swapsLayout && selectedView != nullptr) {
+                syncChildLayoutParams(*selectedView);
             }
             markSelectedViewDirty();
             treeView_->style().markDirty();
@@ -621,7 +631,9 @@ namespace CodeToolsVsix
         // once it actually shows. Harmless timing-wise for a blocking editor (Color/Gradient/
         // FilePath's real showModal()/showOpenFile(), reached via the base editAsync() -> edit()
         // wrapper) - opening one tick later than the click that requested it is unobservable.
-        newui::SubView* owner = model_->selected();
+        // A dialog needs a View to own it - the grid itself when the selection isn't one.
+        auto* ownerView = dynamic_cast<newui::View*>(model_->selected());
+        newui::View* owner = ownerView != nullptr ? ownerView : static_cast<newui::View*>(treeView_);
         std::shared_ptr<PropertyEditor> sharedEditor = std::move(editor);
         std::shared_ptr<bool> alive = aliveFlag_;
         auto openNow = [this, alive, sharedEditor, owner, anchorScreenRect] {

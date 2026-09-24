@@ -122,6 +122,11 @@ namespace CodeToolsVsix
     DesignerEditor::~DesignerEditor()
     {
         *aliveFlag_ = false;
+        if (workspace_ != nullptr && workspace_->canvasWell() != nullptr) {
+            workspace_->canvasWell()->onSizeChanged.remove(canvasWellSizeConnection_);
+        }
+        // Before any member it calls back into (undo stack, workspace) goes away.
+        menuDesigner_.reset();
         // See this declaration's own doc comment (DesignerEditor.h) - must
         // run before viewDesignerController_'s own destruction, which an
         // implicit/defaulted destructor wouldn't guarantee relative to
@@ -280,6 +285,23 @@ namespace CodeToolsVsix
                 handlePropertiesParentChangeRequested(view, newParent);
             });
         workspace_->setUndoStack(&undoStack_);
+
+        menuDesigner_ = std::make_unique<MenuDesigner>(workspace_->canvasWell());
+        menuDesigner_->setSelectionChangedHandler([this](newui::MenuItem* item) { handleMenuItemSelected(item); });
+        menuDesigner_->setUndoStack(&undoStack_);
+        menuDesigner_->setChangedHandler([this] {
+            markDirty();
+            workspace_->propertiesPane()->treeView()->style().markDirty();
+            getRootView()->markDirty();
+        });
+        canvasWellSizeConnection_ = workspace_->canvasWell()->onSizeChanged.add(this, &DesignerEditor::handleCanvasWellSizeChanged);
+        // A menu item's text is its bar button's label.
+        workspace_->propertiesPane()->setAfterCommitHandler([this](newui::Component* edited) {
+            if (dynamic_cast<newui::MenuItem*>(edited) != nullptr && menuDesigner_->menuBar() != nullptr) {
+                menuDesigner_->menuBar()->rebuildButtons();
+            }
+            menuDesigner_->refresh();
+        });
         workspace_->setPrimarySelectionProvider([this]() { return viewDesignerController_.primary(); });
         undoStack_.onActionPushed.add(this, &DesignerEditor::handleUndoStackActionPushed);
 
@@ -415,8 +437,8 @@ namespace CodeToolsVsix
         auto add = [](newui::MenuItem& parent, const std::string& text, std::function<void()> action,
                        bool enabled = true, const std::string& shortcut = std::string()) {
             newui::MenuItem* item = parent.addChild(std::make_unique<newui::MenuItem>(text));
-            item->state.setEnabled(enabled);
-            item->shortcutText = shortcut;
+            item->state().setEnabled(enabled);
+            item->setShortcutText(shortcut);
             item->onClick.add([action](newui::MenuItem&) {
                 action();
                 return newui::SyncReturn::Handled;
@@ -540,6 +562,27 @@ namespace CodeToolsVsix
         }
         // The double-click's first click already selected target (handleMouseDownForSelection()).
         viewDesignerController_.selectExclusive(target);
+
+        // On a MenuBar's button: rename that menu in place. Posted - RootView resets focus after
+        // this handler, which would end the edit before it starts.
+        auto* bar = dynamic_cast<newui::MenuBar*>(target);
+        newui::MenuItem* menu = bar != nullptr ? menuDesigner_->topLevelMenuAt(pt) : nullptr;
+        if (menu != nullptr) {
+            const auto& menus = bar->menus();
+            const std::size_t index = static_cast<std::size_t>(std::find(menus.begin(), menus.end(), menu) - menus.begin());
+            std::shared_ptr<bool> alive = aliveFlag_;
+            auto rename = [this, alive, bar, index] {
+                if (*alive && menuDesigner_->menuBar() == bar) {
+                    menuDesigner_->beginEdit(&bar->root(), index);
+                }
+            };
+            if (newui::RunLoop::current()) {
+                newui::RunLoop::current().post(std::move(rename));
+            } else {
+                rename();
+            }
+            return newui::SyncReturn::Handled;
+        }
         editComponent(target, pt);
         return newui::SyncReturn::Handled;
     }
@@ -547,6 +590,13 @@ namespace CodeToolsVsix
     newui::SyncReturn DesignerEditor::handleMouseDownForSelection(newui::View& /*sender*/, const newui::Point& pt,
         std::uint32_t btnMask, std::uint32_t keyMask)
     {
+        // A click on the menu designer's own columns belongs to them, not the canvas.
+        if (menuDesigner_ != nullptr && menuDesigner_->contains(pt)) {
+            moveDragEntries_.clear();
+            moveDragStarted_ = false;
+            return newui::SyncReturn::Ignored;
+        }
+
         // Checked first, so grabbing a guide line always starts a resize
         // rather than a selection - CanvasWell.h's own class comment has
         // the full reasoning for why this is driven from here rather than
@@ -569,6 +619,18 @@ namespace CodeToolsVsix
         // the menu then applies to it without collapsing a multi-selection), then show its
         // ComponentEditor's verbs. Never arms a move-drag.
         if ((btnMask & newui::mbmRightButton) != 0) {
+            // On a MenuBar's button: that menu's item commands.
+            newui::MenuItem* menu = nullptr;
+            if (dynamic_cast<newui::MenuBar*>(target) != nullptr && menuDesigner_ != nullptr) {
+                viewDesignerController_.selectExclusive(target);   // opens the menu designer
+                menu = menuDesigner_->topLevelMenuAt(pt);
+            }
+            if (menu != nullptr) {
+                menuDesigner_->select(menu);
+                getRootView()->markDirty();
+                menuDesigner_->showContextMenu(menu, pt);
+                return newui::SyncReturn::Handled;
+            }
             if (target != nullptr) {
                 const std::vector<newui::SubView*> selected = viewDesignerController_.selected();
                 if (std::find(selected.begin(), selected.end(), target) == selected.end()) {
@@ -584,6 +646,20 @@ namespace CodeToolsVsix
             viewDesignerController_.toggleSelection(target);
         } else {
             viewDesignerController_.selectExclusive(target);
+            // A MenuBar's buttons aren't selectable views - a press on one selects that menu and
+            // can drag it (the bar itself moves by its empty area).
+            if (dynamic_cast<newui::MenuBar*>(target) != nullptr) {
+                newui::MenuItem* menu = menuDesigner_->topLevelMenuAt(pt);
+                menuDesigner_->select(menu);
+                if (menu != nullptr) {
+                    menuDesigner_->armDrag(menu, pt);
+                    getRootView()->markDirty();
+                    endDragCursors();
+                    moveDragEntries_.clear();
+                    moveDragStarted_ = false;
+                    return newui::SyncReturn::Ignored;
+                }
+            }
         }
 
         // Same reasoning as setupUI()'s/load()'s own markDirty() calls -
@@ -895,6 +971,12 @@ namespace CodeToolsVsix
         if (workspace_ == nullptr || !canvasOwnsKeyboard()) {
             return newui::SyncReturn::Ignored;
         }
+        // While a menu item is selected, keys belong to the menu designer - the canvas commands
+        // would act on its MenuBar. Undo/redo still apply.
+        const bool undoKey = (keyMask & newui::kmCtrl) != 0 && VKeyCode == static_cast<std::uint32_t>(newui::vkLetterZ);
+        if (menuDesigner_ != nullptr && menuDesigner_->selectedItem() != nullptr && !undoKey) {
+            return menuDesigner_->handleKeyDown(keyMask, VKeyCode) ? newui::SyncReturn::Handled : newui::SyncReturn::Ignored;
+        }
 
         bool handled = false;
         if ((keyMask & newui::kmCtrl) != 0) {
@@ -997,6 +1079,10 @@ namespace CodeToolsVsix
     newui::SyncReturn DesignerEditor::handleMouseMove(newui::View& /*sender*/, const newui::Point& pt,
         std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/)
     {
+        if (menuDesigner_ != nullptr && menuDesigner_->isDragging()) {
+            menuDesigner_->dragTo(pt);
+            return newui::SyncReturn::Handled;
+        }
         // CanvasWell's own resize-guide drag takes priority - handleMouseDownForSelection() never
         // arms a move-drag at all once beginResizeDrag() has already claimed the click, so the two
         // gestures are mutually exclusive by construction; check first regardless.
@@ -1089,7 +1175,39 @@ namespace CodeToolsVsix
         return newui::SyncReturn::Ignored;
     }
 
-    newui::SyncReturn DesignerEditor::handleMouseUp(newui::View& /*sender*/, const newui::Point& pt,
+    newui::SyncReturn DesignerEditor::handleMouseUp(newui::View& sender, const newui::Point& pt,
+        std::uint32_t btnMask, std::uint32_t keyMask)
+    {
+        if (menuDesigner_ != nullptr && menuDesigner_->isDragging()) {
+            menuDesigner_->endDrag(pt);
+            return newui::SyncReturn::Handled;
+        }
+        newui::SyncReturn result = handleMouseUpCore(sender, pt, btnMask, keyMask);
+        if (menuDesigner_ != nullptr && menuDesigner_->isOpen()) {
+            menuDesigner_->refresh();   // the bar may have moved
+        }
+        return result;
+    }
+
+    void DesignerEditor::handleMenuItemSelected(newui::MenuItem* item)
+    {
+        newui::Component* shown = item;
+        if (shown == nullptr) {
+            shown = menuDesigner_->menuBar();
+        }
+        workspace_->propertiesPane()->setSelection(shown);
+        getRootView()->markDirty();
+    }
+
+    newui::SyncReturn DesignerEditor::handleCanvasWellSizeChanged(newui::View& /*sender*/, const newui::Size& /*size*/)
+    {
+        if (menuDesigner_ != nullptr && menuDesigner_->isOpen()) {
+            menuDesigner_->refresh();
+        }
+        return newui::SyncReturn::Ignored;
+    }
+
+    newui::SyncReturn DesignerEditor::handleMouseUpCore(newui::View& /*sender*/, const newui::Point& pt,
         std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/)
     {
         CanvasWell* canvasWell = workspace_ ? workspace_->canvasWell() : nullptr;
@@ -1159,6 +1277,13 @@ namespace CodeToolsVsix
         if (workspace_ != nullptr) {
             workspace_->propertiesPane()->setSelection(sender.primary());
             workspace_->documentOutlinePane()->setSelection(sender.selected());
+            if (menuDesigner_ != nullptr) {
+                if (auto* bar = dynamic_cast<newui::MenuBar*>(sender.primary())) {
+                    menuDesigner_->open(bar);
+                } else {
+                    menuDesigner_->close();
+                }
+            }
         }
         return newui::SyncReturn::Ignored;
     }
@@ -1827,6 +1952,9 @@ namespace CodeToolsVsix
             undoStack_.undo();
         }
         refreshUndoRedoButtons();
+        if (menuDesigner_ != nullptr) {
+            menuDesigner_->refresh();
+        }
         getRootView()->markDirty();
         return could;
     }
@@ -1838,6 +1966,9 @@ namespace CodeToolsVsix
             undoStack_.redo();
         }
         refreshUndoRedoButtons();
+        if (menuDesigner_ != nullptr) {
+            menuDesigner_->refresh();
+        }
         getRootView()->markDirty();
         return could;
     }
