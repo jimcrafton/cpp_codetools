@@ -3,6 +3,7 @@
 #include "CanvasWell.h"
 #include "DocumentOutline.h"
 #include "PropertiesGrid.h"
+#include "SourceView.h"
 #include "PropertiesPanel.h"
 #include "Toolbox.h"
 
@@ -183,7 +184,10 @@ namespace CodeToolsVsix
             primarySelectionProvider_ = std::move(provider);
         }
 
-        void reloadDesignModel(newui::Model& model);
+        // Shows the Design (canvas) or Source page and keeps the mode control in step. Only the
+        // page - what entering or leaving Source means for the document is DesignerEditor's job.
+        void showMode(std::size_t mode);
+        SourceView* sourceView() const { return sourceView_; }
     private:
         newui::Toolbar* topBar_ = nullptr;
         CanvasWell* canvasWell_ = nullptr;
@@ -205,8 +209,7 @@ namespace CodeToolsVsix
         newui::Label* undoRedoStatusLabel_ = nullptr;
         newui::UndoStack* undoStack_ = nullptr;
         newui::SubView* designerViews_ = nullptr;
-        newui::SubView* designSource_ = nullptr;
-		newui::TextControl* designSourceTxt_ = nullptr;
+        SourceView* sourceView_ = nullptr;
         std::function<newui::SubView*()> primarySelectionProvider_;
 
         

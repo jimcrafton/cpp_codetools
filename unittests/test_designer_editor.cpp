@@ -12,6 +12,7 @@
 #include <newui/rootview.h>
 #include <newui/rootviewproxy.h>
 #include <newui/subview.h>
+#include <newui/uicolormanager.h>
 #include <newui/controls.h>
 
 #include <gtest/gtest.h>
@@ -3234,4 +3235,281 @@ TEST(DesignerPasteText, EditedBoundsInPastedTextAreRespectedUnderAnAnchorLayout)
     ASSERT_NE(pasted, original);
     EXPECT_FLOAT_EQ(pasted->bounds().left(), 200.0f);
     EXPECT_FLOAT_EQ(pasted->bounds().top(), 150.0f);
+}
+
+namespace
+{
+    struct SourceFixture
+    {
+        SourceFixture() : root(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot"), editor(&root)
+        {
+            CodeToolsVsix::PropertyEditorRegistry::instance().registerBuiltinEditors();
+            root.setBounds(newui::Rect(0, 0, 1400, 700));
+            button = new newui::Button();
+            button->setName("okButton");
+            button->setText("OK");
+            button->setBounds(newui::Rect(10, 20, 80, 24));
+            editor.workspace()->rootViewProxy()->addChild(button);
+        }
+
+        CodeToolsVsix::SourceView& source() { return *editor.workspace()->sourceView(); }
+        newui::RootViewProxy& surface() { return *editor.workspace()->rootViewProxy(); }
+
+        newui::RootView root;
+        CodeToolsVsix::DesignerEditor editor;
+        newui::Button* button = nullptr;
+    };
+
+    void replaceOnce(std::string& text, const std::string& from, const std::string& to)
+    {
+        const std::size_t at = text.find(from);
+        ASSERT_NE(at, std::string::npos) << from;
+        text.replace(at, from.size(), to);
+    }
+}
+
+TEST(DesignerSource, EnteringSourceShowsTheDocumentText)
+{
+    SourceFixture f;
+
+    ASSERT_TRUE(f.editor.setSourceMode(true));
+
+    EXPECT_TRUE(f.editor.isSourceMode());
+    EXPECT_EQ(f.editor.workspace()->modeControl()->selectedIndex(), CodeToolsVsix::Workspace::kSourceModeSegment);
+    EXPECT_EQ(f.source().text(), f.editor.documentText());
+    EXPECT_NE(f.source().text().find("okButton"), std::string::npos);
+    EXPECT_FALSE(f.editor.isDirty());
+}
+
+TEST(DesignerSource, LeavingWithoutEditsChangesNothing)
+{
+    SourceFixture f;
+    f.editor.setSourceMode(true);
+
+    ASSERT_TRUE(f.editor.setSourceMode(false));
+
+    EXPECT_FALSE(f.editor.isSourceMode());
+    EXPECT_FALSE(f.editor.undoStack().canUndo());
+    ASSERT_EQ(f.surface().childViews().size(), 1u);
+    EXPECT_EQ(f.surface().childViews()[0], f.button);
+}
+
+TEST(DesignerSource, LeavingWithEditsAppliesThemAsOneUndoableStep)
+{
+    SourceFixture f;
+    f.editor.setSourceMode(true);
+    std::string text = f.source().text();
+    replaceOnce(text, "text: \"OK\"", "text: \"Apply\"");
+    f.source().setText(text);
+    EXPECT_TRUE(f.editor.isDirty()) << "unapplied Source edits are unsaved changes";
+
+    ASSERT_TRUE(f.editor.setSourceMode(false));
+
+    ASSERT_EQ(f.surface().childViews().size(), 1u);
+    auto* rebuilt = dynamic_cast<newui::Button*>(f.surface().childViews()[0]);
+    ASSERT_NE(rebuilt, nullptr);
+    EXPECT_NE(rebuilt, f.button);
+    EXPECT_EQ(rebuilt->text(), "Apply");
+
+    ASSERT_TRUE(f.editor.undoStack().canUndo());
+    f.editor.undoStack().undo();
+    ASSERT_EQ(f.surface().childViews().size(), 1u);
+    EXPECT_EQ(f.surface().childViews()[0], f.button) << "undo puts the very same control back";
+    EXPECT_EQ(f.button->text(), "OK");
+
+    f.editor.undoStack().redo();
+    EXPECT_EQ(f.surface().childViews()[0], rebuilt);
+}
+
+TEST(DesignerSource, TextThatDoesNotParseKeepsYouInSourceWithTheError)
+{
+    SourceFixture f;
+    f.editor.setSourceMode(true);
+    f.source().setText("{ rootView: { ");
+
+    EXPECT_FALSE(f.editor.setSourceMode(false));
+
+    EXPECT_TRUE(f.editor.isSourceMode());
+    EXPECT_EQ(f.editor.workspace()->modeControl()->selectedIndex(), CodeToolsVsix::Workspace::kSourceModeSegment);
+    EXPECT_FALSE(f.source().error().empty());
+    EXPECT_TRUE(f.source().errorBar()->isVisible());
+    ASSERT_EQ(f.surface().childViews().size(), 1u);
+    EXPECT_EQ(f.surface().childViews()[0], f.button) << "the canvas is untouched";
+    EXPECT_FALSE(f.editor.undoStack().canUndo());
+}
+
+TEST(DesignerSource, AnEditElsewhereRefreshesUneditedSourceText)
+{
+    SourceFixture f;
+    f.editor.setSourceMode(true);
+
+    newui::Button extra;
+    extra.setName("extraButton");
+    ASSERT_TRUE(f.editor.pasteSerializedViews({ CodeToolsVsix::DesignerClipboard::serialize(extra) }, 0.0f));
+
+    EXPECT_NE(f.source().text().find("extraButton"), std::string::npos);
+    EXPECT_EQ(f.source().text(), f.editor.documentText());
+}
+
+TEST(DesignerSource, UndoWhileInSourceRefreshesItsText)
+{
+    SourceFixture f;
+    newui::Button extra;
+    extra.setName("extraButton");
+    ASSERT_TRUE(f.editor.pasteSerializedViews({ CodeToolsVsix::DesignerClipboard::serialize(extra) }, 0.0f));
+    f.editor.setSourceMode(true);
+    ASSERT_NE(f.source().text().find("extraButton"), std::string::npos);
+
+    ASSERT_TRUE(f.editor.undo());
+
+    EXPECT_EQ(f.source().text().find("extraButton"), std::string::npos);
+}
+
+namespace
+{
+    std::size_t paintedOverlayPixels(newui::RootView& root)
+    {
+        BLImage image(1400, 700, BL_FORMAT_PRGB32);
+        {
+            BLContext ctx(image);
+            ctx.clear_all();
+            root.overlay()->paint(ctx, newui::Rect(0, 0, 1400, 700));
+            ctx.end();
+        }
+        BLImageData data{};
+        image.get_data(&data);
+        std::size_t count = 0;
+        for (int y = 0; y < 700; ++y) {
+            const auto* row = reinterpret_cast<const std::uint32_t*>(static_cast<const std::uint8_t*>(data.pixel_data) + y * data.stride);
+            for (int x = 0; x < 1400; ++x) {
+                count += row[x] != 0 ? 1 : 0;
+            }
+        }
+        return count;
+    }
+}
+
+TEST(DesignerSource, TheSelectionOverlayDrawsNothingOverTheSourceText)
+{
+    SourceFixture f;
+    f.editor.viewDesignerController().selectExclusive(f.button);
+    ASSERT_GT(paintedOverlayPixels(f.root), 0u) << "handles are drawn in Design mode";
+
+    f.editor.setSourceMode(true);
+
+    EXPECT_EQ(paintedOverlayPixels(f.root), 0u);
+    EXPECT_EQ(f.editor.viewDesignerController().primary(), f.button) << "the selection itself is kept";
+}
+
+TEST(DesignerSource, ToolboxDropsAreRefusedWhileSourceShows)
+{
+    SourceFixture f;
+    const std::wstring payload = CodeToolsVsix::Toolbox::dragPayloadFor(0, 0);
+    const newui::Rect surfaceRect = CodeToolsVsix::SelectionOverlay::boundsInRootView(&f.surface());
+    const newui::Point onSurface(surfaceRect.left() + 200, surfaceRect.top() + 150);
+    const std::size_t before = f.surface().childViews().size();
+    ASSERT_TRUE(f.editor.dropToolboxEntryAt(payload, onSurface)) << "the same drop works in Design mode";
+    f.editor.undoStack().undo();
+    ASSERT_EQ(f.surface().childViews().size(), before);
+
+    f.editor.setSourceMode(true);
+
+    EXPECT_FALSE(f.editor.dropToolboxEntryAt(payload, onSurface));
+    EXPECT_EQ(f.surface().childViews().size(), before);
+}
+
+namespace
+{
+    // The run covering text position `at`, or nullptr.
+    const newui::text::TextColorRun* runAt(const CodeToolsVsix::SourceView& view, std::size_t at)
+    {
+        for (const newui::text::TextColorRun& run : view.colorRuns()) {
+            if (at >= run.start && at < run.start + run.length) {
+                return &run;
+            }
+        }
+        return nullptr;
+    }
+
+    newui::Color themeColor(lex::StyleId style)
+    {
+        const lex::Theme theme = newui::UIColorManager::isDarkMode() ? lex::Theme::dark() : lex::Theme::light();
+        const std::uint32_t argb = theme.style(style).foreground;
+        return newui::Color(((argb >> 16) & 0xFF) / 255.0f, ((argb >> 8) & 0xFF) / 255.0f,
+            (argb & 0xFF) / 255.0f, ((argb >> 24) & 0xFF) / 255.0f);
+    }
+}
+
+TEST(SourceViewHighlight, KeysStringsNumbersAndLiteralsGetTheirThemeColors)
+{
+    CodeToolsVsix::SourceView view;
+    const std::string text = "{ name: \"OK\", size: 12, on: true }";
+    view.setText(text);
+
+    const newui::text::TextColorRun* key = runAt(view, text.find("name"));
+    const newui::text::TextColorRun* str = runAt(view, text.find("\"OK\""));
+    const newui::text::TextColorRun* num = runAt(view, text.find("12"));
+    const newui::text::TextColorRun* lit = runAt(view, text.find("true"));
+    ASSERT_NE(key, nullptr);
+    ASSERT_NE(str, nullptr);
+    ASSERT_NE(num, nullptr);
+    ASSERT_NE(lit, nullptr);
+    EXPECT_EQ(key->color, themeColor(lex::StyleId::PropertyName));
+    EXPECT_EQ(str->color, themeColor(lex::StyleId::String));
+    EXPECT_EQ(num->color, themeColor(lex::StyleId::Number));
+    EXPECT_EQ(lit->color, themeColor(lex::StyleId::Constant));
+    for (const newui::text::TextColorRun& run : view.colorRuns()) {
+        EXPECT_LE(run.start + run.length, text.size());
+    }
+}
+
+TEST(SourceViewHighlight, RecolorsWhenTheTextChanges)
+{
+    CodeToolsVsix::SourceView view;
+    view.setText("{ a: 1 }");
+    ASSERT_EQ(runAt(view, 5)->color, themeColor(lex::StyleId::Number));
+
+    view.setText("{ a: 'x' }");
+
+    const newui::text::TextColorRun* str = runAt(view, 5);
+    ASSERT_NE(str, nullptr);
+    EXPECT_EQ(str->color, themeColor(lex::StyleId::String));
+}
+
+TEST(SourceViewHighlight, ValidTextHasNoSquiggles)
+{
+    CodeToolsVsix::SourceView view;
+    view.setText("{ name: \"OK\", size: [1, 2] }");
+    EXPECT_TRUE(view.problems().empty());
+}
+
+TEST(SourceViewHighlight, ProblemsAreSquiggledWhereTheyAre)
+{
+    CodeToolsVsix::SourceView view;
+    const std::string text = "{ name: \"OK, size: 12 }";   // the string never closes
+    view.setText(text);
+
+    ASSERT_FALSE(view.problems().empty());
+    bool coversTheString = false;
+    for (const newui::text::TextDecoration& problem : view.problems()) {
+        EXPECT_EQ(problem.kind, newui::text::TextDecorationKind::Squiggle);
+        EXPECT_GE(problem.length, 1u);
+        EXPECT_LE(problem.start + problem.length, text.size());
+        const std::size_t quote = text.find('"');
+        coversTheString = coversTheString || (problem.start <= quote && quote < problem.start + problem.length);
+    }
+    EXPECT_TRUE(coversTheString);
+}
+
+TEST(SourceViewHighlight, AMissingEndIsStillSquiggledOnTheLastCharacter)
+{
+    CodeToolsVsix::SourceView view;
+    const std::string text = "{ a: 1";
+    view.setText(text);
+
+    ASSERT_FALSE(view.problems().empty());
+    for (const newui::text::TextDecoration& problem : view.problems()) {
+        EXPECT_LE(problem.start + problem.length, text.size());
+        EXPECT_GE(problem.length, 1u);
+    }
 }

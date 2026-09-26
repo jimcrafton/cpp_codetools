@@ -157,6 +157,9 @@ namespace CodeToolsVsix
         // chrome around the design surface, since Overlay paints on top
         // of the *entire* hosting RootView pane, not just clipView_'s own
         // area.
+        if (clipView_ != nullptr && !clipView_->isVisible()) {
+            return;   // the design surface is hidden (Source mode) - nothing of it to mark up
+        }
         bool clipping = clipView_ != nullptr;
         if (clipping) {
             newui::Rect clipRect = boundsInRootView(clipView_);

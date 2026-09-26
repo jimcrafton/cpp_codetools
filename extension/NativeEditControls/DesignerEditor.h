@@ -195,6 +195,18 @@ namespace CodeToolsVsix
         // Menu editing on the design surface - open while a MenuBar is selected.
         MenuDesigner* menuDesigner() const { return menuDesigner_.get(); }
 
+        // Source mode (the toolbar's Design/Source switch; public so tests can drive it). Entering
+        // shows the document as text. Leaving applies edited text to the canvas as one undoable
+        // step - or, if it doesn't parse, stays in Source with the error shown and returns false.
+        bool setSourceMode(bool source);
+        bool isSourceMode() const { return sourceMode_; }
+        // The document as text - exactly what Save writes.
+        std::string documentText() const;
+        // Rebuilds the canvas from text as one undoable step (the old controls are detached and
+        // kept, so undo puts them back and earlier undo steps stay valid). False, changing
+        // nothing, with *error set if text doesn't parse.
+        bool applyDocumentText(const std::string& text, std::string* error);
+
         // Hover feedback for a Toolbox drag at rootLocalPt (this editor's root space): highlights
         // the target container and shows where the control would land - an insertion line (flex),
         // cell (grid), or ghost outline (free position) - the same cues a canvas drag gets. Returns
@@ -219,7 +231,8 @@ namespace CodeToolsVsix
         newui::DocumentController& documentController() { return documentController_; }
 
         // NativeEditor's flag is replaced by document()'s own.
-        bool isDirty() const override { return document_ != nullptr && document_->isModified(); }
+        // Unapplied Source edits count as unsaved changes too.
+        bool isDirty() const override { return (document_ != nullptr && document_->isModified()) || hasUnappliedSource(); }
         void markDirty() override { if (document_ != nullptr) { document_->markModified(); } }
 
         // filePath can be any real, absolute ".newui" path - a user's
@@ -525,6 +538,16 @@ namespace CodeToolsVsix
         // Cleared in the destructor; guards editComponent()'s posted task.
         std::shared_ptr<bool> aliveFlag_ = std::make_shared<bool>(true);
         std::unique_ptr<MenuDesigner> menuDesigner_;
+
+        newui::SyncReturn handleModeChanged(newui::SegmentedControl& sender);
+        // Whether Source is showing text that differs from what it last loaded.
+        bool hasUnappliedSource() const;
+        // While Source shows unedited text, keeps it in step with the document.
+        void refreshSourceIfUnedited();
+        void reloadSourceText();
+        bool sourceMode_ = false;
+        std::string sourceBaseline_;   // the text Source last loaded
+        bool changingMode_ = false;
         // Removed in the destructor - the canvas well (in the root's tree) can outlive this editor
         // and keep laying out while the root is torn down.
         newui::Connection canvasWellSizeConnection_;

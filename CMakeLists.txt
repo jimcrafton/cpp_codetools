@@ -162,6 +162,34 @@ target_include_directories(cpptools PUBLIC include ${CMAKE_CURRENT_BINARY_DIR}/i
 target_link_libraries(cpptools PUBLIC libclang::libclang)
 add_dependencies(cpptools cpptools_version)
 
+# lex - lossless lexing/parsing, semantic diff and syntax highlighting (JSON5 today, C++ later),
+# brought over from lexer-base. Standard library only, so the editors can highlight without
+# pulling in libclang the way cpptools does.
+add_library(lex STATIC
+    src/lex/lexer_base.cpp
+    src/lex/json5_lexer.cpp
+    src/lex/json5_parser.cpp
+    src/lex/json5_hash.cpp
+    src/lex/json5_diff.cpp
+    src/lex/json5_presentation.cpp
+    src/lex/highlight.cpp
+    src/lex/json5_language.cpp
+    include/lex/lex.h
+    include/lex/lexer_base.h
+    include/lex/json5_lexer.h
+    include/lex/json5_ast.h
+    include/lex/json5_parser.h
+    include/lex/json5_hash.h
+    include/lex/json5_diff.h
+    include/lex/json5_presentation.h
+    include/lex/highlight.h
+    include/lex/json5_language.h)
+
+target_include_directories(lex PUBLIC include)
+if(MSVC)
+    target_compile_options(lex PRIVATE /utf-8)
+endif()
+
 add_subdirectory(tools/cppoutline)
 
 # codetools++ VSIX support - extension/NativeEditControls.dll, the native HWND edit surface
@@ -200,6 +228,8 @@ add_library(NativeEditControls SHARED
     extension/NativeEditControls/ComponentEditor.cpp
     extension/NativeEditControls/MenuDesigner.h
     extension/NativeEditControls/MenuDesigner.cpp
+    extension/NativeEditControls/SourceView.h
+    extension/NativeEditControls/SourceView.cpp
     extension/NativeEditControls/DesignerClipboard.h
     extension/NativeEditControls/DesignerClipboard.cpp
     extension/NativeEditControls/DesignerArrange.h
@@ -253,7 +283,7 @@ set(VSEXT_INCLUDES "C:/Program Files/Microsoft Visual Studio/18/Community/VSSDK/
 
 target_include_directories(NativeEditControls PUBLIC include ${VSEXT_INCLUDES})
 
-target_link_libraries(NativeEditControls PRIVATE cpptools newui user32.lib gdi32.lib)
+target_link_libraries(NativeEditControls PRIVATE cpptools newui lex user32.lib gdi32.lib)
 add_dependencies(NativeEditControls cpptools_version)
 
 # testharness - a plain newui::Application/newui::Frame .exe (extension/NativeEditControls/
@@ -280,6 +310,7 @@ add_executable(testharness
     extension/NativeEditControls/ColorChoices.cpp
     extension/NativeEditControls/ComponentEditor.cpp
     extension/NativeEditControls/MenuDesigner.cpp
+    extension/NativeEditControls/SourceView.cpp
     extension/NativeEditControls/DesignerClipboard.cpp
     extension/NativeEditControls/DesignerArrange.cpp
     extension/NativeEditControls/ToolboxRegistry.cpp
@@ -307,7 +338,7 @@ target_compile_definitions(testharness PRIVATE
 
 target_include_directories(testharness PRIVATE include ${VSEXT_INCLUDES})
 
-target_link_libraries(testharness PRIVATE cpptools newui user32.lib gdi32.lib comdlg32.lib)
+target_link_libraries(testharness PRIVATE cpptools newui lex user32.lib gdi32.lib comdlg32.lib)
 add_dependencies(testharness cpptools_version)
 
 cpptools_copy_libclang_dll(NativeEditControls)

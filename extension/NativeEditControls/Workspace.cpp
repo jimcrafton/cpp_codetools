@@ -156,17 +156,6 @@ namespace CodeToolsVsix
         modeControl_->setDesiredSize(modeControl_->naturalSize());
 
 
-        modeControl_->onSelectionChanged.add([this](newui::SegmentedControl& sender) {
-            auto idx = sender.selectedIndex();
-            
-            reinterpret_cast<newui::CardLayout*>(this->designerViews_->layout())->show(idx);
-			this->designerViews_->redraw();
-
-            return newui::SyncReturn::Handled;
-            });
-
-
-
         // "100%" (Main.dc.html's own ".tb-zoom") - a static placeholder,
         // not wired to anything real (no canvas zoom feature exists yet -
         // see zoomLabel()'s own header comment). Fixed width, same
@@ -280,36 +269,13 @@ namespace CodeToolsVsix
         designerViewsBuilder.name("workspaceDesignerViews")
             .visible(true)
             .layout<newui::CardLayout>();
-        
-        
-        newui::ViewBuilder<newui::SubView> designSourceBuilder;
-        designSourceBuilder.name("designSource")
-            .visible(true)
-            .bounds(newui::Rect(0.0f, 0.0f, 100, 100))
-            .layout<newui::AnchorLayout>()
-			.style<newui::ViewStyle>([](newui::ViewStyle& style) {
-			style.setBackgroundColor(newui::Color("red"));
-				});
-        designSource_ = designSourceBuilder.build();
 
-        newui::ViewBuilder<newui::TextControl> designSourceTxtBuilder;
-        designSourceTxtBuilder.name("designSourceTxt")
-            .visible(true)
-            .bounds(newui::Rect(0.0f, 0.0f, 100, 100))
-            .layoutParams<newui::AnchorLayoutParams>([](newui::AnchorLayoutParams& params) {
-            params.setAnchors(newui::Anchor::Left | newui::Anchor::Top
-                | newui::Anchor::Right | newui::Anchor::Bottom);
-                });
-        designSourceTxt_ = designSourceTxtBuilder.build();
-
-        designSource_->addChild(designSourceTxt_);
-
+        // Design and Source pages, one visible at a time - showMode() flips them.
+        sourceView_ = new SourceView();
         designerViews_ = designerViewsBuilder.build();
-		designerViews_->addChild(canvasWell_);
-
-        designerViews_->addChild(designSource_);
-		reinterpret_cast<newui::CardLayout*>(designerViews_->layout())->show(0);
-        
+        designerViews_->addChild(canvasWell_);
+        designerViews_->addChild(sourceView_);
+        showMode(kDesignModeSegment);
 
         // PropertiesGrid's own constructor already sets visible(true) and
         // its background color (matching FrameProxy/RootViewProxy/
@@ -492,23 +458,13 @@ namespace CodeToolsVsix
         self.child(topBar_).child(middle).child(statusBar_);
     }    
 
-    void Workspace::reloadDesignModel(newui::Model& model)
+    void Workspace::showMode(std::size_t mode)
     {
-		ViewDesignerModel& designModel = static_cast<ViewDesignerModel&>(model);
-        
-
-        json5::document existingDoc;
-        std::string existingText;
-        
-        newui::reflection::ObjectWriter writer;
-        writer.setDesignMode(true);
-        writer.beginObject(std::string(), nullptr);  // stamps "meta"; depth_ -> 1
-
-        writer.writeNested("rootView", rootViewProxy_);
-        writer.endObject(std::string(), nullptr);
-
-        auto str = json5::to_string(writer.doc);
-
-		designSourceTxt_->model().setText(newui::utf8ToWide(str));
+        auto* cards = static_cast<newui::CardLayout*>(designerViews_->layout());
+        cards->show(mode == kSourceModeSegment ? 1 : 0);
+        if (modeControl_->selectedIndex() != mode) {
+            modeControl_->setSelectedIndex(mode);
+        }
+        designerViews_->redraw();
     }
 }

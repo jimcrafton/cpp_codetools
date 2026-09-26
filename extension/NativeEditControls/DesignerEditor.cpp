@@ -20,6 +20,8 @@
 #include <newui/keyboard_constants.h>
 
 #include <algorithm>
+#include <fstream>
+#include <iterator>
 #include <utility>
 
 namespace CodeToolsVsix
@@ -286,6 +288,8 @@ namespace CodeToolsVsix
             });
         workspace_->setUndoStack(&undoStack_);
 
+        workspace_->modeControl()->onSelectionChanged.add(this, &DesignerEditor::handleModeChanged);
+
         menuDesigner_ = std::make_unique<MenuDesigner>(workspace_->canvasWell());
         menuDesigner_->setSelectionChangedHandler([this](newui::MenuItem* item) { handleMenuItemSelected(item); });
         menuDesigner_->setUndoStack(&undoStack_);
@@ -301,6 +305,7 @@ namespace CodeToolsVsix
                 menuDesigner_->menuBar()->rebuildButtons();
             }
             menuDesigner_->refresh();
+            refreshSourceIfUnedited();
         });
         workspace_->setPrimarySelectionProvider([this]() { return viewDesignerController_.primary(); });
         undoStack_.onActionPushed.add(this, &DesignerEditor::handleUndoStackActionPushed);
@@ -556,6 +561,9 @@ namespace CodeToolsVsix
     newui::SyncReturn DesignerEditor::handleMouseDblClick(newui::View& /*sender*/, const newui::Point& pt,
         std::uint32_t btnMask, std::uint32_t /*keyMask*/)
     {
+        if (sourceMode_) {
+            return newui::SyncReturn::Ignored;   // the canvas is hidden - its area belongs to the Source text
+        }
         newui::SubView* target = nullptr;
         if ((btnMask & newui::mbmLeftButton) == 0 || !hitTestDesignSurface(pt, target) || target == nullptr) {
             return newui::SyncReturn::Ignored;
@@ -590,6 +598,9 @@ namespace CodeToolsVsix
     newui::SyncReturn DesignerEditor::handleMouseDownForSelection(newui::View& /*sender*/, const newui::Point& pt,
         std::uint32_t btnMask, std::uint32_t keyMask)
     {
+        if (sourceMode_) {
+            return newui::SyncReturn::Ignored;   // the canvas is hidden - its area belongs to the Source text
+        }
         // A click on the menu designer's own columns belongs to them, not the canvas.
         if (menuDesigner_ != nullptr && menuDesigner_->contains(pt)) {
             moveDragEntries_.clear();
@@ -974,6 +985,9 @@ namespace CodeToolsVsix
         // While a menu item is selected, keys belong to the menu designer - the canvas commands
         // would act on its MenuBar. Undo/redo still apply.
         const bool undoKey = (keyMask & newui::kmCtrl) != 0 && VKeyCode == static_cast<std::uint32_t>(newui::vkLetterZ);
+        if (sourceMode_ && !undoKey) {
+            return newui::SyncReturn::Ignored;   // the canvas is hidden
+        }
         if (menuDesigner_ != nullptr && menuDesigner_->selectedItem() != nullptr && !undoKey) {
             return menuDesigner_->handleKeyDown(keyMask, VKeyCode) ? newui::SyncReturn::Handled : newui::SyncReturn::Ignored;
         }
@@ -1079,6 +1093,9 @@ namespace CodeToolsVsix
     newui::SyncReturn DesignerEditor::handleMouseMove(newui::View& /*sender*/, const newui::Point& pt,
         std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/)
     {
+        if (sourceMode_) {
+            return newui::SyncReturn::Ignored;   // the canvas is hidden - its area belongs to the Source text
+        }
         if (menuDesigner_ != nullptr && menuDesigner_->isDragging()) {
             menuDesigner_->dragTo(pt);
             return newui::SyncReturn::Handled;
@@ -1439,9 +1456,140 @@ namespace CodeToolsVsix
         return newui::SyncReturn::Ignored;
     }
 
-    newui::SyncReturn DesignerEditor::handleViewDesignerModelChanged(newui::Model& sender)
+    newui::SyncReturn DesignerEditor::handleViewDesignerModelChanged(newui::Model& /*sender*/)
     {
-        workspace_->reloadDesignModel(sender);
+        refreshSourceIfUnedited();
+        return newui::SyncReturn::Handled;
+    }
+
+    // --- Source mode ---------------------------------------------------------------------
+
+    std::string DesignerEditor::documentText() const
+    {
+        // The saved file's other top-level keys (its title, ...) ride along, as they do on Save.
+        std::string existing;
+        if (document_ != nullptr && document_->hasFilePath()) {
+            std::ifstream in(utf8ToWide(document_->filePath()), std::ios::binary);
+            existing.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+        }
+        return newui::Bundle::instance().writeRootViewToText(*workspace_->rootViewProxy(), existing, /*designMode=*/true);
+    }
+
+    bool DesignerEditor::applyDocumentText(const std::string& text, std::string* error)
+    {
+        // Read into a scratch surface first: a text that doesn't parse changes nothing.
+        auto* scratch = new newui::RootViewProxy();
+        if (!newui::Bundle::instance().loadRootViewFromText(*scratch, text, /*designMode=*/true, error)) {
+            scratch->destroy();
+            delete scratch;
+            return false;
+        }
+        std::vector<newui::SubView*> incoming = scratch->childViews();
+        for (newui::SubView* child : incoming) {
+            scratch->removeChild(child);
+        }
+        const newui::Size clientSize = scratch->bounds().size();
+        scratch->destroy();
+        delete scratch;
+
+        newui::RootViewProxy* surface = workspace_->rootViewProxy();
+        const std::vector<newui::SubView*> outgoing = surface->childViews();
+        const bool hasClientSize = clientSize.width > 0.0f && clientSize.height > 0.0f;
+        const newui::Size newFrameSize = hasClientSize
+            ? newui::Size(clientSize.width, clientSize.height + newui::FrameProxy::kTitleBarHeight) : newui::Size();
+        const newui::Size oldFrameSize = workspace_->frameProxy()->bounds().size();
+        const std::string oldTitle = workspace_->frameProxy()->title();
+        std::string newTitle = oldTitle;
+        newui::Frame scratchFrame;
+        if (newui::Bundle::instance().loadFrameFromText(scratchFrame, text)) {
+            newTitle = scratchFrame.getTitle();
+        }
+
+        // Swaps whole trees rather than rebuilding: the detached one is kept alive by this
+        // action, so undoing restores the very same controls earlier undo steps refer to.
+        auto swapIn = [this, surface](const std::vector<newui::SubView*>& in, const std::vector<newui::SubView*>& out,
+                          const newui::Size& frameSize, const std::string& title) {
+            viewDesignerController_.clearSelection();
+            for (newui::SubView* child : out) {
+                surface->removeChild(child);
+            }
+            for (newui::SubView* child : in) {
+                surface->addChild(child);
+            }
+            workspace_->setCanvasFrameSize(frameSize);
+            workspace_->frameProxy()->updateLayout();
+            workspace_->frameProxy()->setTitle(title);
+            viewDesignerModel_->refresh();
+            markDirty();
+            getRootView()->markDirty();
+        };
+
+        newui::UndoableAction action;
+        action.description = "Edit Source";
+        action.doIt = [swapIn, incoming, outgoing, newFrameSize, newTitle] { swapIn(incoming, outgoing, newFrameSize, newTitle); };
+        action.undoIt = [swapIn, incoming, outgoing, oldFrameSize, oldTitle] { swapIn(outgoing, incoming, oldFrameSize, oldTitle); };
+        undoStack_.push(std::move(action));
+        return true;
+    }
+
+    bool DesignerEditor::hasUnappliedSource() const
+    {
+        return sourceMode_ && workspace_ != nullptr && workspace_->sourceView()->text() != sourceBaseline_;
+    }
+
+    void DesignerEditor::reloadSourceText()
+    {
+        sourceBaseline_ = documentText();
+        workspace_->sourceView()->setText(sourceBaseline_);
+        workspace_->sourceView()->setError(std::string());
+    }
+
+    void DesignerEditor::refreshSourceIfUnedited()
+    {
+        if (sourceMode_ && workspace_ != nullptr && workspace_->sourceView()->text() == sourceBaseline_) {
+            reloadSourceText();
+        }
+    }
+
+    bool DesignerEditor::setSourceMode(bool source)
+    {
+        if (workspace_ == nullptr || source == sourceMode_) {
+            return true;
+        }
+        SourceView* sourceView = workspace_->sourceView();
+        if (source) {
+            reloadSourceText();
+            sourceMode_ = true;
+            workspace_->showMode(Workspace::kSourceModeSegment);
+            getRootView()->markDirty();
+            return true;
+        }
+
+        const std::string text = sourceView->text();
+        if (text != sourceBaseline_) {
+            std::string error;
+            if (!applyDocumentText(text, &error)) {
+                sourceView->setError(error);
+                workspace_->showMode(Workspace::kSourceModeSegment);   // the switch stays on Source
+                getRootView()->markDirty();
+                return false;
+            }
+        }
+        sourceView->setError(std::string());
+        sourceMode_ = false;
+        workspace_->showMode(Workspace::kDesignModeSegment);
+        getRootView()->markDirty();
+        return true;
+    }
+
+    newui::SyncReturn DesignerEditor::handleModeChanged(newui::SegmentedControl& sender)
+    {
+        if (changingMode_) {
+            return newui::SyncReturn::Handled;   // showMode() moving the switch back
+        }
+        changingMode_ = true;
+        setSourceMode(sender.selectedIndex() == Workspace::kSourceModeSegment);
+        changingMode_ = false;
         return newui::SyncReturn::Handled;
     }
 
@@ -1509,7 +1657,7 @@ namespace CodeToolsVsix
 
     bool DesignerEditor::hoverToolboxEntryAt(const std::wstring& payload, const newui::Point& rootLocalPt)
     {
-        if (workspace_ == nullptr || !Toolbox::isDragPayload(payload)) {
+        if (workspace_ == nullptr || sourceMode_ || !Toolbox::isDragPayload(payload)) {
             endToolboxHover();
             return false;
         }
@@ -1575,7 +1723,7 @@ namespace CodeToolsVsix
     bool DesignerEditor::dropToolboxEntryAt(const std::wstring& payload, const newui::Point& rootLocalPt)
     {
         endToolboxHover();  // a drop ends the hover - the cues must not linger over the new control
-        if (workspace_ == nullptr || document_ == nullptr) {
+        if (workspace_ == nullptr || document_ == nullptr || sourceMode_) {
             return false;
         }
         newui::SubView* created = Toolbox::createFromDragPayload(payload);
@@ -1911,6 +2059,9 @@ namespace CodeToolsVsix
         if (resetDocument) {
             document_->reset();
         }
+        if (sourceMode_) {
+            reloadSourceText();
+        }
         getRootView()->markDirty();
     }
 
@@ -1956,6 +2107,7 @@ namespace CodeToolsVsix
             undoStack_.undo();
         }
         refreshUndoRedoButtons();
+        refreshSourceIfUnedited();
         if (menuDesigner_ != nullptr) {
             menuDesigner_->refresh();
         }
@@ -1970,6 +2122,7 @@ namespace CodeToolsVsix
             undoStack_.redo();
         }
         refreshUndoRedoButtons();
+        refreshSourceIfUnedited();
         if (menuDesigner_ != nullptr) {
             menuDesigner_->refresh();
         }
@@ -2132,6 +2285,9 @@ namespace CodeToolsVsix
         viewDesignerController_.clearSelection();
         undoStack_.clear();
         refreshUndoRedoButtons();
+        if (sourceMode_) {
+            reloadSourceText();
+        }
 
         // Document::load() marks the document clean and adopts the path once this returns true.
         return true;
@@ -2149,6 +2305,16 @@ namespace CodeToolsVsix
 
     bool DesignerEditor::saveToFile(const std::string& absolutePath)
     {
+        // Unapplied Source edits are what's being saved - apply them first, or refuse.
+        if (hasUnappliedSource()) {
+            std::string error;
+            const std::string text = workspace_->sourceView()->text();
+            if (!applyDocumentText(text, &error)) {
+                workspace_->sourceView()->setError(error);
+                return false;
+            }
+            sourceBaseline_ = text;
+        }
 
         // No Bundle::setExecutableDirOverride() call here - see load()'s
         // own comment. writeRootViewToFile() resolves directly against

@@ -11,6 +11,21 @@ cpptools_copy_libclang_dll(cpptools_tests)
 include(GoogleTest)
 gtest_discover_tests(cpptools_tests)
 
+# The lex library's checks (from lexer-base) - their CHECK macro reports through GoogleTest, see
+# lex/test_util.h.
+add_executable(lex_tests
+    lex/lex_tests.cpp
+    lex/lexer_base_tests.cpp
+    lex/json5_lexer_tests.cpp
+    lex/json5_parser_tests.cpp
+    lex/json5_diff_tests.cpp
+    lex/json5_presentation_tests.cpp
+    lex/highlight_tests.cpp)
+target_link_libraries(lex_tests PRIVATE lex GTest::gtest_main Threads::Threads)
+if(MSVC)
+    target_compile_options(lex_tests PRIVATE /utf-8)
+endif()
+
 # PropertyEditor (extension/NativeEditControls/) needs real newui::reflection
 # types - a separate executable from cpptools_tests (which doesn't link
 # newui at all) rather than adding that dependency there.
@@ -56,6 +71,7 @@ add_executable(nativeeditcontrols_tests
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/ColorChoices.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/ComponentEditor.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/MenuDesigner.cpp"
+    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/SourceView.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/DesignerClipboard.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/DesignerArrange.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/ToolboxRegistry.cpp"
@@ -86,7 +102,7 @@ target_compile_definitions(nativeeditcontrols_tests PRIVATE
 
 target_include_directories(nativeeditcontrols_tests PRIVATE "${CMAKE_SOURCE_DIR}/include" ${VSEXT_INCLUDES})
 
-target_link_libraries(nativeeditcontrols_tests PRIVATE cpptools newui user32.lib gdi32.lib comdlg32.lib GTest::gtest_main Threads::Threads)
+target_link_libraries(nativeeditcontrols_tests PRIVATE cpptools newui lex user32.lib gdi32.lib comdlg32.lib GTest::gtest_main Threads::Threads)
 
 cpptools_copy_libclang_dll(nativeeditcontrols_tests)
 
