@@ -3052,3 +3052,52 @@ TEST(MenuDesigner, TheEditorCanBeDestroyedWhileItsRootViewLivesOn)
     EXPECT_EQ(file->children().size(), 1u) << "an open edit is dropped, not committed, on teardown";
     root.destroy();   // what the frame does next - its teardown used to lay out the canvas well
 }
+
+TEST(MenuDesignerEditing, EnterAfterRenamingANewSubmenuItemMovesToTheNextRow)
+{
+    MenuDesignerFixture f;
+    f.editor.viewDesignerController().selectExclusive(f.bar);
+    f.designer().select(f.open);
+
+    f.designer().createSubmenu(f.open);   // "New Item", being renamed
+    f.designer().editField()->setText(L"Recent A");
+    f.designer().commitEdit(true);
+
+    ASSERT_TRUE(f.designer().isEditing()) << "Enter moves on to the submenu's Type Here row";
+    EXPECT_EQ(f.designer().editField()->text(), L"");
+    f.designer().editField()->setText(L"Recent B");
+    f.designer().commitEdit(true);
+
+    ASSERT_EQ(f.open->children().size(), 2u);
+    EXPECT_EQ(f.open->children()[0]->text(), "Recent A");
+    EXPECT_EQ(f.open->children()[1]->text(), "Recent B");
+}
+
+TEST(MenuDesignerEditing, EnterAfterRenamingAMiddleItemMovesToRenameTheNextOne)
+{
+    MenuDesignerFixture f;
+    f.editor.viewDesignerController().selectExclusive(f.bar);
+    f.designer().select(f.open);
+
+    f.designer().beginEdit(f.file, 0);   // rename Open
+    f.designer().commitEdit(true);
+
+    ASSERT_TRUE(f.designer().isEditing());
+    EXPECT_EQ(f.designer().selectedItem(), f.recent);
+    EXPECT_EQ(f.designer().editField()->text(), L"Recent");
+}
+
+TEST(MenuDesignerEditing, CreateSubmenuOpensTheNewItemWithAllItsTextSelected)
+{
+    MenuDesignerFixture f;
+    f.editor.viewDesignerController().selectExclusive(f.bar);
+    f.designer().select(f.open);
+
+    f.designer().createSubmenu(f.open);
+
+    newui::TextField* field = f.designer().editField();
+    ASSERT_TRUE(f.designer().isEditing());
+    ASSERT_EQ(field->selection().ranges().size(), 1u);
+    EXPECT_EQ(field->selection().ranges()[0].start(), 0u);
+    EXPECT_EQ(field->selection().ranges()[0].length(), field->text().size());
+}

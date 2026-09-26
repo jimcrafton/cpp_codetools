@@ -657,20 +657,23 @@ namespace CodeToolsVsix
         const std::string text = wideToUtf8(editField_->text());
         editParent_ = nullptr;   // before anything below can re-enter through lost focus
 
-        newui::MenuItem* created = nullptr;
+        // The item just renamed or created - nullptr when an empty placeholder was committed.
+        newui::MenuItem* edited = nullptr;
         if (index < parent->children().size()) {
+            edited = parent->children()[index];
             if (!text.empty()) {
-                renameItem(parent->children()[index], text);
+                renameItem(edited, text);
             }
         } else if (!text.empty()) {
-            created = insertItem(parent, index, text);
-            select(created);
+            edited = insertItem(parent, index, text);
+            select(edited);
         }
 
-        if (continueEditing && created != nullptr) {
-            // The next placeholder: below the new item, or - for a new top-level menu - its first item.
+        if (continueEditing && edited != nullptr) {
+            // Enter moves on: to the next row (an item to rename, or Type Here), or - from a bar
+            // menu - into its own first row.
             if (isBarRoot(parent)) {
-                beginEdit(created, 0);
+                beginEdit(edited, 0);
             } else {
                 beginEdit(parent, index + 1);
             }
@@ -865,12 +868,28 @@ namespace CodeToolsVsix
         }
         newui::MenuItem* item = selected_;
         const bool ctrl = (keyMask & newui::kmCtrl) != 0;
+        // A command that opens the edit field runs after this key event: RootView hands the same
+        // key on to whatever is focused once this returns - that would be the new field, and the
+        // key (Right arrow, Enter) would collapse its selection or commit it at once.
+        std::shared_ptr<bool> alive = alive_;
+        auto afterKey = [alive](std::function<void()> command) {
+            auto guarded = [alive, command] {
+                if (*alive) {
+                    command();
+                }
+            };
+            if (newui::RunLoop::current()) {
+                newui::RunLoop::current().post(std::move(guarded));
+            } else {
+                guarded();
+            }
+        };
         switch (vkCode) {
         case newui::vkDelete: deleteItem(item); return true;
-        case newui::vkInsert: insertBefore(item); return true;
+        case newui::vkInsert: afterKey([this, item] { insertBefore(item); }); return true;
         case newui::vkRightArrow:
             if (ctrl) {
-                createSubmenu(item);
+                afterKey([this, item] { createSubmenu(item); });
             } else {
                 moveSelection(Direction::Right);
             }
@@ -880,7 +899,11 @@ namespace CodeToolsVsix
         case newui::vkDownArrow: moveSelection(Direction::Down); return true;
         case newui::vkReturn:
         case newui::vkF2:
-            beginEdit(item->parent(), indexIn(item->parent(), item));
+            afterKey([this, item] {
+                if (item->parent() != nullptr) {
+                    beginEdit(item->parent(), indexIn(item->parent(), item));
+                }
+            });
             return true;
         case newui::vkEscape: select(nullptr); return true;
         default: return false;
