@@ -309,6 +309,7 @@ namespace CodeToolsVsix
         });
         workspace_->setPrimarySelectionProvider([this]() { return viewDesignerController_.primary(); });
         undoStack_.onActionPushed.add(this, &DesignerEditor::handleUndoStackActionPushed);
+        workspace_->sourceView()->textControl()->model().onHistoryChanged.add(this, &DesignerEditor::handleSourceHistoryChanged);
 
         // New/Open/Save/Undo/Redo - temporary testing-phase convenience,
         // see workspace_->newButton() etc.'s own header comment
@@ -1560,6 +1561,7 @@ namespace CodeToolsVsix
         if (source) {
             reloadSourceText();
             sourceMode_ = true;
+            refreshUndoRedoButtons();
             workspace_->showMode(Workspace::kSourceModeSegment);
             getRootView()->markDirty();
             return true;
@@ -1577,6 +1579,7 @@ namespace CodeToolsVsix
         }
         sourceView->setError(std::string());
         sourceMode_ = false;
+        refreshUndoRedoButtons();
         workspace_->showMode(Workspace::kDesignModeSegment);
         getRootView()->markDirty();
         return true;
@@ -1959,12 +1962,18 @@ namespace CodeToolsVsix
 
     bool DesignerEditor::copySelection()
     {
+        if (sourceMode_ && workspace_ != nullptr) {
+            return workspace_->sourceView()->textControl()->copy();   // the text, not the design selection
+        }
         pasteCount_ = 0;
         return DesignerClipboard::copyToClipboard(viewDesignerController_.selected(), getRootView());
     }
 
     bool DesignerEditor::cutSelection()
     {
+        if (sourceMode_ && workspace_ != nullptr) {
+            return workspace_->sourceView()->textControl()->cut();
+        }
         if (!copySelection()) {
             return false;
         }
@@ -1973,6 +1982,9 @@ namespace CodeToolsVsix
 
     bool DesignerEditor::pasteFromClipboard()
     {
+        if (sourceMode_ && workspace_ != nullptr) {
+            return workspace_->sourceView()->textControl()->paste();
+        }
         bool fromText = false;
         std::vector<std::string> texts = DesignerClipboard::readClipboard(&fromText);
         if (texts.empty()) {
@@ -2102,6 +2114,14 @@ namespace CodeToolsVsix
 
     bool DesignerEditor::undo()
     {
+        if (sourceMode_ && workspace_ != nullptr) {
+            // The Source page has its own history; the document's isn't touched while it's showing
+            // (an undo there would change a design you can't see).
+            const bool did = workspace_->sourceView()->textControl()->undo();
+            refreshUndoRedoButtons();
+            getRootView()->markDirty();
+            return did;
+        }
         const bool could = undoStack_.canUndo();
         if (could) {
             undoStack_.undo();
@@ -2117,6 +2137,12 @@ namespace CodeToolsVsix
 
     bool DesignerEditor::redo()
     {
+        if (sourceMode_ && workspace_ != nullptr) {
+            const bool did = workspace_->sourceView()->textControl()->redo();
+            refreshUndoRedoButtons();
+            getRootView()->markDirty();
+            return did;
+        }
         const bool could = undoStack_.canRedo();
         if (could) {
             undoStack_.redo();
@@ -2149,9 +2175,25 @@ namespace CodeToolsVsix
         return newui::SyncReturn::Ignored;
     }
 
+    newui::SyncReturn DesignerEditor::handleSourceHistoryChanged(newui::text::TextModel& /*sender*/)
+    {
+        if (sourceMode_) {
+            refreshUndoRedoButtons();
+        }
+        return newui::SyncReturn::Ignored;
+    }
+
     void DesignerEditor::refreshUndoRedoButtons()
     {
         if (workspace_ == nullptr) {
+            return;
+        }
+        if (sourceMode_) {
+            const newui::TextControl* text = workspace_->sourceView()->textControl();
+            workspace_->undoButton()->setEnabled(text->canUndo());
+            workspace_->redoButton()->setEnabled(text->canRedo());
+            workspace_->undoRedoStatusLabel()->setText(text->canUndo() ? "Undo: Source edit"
+                : text->canRedo() ? "Redo: Source edit" : std::string());
             return;
         }
         workspace_->undoButton()->setEnabled(undoStack_.canUndo());

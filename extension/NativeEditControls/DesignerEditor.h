@@ -412,6 +412,10 @@ namespace CodeToolsVsix
         // sites can each change canUndo()/canRedo(), so this is the one
         // place that actually pushes that state onto the two buttons.
         newui::SyncReturn handleUndoStackActionPushed(newui::UndoStack& sender, const newui::UndoableAction& action);
+        // The Source page's own text history changed: the buttons follow it while it's showing.
+        newui::SyncReturn handleSourceHistoryChanged(newui::text::TextModel& sender);
+        // Follows whichever history is active: the document's UndoStack, or the Source page's text
+        // history while that page is showing.
         void refreshUndoRedoButtons();
 
         // One dragged view's starting state, captured at mouseDown - parent is the view's real

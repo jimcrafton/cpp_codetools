@@ -64,19 +64,28 @@ namespace CodeToolsVsix
         static std::vector<newui::text::TextFold> foldsFor(const lex::json5::ParseResult& parsed, const std::wstring& text);
 
     private:
-        // Re-lexes the text, recolors it (lex's light or dark theme, following the system),
-        // squiggles what doesn't parse and refreshes the folds - keeping collapsed the ones still
-        // there.
+        struct Analysis;
+        struct AsyncState;
+
+        // The pure part: lex, parse, style ranges and folds for a text snapshot. Thread-safe.
+        static Analysis analyze(const std::wstring& text);
+        // Recolors (lex's light or dark theme, following the system), squiggles what doesn't parse
+        // and refreshes the folds - keeping collapsed the ones still there. UI thread.
+        void apply(Analysis&& analysis);
+        // analyze + apply, synchronously.
         void highlight();
-        // Typing shows at once; re-highlighting (lex, parse, styles, folds - whole-document) waits
-        // until it pauses, on the run loop - or runs right away with no loop running (tests).
+        // analyze on a worker over a snapshot, apply back on the loop; a result for text that has
+        // since changed is dropped, and one worker runs at a time.
+        void startBackgroundHighlight(newui::RunLoop& loop);
+        // Typing shows at once; re-highlighting (whole-document) waits until it pauses, on the
+        // run loop - or runs right away with no loop running (tests).
         newui::SyncReturn handleTextChanged(newui::Model& sender);
         newui::SyncReturn handleEditStateChanged(newui::TextController& sender);
         newui::SyncReturn handleWhitespaceToggled(newui::Button& sender);
         // The status bar and the breadcrumbs, for the caret and selection now.
         void updateStatus();
 
-        lex::SyntaxHighlighter highlighter_;
+        std::shared_ptr<AsyncState> async_;
         newui::Label* errorBar_ = nullptr;
         newui::ScrollView* scrollView_ = nullptr;
         newui::TextFoldingControl* textControl_ = nullptr;

@@ -2,6 +2,7 @@
 #include "../extension/NativeEditControls/DesignerEditor.h"
 
 #include <newui/bundle.h>
+#include <newui/clipboardmgr.h>
 #include <newui/dragndrop.h>
 #include <newui/controls.h>
 #include <newui/frame.h>
@@ -18,7 +19,10 @@
 #include <gtest/gtest.h>
 
 #include <any>
+#include <chrono>
 #include <fstream>
+#include <future>
+#include <thread>
 #include <iterator>
 #include <memory>
 #include <string>
@@ -3268,6 +3272,116 @@ namespace
     }
 }
 
+TEST(DesignerSourceClipboard, CopyCutAndPasteOnTheSourcePageActOnTheText)
+{
+    SourceFixture f;
+    f.editor.setSourceMode(true);
+    newui::TextFoldingControl* text = f.source().textControl();
+    const std::string original = f.source().text();
+
+    // Copy: the selected text, not the design selection.
+    text->selection().setRange(newui::text::TextRange(0, 1));
+    ASSERT_TRUE(f.editor.execCommand(EditorCommand::Copy, 0, nullptr));
+    std::wstring onClipboard;
+    ASSERT_TRUE(newui::ClipboardManager::getText(onClipboard));
+    EXPECT_EQ(onClipboard, std::wstring(1, static_cast<wchar_t>(original[0])));
+    EXPECT_EQ(f.source().text(), original);
+
+    // Cut removes it; Paste puts it back - each one undo step on the Source page.
+    ASSERT_TRUE(f.editor.execCommand(EditorCommand::Cut, 0, nullptr));
+    EXPECT_EQ(f.source().text(), original.substr(1));
+    text->caret().setPosition(newui::text::TextPosition(0));
+    ASSERT_TRUE(f.editor.execCommand(EditorCommand::Paste, 0, nullptr));
+    EXPECT_EQ(f.source().text(), original);
+
+    ASSERT_TRUE(f.editor.undo());   // the paste
+    EXPECT_EQ(f.source().text(), original.substr(1));
+    ASSERT_TRUE(f.editor.undo());   // the cut
+    EXPECT_EQ(f.source().text(), original);
+    EXPECT_FALSE(f.editor.undoStack().canUndo()) << "the document's history was never involved";
+}
+
+TEST(DesignerSourceClipboard, TheDesignSurfaceStillCopiesItsSelectionOnTheDesignPage)
+{
+    SourceFixture f;
+    f.editor.viewDesignerController().selectExclusive(f.button);
+    ASSERT_TRUE(f.editor.execCommand(EditorCommand::Copy, 0, nullptr));
+    std::wstring onClipboard;
+    ASSERT_TRUE(newui::ClipboardManager::getText(onClipboard));
+    EXPECT_NE(onClipboard.find(L"okButton"), std::wstring::npos) << "the serialized control, not source text";
+}
+
+
+TEST(DesignerSourceUndo, UndoAndRedoOnTheSourcePageActOnTheSourceTextNotTheDocument)
+{
+    SourceFixture f;
+    int documentUndos = 0;
+    newui::UndoableAction action;
+    action.description = "Document change";
+    action.doIt = [] {};
+    action.undoIt = [&documentUndos] { ++documentUndos; };
+    f.editor.undoStack().push(std::move(action));
+
+    f.editor.setSourceMode(true);
+    const std::string original = f.source().text();
+    f.source().textControl()->model().insert(0, L"  ");
+    ASSERT_NE(f.source().text(), original);
+
+    ASSERT_TRUE(f.editor.undo());
+    EXPECT_EQ(f.source().text(), original);
+    EXPECT_EQ(documentUndos, 0) << "the document's history isn't touched from the Source page";
+    EXPECT_TRUE(f.editor.undoStack().canUndo());
+
+    ASSERT_TRUE(f.editor.redo());
+    EXPECT_NE(f.source().text(), original);
+    EXPECT_EQ(documentUndos, 0);
+
+    // Nothing more to undo there - and still not the document's step.
+    ASSERT_TRUE(f.editor.undo());
+    EXPECT_FALSE(f.editor.undo());
+    EXPECT_EQ(documentUndos, 0);
+}
+
+TEST(DesignerSourceUndo, TheToolbarButtonsFollowTheHistoryThatIsShowing)
+{
+    SourceFixture f;
+    newui::UndoableAction action;
+    action.description = "Document change";
+    action.doIt = [] {};
+    action.undoIt = [] {};
+    f.editor.undoStack().push(std::move(action));
+    EXPECT_TRUE(f.editor.workspace()->undoButton()->isEnabled());
+
+    f.editor.setSourceMode(true);
+    EXPECT_FALSE(f.editor.workspace()->undoButton()->isEnabled()) << "nothing to undo in the fresh Source text";
+    EXPECT_FALSE(f.editor.workspace()->redoButton()->isEnabled());
+
+    f.source().textControl()->model().insert(0, L" ");
+    EXPECT_TRUE(f.editor.workspace()->undoButton()->isEnabled());
+    EXPECT_FALSE(f.editor.workspace()->redoButton()->isEnabled());
+
+    f.editor.undo();
+    EXPECT_FALSE(f.editor.workspace()->undoButton()->isEnabled());
+    EXPECT_TRUE(f.editor.workspace()->redoButton()->isEnabled());
+
+    ASSERT_TRUE(f.editor.setSourceMode(false));
+    EXPECT_TRUE(f.editor.workspace()->undoButton()->isEnabled()) << "back to the document's own history";
+    EXPECT_FALSE(f.editor.workspace()->redoButton()->isEnabled());
+}
+
+TEST(DesignerSourceUndo, EnteringSourceStartsAFreshTextHistory)
+{
+    SourceFixture f;
+    f.editor.setSourceMode(true);
+    f.source().textControl()->model().insert(0, L" ");
+    ASSERT_TRUE(f.source().textControl()->canUndo());
+    ASSERT_TRUE(f.editor.setSourceMode(false));
+
+    f.editor.setSourceMode(true);
+    EXPECT_FALSE(f.source().textControl()->canUndo());
+}
+
+
 TEST(DesignerSource, EnteringSourceShowsTheDocumentText)
 {
     SourceFixture f;
@@ -3351,8 +3465,10 @@ TEST(DesignerSource, AnEditElsewhereRefreshesUneditedSourceText)
     EXPECT_EQ(f.source().text(), f.editor.documentText());
 }
 
-TEST(DesignerSource, UndoWhileInSourceRefreshesItsText)
+TEST(DesignerSource, UndoOnTheSourcePageLeavesTheDocumentsHistoryAlone)
 {
+    // Undo is scoped to the page that's showing: on Source it's the text's own history, so it can't
+    // silently revert a design change you can't see (and rewrite the text under you).
     SourceFixture f;
     newui::Button extra;
     extra.setName("extraButton");
@@ -3360,8 +3476,15 @@ TEST(DesignerSource, UndoWhileInSourceRefreshesItsText)
     f.editor.setSourceMode(true);
     ASSERT_NE(f.source().text().find("extraButton"), std::string::npos);
 
-    ASSERT_TRUE(f.editor.undo());
+    EXPECT_FALSE(f.editor.undo()) << "nothing has been typed on the Source page";
 
+    EXPECT_NE(f.source().text().find("extraButton"), std::string::npos);
+    EXPECT_TRUE(f.editor.undoStack().canUndo()) << "the paste is still there to undo from Design";
+
+    // From the Design page it does undo, and the Source page then shows the document as it is.
+    ASSERT_TRUE(f.editor.setSourceMode(false));
+    ASSERT_TRUE(f.editor.undo());
+    f.editor.setSourceMode(true);
     EXPECT_EQ(f.source().text().find("extraButton"), std::string::npos);
 }
 
@@ -3463,6 +3586,71 @@ TEST(SourceViewHighlight, KeysStringsNumbersAndLiteralsGetTheirThemeColors)
     }
 }
 
+namespace
+{
+    // Runs fn on the loop's thread and waits for it.
+    template <typename Fn>
+    void onLoop(newui::RunLoop& loop, Fn fn)
+    {
+        std::promise<void> done;
+        loop.post([&]() { fn(); done.set_value(); });
+        done.get_future().wait();
+    }
+}
+
+TEST(SourceViewHighlight, WithARunLoopTheColorsArriveAfterTheBackgroundPass)
+{
+    newui::RunLoop::RunLoopThread loopThread = newui::RunLoop::runThreaded();
+    newui::RunLoop& loop = *loopThread.loop;
+    loop.waitForStart();
+
+    std::unique_ptr<CodeToolsVsix::SourceView> view;
+    onLoop(loop, [&]() {
+        view = std::make_unique<CodeToolsVsix::SourceView>();
+        view->setText("{ a: 1 }");
+        EXPECT_TRUE(view->colorRuns().empty());   // deferred, not synchronous
+    });
+
+    bool colored = false;
+    for (int i = 0; i < 100 && !colored; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        onLoop(loop, [&]() { colored = runAt(*view, 5) != nullptr; });
+    }
+    EXPECT_TRUE(colored);
+    if (colored) {
+        onLoop(loop, [&]() { EXPECT_EQ(runAt(*view, 5)->color, themeColor(lex::StyleId::Number)); });
+    }
+
+    onLoop(loop, [&]() { view.reset(); });
+    loop.quit();
+    loopThread.thread.join();
+}
+
+TEST(SourceViewHighlight, ADestroyedViewIsNotTouchedByAWorkerStillRunning)
+{
+    newui::RunLoop::RunLoopThread loopThread = newui::RunLoop::runThreaded();
+    newui::RunLoop& loop = *loopThread.loop;
+    loop.waitForStart();
+
+    std::unique_ptr<CodeToolsVsix::SourceView> view;
+    std::string big = "[\n";
+    for (int i = 0; i < 20000; ++i) {
+        big += "  { a: " + std::to_string(i) + ", b: 'x' },\n";
+    }
+    big += "]";
+    onLoop(loop, [&]() {
+        view = std::make_unique<CodeToolsVsix::SourceView>();
+        view->setText(big);
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(80));   // past the debounce: the worker is running
+    onLoop(loop, [&]() { view.reset(); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));  // let its completion task run and bail
+    onLoop(loop, []() {});
+
+    loop.quit();
+    loopThread.thread.join();
+}
+
 TEST(SourceViewHighlight, RecolorsWhenTheTextChanges)
 {
     CodeToolsVsix::SourceView view;
@@ -3474,6 +3662,29 @@ TEST(SourceViewHighlight, RecolorsWhenTheTextChanges)
     const newui::text::TextColorRun* str = runAt(view, 5);
     ASSERT_NE(str, nullptr);
     EXPECT_EQ(str->color, themeColor(lex::StyleId::String));
+}
+
+TEST(SourceViewHistory, EditsCanBeUndoneTheHighlightingFollowsAndSetTextForgetsTheHistory)
+{
+    CodeToolsVsix::SourceView view;
+    view.setText("{ a: 1 }");
+    newui::text::TextModel& model = view.textControl()->model();
+    EXPECT_FALSE(model.canUndo());   // loading isn't an edit
+
+    model.replace(newui::text::TextRange(5, 1), L"'x'");
+    ASSERT_EQ(view.text(), "{ a: 'x' }");
+    ASSERT_EQ(runAt(view, 5)->color, themeColor(lex::StyleId::String));
+    EXPECT_TRUE(model.canUndo());
+
+    ASSERT_TRUE(model.undo());
+    EXPECT_EQ(view.text(), "{ a: 1 }");
+    EXPECT_EQ(runAt(view, 5)->color, themeColor(lex::StyleId::Number));   // re-highlighted for the restored text
+    ASSERT_TRUE(model.redo());
+    EXPECT_EQ(view.text(), "{ a: 'x' }");
+
+    view.setText("{ b: 2 }");
+    EXPECT_FALSE(model.canUndo());
+    EXPECT_FALSE(model.canRedo());
 }
 
 TEST(SourceViewHighlight, ValidTextHasNoSquiggles)

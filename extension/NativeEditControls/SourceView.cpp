@@ -3,6 +3,7 @@
 
 #include <newui/font.h>
 #include <newui/layout.h>
+#include <newui/texthistory.h>
 #include <newui/textstyle.h>
 #include <newui/uicolormanager.h>
 
@@ -12,6 +13,7 @@
 #include <algorithm>
 #include <chrono>
 #include <memory>
+#include <thread>
 
 namespace CodeToolsVsix
 {
@@ -185,7 +187,25 @@ namespace CodeToolsVsix
         return crumbs;
     }
 
-    SourceView::SourceView() : highlighter_(lex::json5Language())
+    // Everything the highlighter derives from a text snapshot - no UI state, so a worker can build it.
+    struct SourceView::Analysis
+    {
+        std::vector<newui::text::TextStyleRange> ranges;
+        lex::json5::ParseResult parsed;
+        std::vector<newui::text::TextFold> folds;   // none collapsed
+    };
+
+    // UI-thread-only bookkeeping for the background pass, shared with the worker's completion task
+    // so it can tell the view is gone.
+    struct SourceView::AsyncState
+    {
+        bool alive = true;
+        bool running = false;   // a worker is in flight
+        bool dirty = false;     // text changed again while it ran
+        std::size_t generation = 0;   // bumped on every text change
+    };
+
+    SourceView::SourceView() : async_(std::make_shared<AsyncState>())
     {
         setName("designSource");
         setVisible(true);
@@ -215,6 +235,8 @@ namespace CodeToolsVsix
         // Hosted by the ScrollView, which scrolls it (a TextControl has no scrollbar of its own).
         textControl_ = new newui::TextFoldingControl();
         textControl_->setName("designSourceText");
+        // Before anything subscribes to the model: this one remembers edits for undo.
+        textControl_->setModel(std::make_unique<newui::text::HistoryTextModel>());
         scrollView_->addChild(textControl_);
 
         // The status row: the status text, then the show-whitespace toggle at the right.
@@ -299,6 +321,7 @@ namespace CodeToolsVsix
 
     SourceView::~SourceView()
     {
+        async_->alive = false;
         if (highlightTimer_ != newui::RunLoop::kInvalidTimerHandle) {
             highlightLoop_->cancelDelayed(highlightTimer_);
         }
@@ -306,6 +329,7 @@ namespace CodeToolsVsix
 
     newui::SyncReturn SourceView::handleTextChanged(newui::Model& /*sender*/)
     {
+        ++async_->generation;
         newui::RunLoop& loop = newui::RunLoop::current();
         if (!loop) {
             highlight();
@@ -319,8 +343,7 @@ namespace CodeToolsVsix
         highlightLoop_ = &loop;
         highlightTimer_ = loop.postDelayed(kHighlightDelay, [this]() {
             highlightTimer_ = newui::RunLoop::kInvalidTimerHandle;
-            highlight();
-            updateStatus();
+            startBackgroundHighlight(*highlightLoop_);
             return true;   // once
         });
         updateStatus();
@@ -329,16 +352,45 @@ namespace CodeToolsVsix
 
     void SourceView::highlight()
     {
+        apply(analyze(textControl_->text()));
+    }
+
+    void SourceView::startBackgroundHighlight(newui::RunLoop& loop)
+    {
+        if (async_->running) {
+            async_->dirty = true;
+            return;
+        }
+        async_->running = true;
+        // An O(1) snapshot on this thread; the worker builds the string from it.
+        std::thread([this, loop = &loop, state = async_, generation = async_->generation,
+                snapshot = textControl_->model().snapshot()]() {
+            auto result = std::make_shared<Analysis>(analyze(snapshot.str()));
+            loop->post([this, state, generation, result]() {
+                state->running = false;
+                if (!state->alive) {
+                    return;
+                }
+                if (generation == state->generation) {
+                    apply(std::move(*result));
+                    updateStatus();
+                }
+                if (state->dirty) {
+                    state->dirty = false;
+                    startBackgroundHighlight(newui::RunLoop::current());
+                }
+            });
+        }).detach();
+    }
+
+    SourceView::Analysis SourceView::analyze(const std::wstring& text)
+    {
         // Whole-document for now; SyntaxHighlighter::replace() can make it incremental later.
-        const std::wstring text = textControl_->text();
-        highlighter_.setText(text);
+        lex::SyntaxHighlighter highlighter(lex::json5Language());
+        highlighter.setText(text);
 
-        // lex's light and dark themes as style sheets, built once; which one follows the system.
-        static const std::shared_ptr<const newui::TextStyleSheet> lightSheet = styleSheetFor(lex::Theme::light());
-        static const std::shared_ptr<const newui::TextStyleSheet> darkSheet = styleSheetFor(lex::Theme::dark());
-        const std::shared_ptr<const newui::TextStyleSheet>& sheet = newui::UIColorManager::isDarkMode() ? darkSheet : lightSheet;
-
-        std::vector<newui::text::TextStyleRange> ranges;
+        Analysis analysis;
+        std::vector<newui::text::TextStyleRange>& ranges = analysis.ranges;
         // A squiggle for [start, start + length) - at least one character, so a zero-length error
         // (e.g. "unexpected end of input") still shows; at the very end, on the last character.
         auto problem = [&](std::size_t start, std::size_t length) {
@@ -351,14 +403,13 @@ namespace CodeToolsVsix
             }
             ranges.push_back({ start, length, kProblemStyle });
         };
-        parsed_ = lex::json5::parse(text);
-        const lex::json5::ParseResult& parsed = parsed_;
-        for (const lex::json5::ParseError& error : parsed.errors) {
+        analysis.parsed = lex::json5::parse(text);
+        for (const lex::json5::ParseError& error : analysis.parsed.errors) {
             problem(error.offset, error.length);
         }
-        for (std::size_t line = 0; line < highlighter_.lineCount(); ++line) {
-            const std::size_t lineStart = highlighter_.lineStart(line);
-            for (const lex::HighlightSpan& span : highlighter_.spans(line)) {
+        for (std::size_t line = 0; line < highlighter.lineCount(); ++line) {
+            const std::size_t lineStart = highlighter.lineStart(line);
+            for (const lex::HighlightSpan& span : highlighter.spans(line)) {
                 if (span.isProblem()) {
                     problem(lineStart + span.column, span.length);
                 }
@@ -369,14 +420,28 @@ namespace CodeToolsVsix
             }
         }
 
+        if (analysis.parsed.root) {
+            analysis.folds = foldsFor(analysis.parsed, text);
+        }
+        return analysis;
+    }
+
+    void SourceView::apply(Analysis&& analysis)
+    {
+        // lex's light and dark themes as style sheets, built once; which one follows the system.
+        static const std::shared_ptr<const newui::TextStyleSheet> lightSheet = styleSheetFor(lex::Theme::light());
+        static const std::shared_ptr<const newui::TextStyleSheet> darkSheet = styleSheetFor(lex::Theme::dark());
+        const std::shared_ptr<const newui::TextStyleSheet>& sheet = newui::UIColorManager::isDarkMode() ? darkSheet : lightSheet;
+
+        parsed_ = std::move(analysis.parsed);
         if (textControl_->styleSheet() != sheet) {
             textControl_->setStyleSheet(sheet);
         }
-        textControl_->setStyledRanges(std::move(ranges));
+        textControl_->setStyledRanges(std::move(analysis.ranges));
 
         // Unparsable: keep the folds as they are (the control keeps them in step with the edit).
-        if (parsed.root) {
-            std::vector<newui::text::TextFold> folds = foldsFor(parsed, text);
+        if (parsed_.root) {
+            std::vector<newui::text::TextFold> folds = std::move(analysis.folds);
             const std::vector<newui::text::TextFold>& current = textControl_->folds();
             for (newui::text::TextFold& fold : folds) {
                 fold.collapsed = std::any_of(current.begin(), current.end(), [&](const newui::text::TextFold& old) {
