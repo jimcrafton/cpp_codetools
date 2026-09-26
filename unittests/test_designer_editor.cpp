@@ -3513,3 +3513,138 @@ TEST(SourceViewHighlight, AMissingEndIsStillSquiggledOnTheLastCharacter)
         EXPECT_GE(problem.length, 1u);
     }
 }
+
+namespace
+{
+    // What a fold hides, as text.
+    std::string hidden(const CodeToolsVsix::SourceView& view, const newui::text::TextFold& fold)
+    {
+        return view.text().substr(fold.start, fold.length);
+    }
+}
+
+TEST(SourceViewFolding, MultiLineObjectsArraysAndBlockCommentsFold)
+{
+    CodeToolsVsix::SourceView view;
+    view.setText("/* a\n   note */\n{\n  a: [\n    1,\n    2\n  ],\n  b: { c: 1 },\n  d: [3]\n}");
+    const std::vector<newui::text::TextFold>& folds = view.textControl()->folds();
+
+    ASSERT_EQ(folds.size(), 3u) << "the one-line { c: 1 } and [3] don't fold";
+    EXPECT_EQ(hidden(view, folds[0]), " a\n   note ");
+    EXPECT_EQ(hidden(view, folds[1]), "\n  a: [\n    1,\n    2\n  ],\n  b: { c: 1 },\n  d: [3]\n");
+    EXPECT_EQ(hidden(view, folds[2]), "\n    1,\n    2\n  ");
+    for (const newui::text::TextFold& fold : folds) {
+        EXPECT_FALSE(fold.collapsed);
+        EXPECT_EQ(fold.placeholder, L"...");
+    }
+}
+
+TEST(SourceViewFolding, ACollapsedFoldStaysCollapsedThroughEdits)
+{
+    CodeToolsVsix::SourceView view;
+    view.setText("{\n  a: [\n    1,\n    2\n  ]\n}");
+    ASSERT_EQ(view.textControl()->folds().size(), 2u);
+    view.textControl()->setFoldCollapsed(1, true);   // the array
+
+    view.textControl()->model().insert(1, L" // top");   // before it: re-parsed, moved
+    const std::vector<newui::text::TextFold>& folds = view.textControl()->folds();
+    ASSERT_EQ(folds.size(), 2u);
+    EXPECT_FALSE(folds[0].collapsed);
+    EXPECT_TRUE(folds[1].collapsed);
+    EXPECT_EQ(hidden(view, folds[1]), "\n    1,\n    2\n  ");
+
+    view.textControl()->model().insert(view.text().find("1,"), L"0, ");   // inside it: expands
+    EXPECT_FALSE(view.textControl()->folds()[1].collapsed);
+}
+
+TEST(SourceViewFolding, UnparsableTextKeepsTheFolds)
+{
+    CodeToolsVsix::SourceView view;
+    view.setText("{\n  a: 1\n}");
+    ASSERT_EQ(view.textControl()->folds().size(), 1u);
+    view.textControl()->setFoldCollapsed(0, true);
+
+    view.textControl()->model().insert(0, L"@@@ ");
+    ASSERT_EQ(view.textControl()->folds().size(), 1u);
+    EXPECT_TRUE(view.textControl()->folds()[0].collapsed);
+}
+
+TEST(SourceViewStatus, LineAndCharacterAreOneBased)
+{
+    const std::wstring text = L"{\n  a: 1,\n  b: 2\n}";
+    EXPECT_EQ(CodeToolsVsix::SourceView::statusFor(text, 0, {}, false), "Ln 1, Ch 1    INS");
+    EXPECT_EQ(CodeToolsVsix::SourceView::statusFor(text, 4, {}, false), "Ln 2, Ch 3    INS");
+    EXPECT_EQ(CodeToolsVsix::SourceView::statusFor(text, text.size(), {}, true), "Ln 4, Ch 2    OVR");
+}
+
+TEST(SourceViewStatus, SelectionShowsItsSizeAndLines)
+{
+    const std::wstring text = L"{\n  a: 1,\n  b: 2\n}";
+    EXPECT_EQ(CodeToolsVsix::SourceView::statusFor(text, 5, { newui::text::TextRange(2, 3) }, false),
+        "Ln 2, Ch 4    Sel 3    INS");
+    EXPECT_EQ(CodeToolsVsix::SourceView::statusFor(text, 12, { newui::text::TextRange(2, 10) }, false),
+        "Ln 3, Ch 3    Sel 10 (2 lines)    INS");
+}
+
+TEST(SourceViewStatus, TheBarFollowsTheCaretSelectionAndMode)
+{
+    CodeToolsVsix::SourceView view;
+    view.setText("{\n  a: 1\n}");
+    view.textControl()->caret().setPosition(newui::text::TextPosition(4));
+    EXPECT_EQ(view.statusBar()->text(), "  Ln 2, Ch 3    INS");
+
+    view.textControl()->selection().setRange(newui::text::TextRange(2, 6));
+    EXPECT_EQ(view.statusBar()->text(), "  Ln 2, Ch 3    Sel 6    INS");
+
+    view.textControl()->controller().setOverwriteMode(true);
+    EXPECT_EQ(view.statusBar()->text(), "  Ln 2, Ch 3    Sel 6    OVR");
+}
+
+namespace
+{
+    const std::wstring kCrumbDoc =
+        L"{\n"
+        L"  panel: {\n"
+        L"    type: \"DemoPanel\",\n"
+        L"    flags: [\"Resizable\", \"AlwaysOnTop\"],\n"
+        L"    children: [\n"
+        L"      { type: \"Button\", name: \"ok\", bounds: { x: 1 } }\n"
+        L"    ]\n"
+        L"  }\n"
+        L"}";
+    const std::string kSep = "  \xE2\x80\xBA  ";
+
+    std::string crumbsAt(const std::wstring& find, std::size_t plus = 0)
+    {
+        return CodeToolsVsix::SourceView::breadcrumbsFor(lex::json5::parse(kCrumbDoc), kCrumbDoc.find(find) + plus);
+    }
+}
+
+TEST(SourceViewBreadcrumbs, FollowPropertiesIndexesNamesAndTypes)
+{
+    EXPECT_EQ(crumbsAt(L"panel"), "root" + kSep + "panel (DemoPanel)");
+    EXPECT_EQ(crumbsAt(L"\"DemoPanel\""), "root" + kSep + "panel (DemoPanel)" + kSep + "type");
+    EXPECT_EQ(crumbsAt(L"\"AlwaysOnTop\""), "root" + kSep + "panel (DemoPanel)" + kSep + "flags" + kSep + "[1]");
+    EXPECT_EQ(crumbsAt(L"x: 1", 3),
+        "root" + kSep + "panel (DemoPanel)" + kSep + "children" + kSep + "ok (Button)" + kSep + "bounds" + kSep + "x");
+    EXPECT_EQ(crumbsAt(L"{"), "root");
+    EXPECT_EQ(CodeToolsVsix::SourceView::breadcrumbsFor(lex::json5::parse(L""), 0), "");
+}
+
+TEST(SourceViewBreadcrumbs, TheBarFollowsTheCaret)
+{
+    CodeToolsVsix::SourceView view;
+    view.textControl()->setText(kCrumbDoc);
+    view.textControl()->caret().setPosition(newui::text::TextPosition(kCrumbDoc.find(L"\"AlwaysOnTop\"")));
+    EXPECT_EQ(view.breadcrumbBar()->text(), "  root" + kSep + "panel (DemoPanel)" + kSep + "flags" + kSep + "[1]");
+}
+
+TEST(SourceViewWhitespace, TheToggleShowsWhitespace)
+{
+    CodeToolsVsix::SourceView view;
+    EXPECT_FALSE(view.textControl()->showsWhitespace());
+    view.whitespaceToggle()->setChecked(true);
+    EXPECT_TRUE(view.textControl()->showsWhitespace());
+    view.whitespaceToggle()->setChecked(false);
+    EXPECT_FALSE(view.textControl()->showsWhitespace());
+}
