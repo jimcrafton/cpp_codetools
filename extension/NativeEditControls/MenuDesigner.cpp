@@ -11,6 +11,7 @@
 #include <newui/uicolormanager.h>
 
 #include <algorithm>
+#include <cctype>
 
 namespace CodeToolsVsix
 {
@@ -315,6 +316,9 @@ namespace CodeToolsVsix
     {
         bar_ = bar;
         selected_ = bar != nullptr ? selected : nullptr;
+        if (bar_ != nullptr) {
+            claimNames(&bar_->root());
+        }
         refresh();
     }
 
@@ -325,6 +329,7 @@ namespace CodeToolsVsix
             commitEdit(false);
         }
         bar_ = nullptr;
+        provisionalNames_.clear();
         selected_ = nullptr;
         refresh();
     }
@@ -516,13 +521,98 @@ namespace CodeToolsVsix
         }
     }
 
-    newui::MenuItem* MenuDesigner::insertItem(newui::MenuItem* parent, std::size_t index, const std::string& text)
+    std::string uniqueMenuItemName(newui::NameManager& names, const std::string& caption, bool separator)
+    {
+        // Caption words run together camelCase, starting lowercase: "Save &As..." -> "saveAs".
+        std::string base;
+        bool upperNext = false;
+        for (char ch : newui::stripMnemonics(caption)) {
+            const unsigned char c = static_cast<unsigned char>(ch);
+            if (std::isalnum(c) == 0) {
+                upperNext = !base.empty();
+                continue;
+            }
+            base += static_cast<char>(base.empty() ? std::tolower(c) : upperNext ? std::toupper(c) : c);
+            upperNext = false;
+        }
+        if (separator) {
+            base = "separator";
+        } else if (base.empty() || std::isdigit(static_cast<unsigned char>(base[0])) != 0) {
+            base = "menuItem";
+        }
+        return names.generateName(base);
+    }
+
+    namespace
+    {
+        void reserveItemNames(const newui::MenuItem& parent, newui::NameManager& names)
+        {
+            for (const newui::MenuItem* item : parent.children()) {
+                if (!item->name().empty()) {
+                    names.reserve(item->name());
+                }
+                reserveItemNames(*item, names);
+            }
+        }
+    }
+
+    void reserveMenuItemNames(const newui::View& view, newui::NameManager& names)
+    {
+        if (const auto* bar = dynamic_cast<const newui::MenuBar*>(&view)) {
+            reserveItemNames(bar->root(), names);
+        }
+        for (const newui::SubView* child : view.childViews()) {
+            reserveMenuItemNames(*child, names);
+        }
+    }
+
+    void uniquifyMenuItemNames(newui::MenuItem& parent, newui::NameManager& names)
+    {
+        for (newui::MenuItem* item : parent.children()) {
+            if (item->name().empty() || names.isTaken(item->name())) {
+                item->setName(uniqueMenuItemName(names, item->text(), item->isSeparator()));
+            } else {
+                names.reserve(item->name());
+            }
+            uniquifyMenuItemNames(*item, names);
+        }
+    }
+
+    std::string MenuDesigner::uniqueName(const std::string& caption, bool separator) const
+    {
+        newui::RootView* root = host_ != nullptr ? host_->rootView() : nullptr;
+        if (root == nullptr) {
+            newui::NameManager scratch;
+            return uniqueMenuItemName(scratch, caption, separator);
+        }
+        return uniqueMenuItemName(root->nameManager(), caption, separator);
+    }
+
+    void MenuDesigner::claimNames(newui::MenuItem* parent)
+    {
+        newui::RootView* root = host_ != nullptr ? host_->rootView() : nullptr;
+        for (newui::MenuItem* item : parent->children()) {
+            if (item->name().empty()) {
+                item->setName(uniqueName(item->text(), item->isSeparator()));
+            } else if (root != nullptr) {
+                root->nameManager().reserve(item->name());
+            }
+            claimNames(item);
+        }
+    }
+
+    newui::MenuItem* MenuDesigner::insertItem(newui::MenuItem* parent, std::size_t index, const std::string& text,
+        bool provisionalName)
     {
         if (parent == nullptr) {
             return nullptr;
         }
         auto* item = new newui::MenuItem(text == "-" ? std::string() : text);
         item->setSeparator(text == "-");
+        item->setName(uniqueName(text, item->isSeparator()));
+        if (provisionalName) {
+            provisionalNames_.insert(item);
+        }
         newui::MenuBar* bar = isBarRoot(parent) ? bar_ : nullptr;
 
         newui::UndoableAction action;
@@ -550,9 +640,16 @@ namespace CodeToolsVsix
             return;
         }
         const std::string before = item->text();
+        const std::string beforeName = item->name();
+        std::string afterName = beforeName;
+        // A placeholder's name follows the first real caption it's given.
+        if (provisionalNames_.erase(item) != 0) {
+            afterName = uniqueName(text, item->isSeparator());
+        }
         newui::MenuBar* bar = isBarRoot(item->parent()) ? bar_ : nullptr;
-        auto apply = [item, bar](const std::string& value) {
+        auto apply = [item, bar](const std::string& value, const std::string& name) {
             item->setText(value);
+            item->setName(name);
             if (bar != nullptr) {
                 bar->rebuildButtons();
             }
@@ -560,8 +657,8 @@ namespace CodeToolsVsix
 
         newui::UndoableAction action;
         action.description = "Rename Menu Item";
-        action.doIt = [apply, text] { apply(text); };
-        action.undoIt = [apply, before] { apply(before); };
+        action.doIt = [apply, text, afterName] { apply(text, afterName); };
+        action.undoIt = [apply, before, beforeName] { apply(before, beforeName); };
         runAction(std::move(action));
     }
 
@@ -801,7 +898,7 @@ namespace CodeToolsVsix
         cancelEdit();
         const std::size_t index = indexIn(parent, item);
         const std::string text = separator ? "-" : isBarRoot(parent) ? "New Menu" : "New Item";
-        newui::MenuItem* created = insertItem(parent, index, text);
+        newui::MenuItem* created = insertItem(parent, index, text, !separator);
         if (!separator) {
             select(created);
             beginEdit(parent, index);
@@ -819,7 +916,7 @@ namespace CodeToolsVsix
             select(first);
             return;
         }
-        newui::MenuItem* created = insertItem(item, item->children().size(), "New Item");
+        newui::MenuItem* created = insertItem(item, item->children().size(), "New Item", true);
         select(created);
         beginEdit(item, indexIn(item, created));
     }

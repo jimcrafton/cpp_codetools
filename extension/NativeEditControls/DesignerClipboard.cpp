@@ -1,4 +1,6 @@
 #include "DesignerClipboard.h"
+#include "MenuDesigner.h"
+#include "TextEncoding.h"
 
 #include <newui/clipboardmgr.h>
 #include <newui/reflection.h>
@@ -6,6 +8,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <sstream>
 
 namespace CodeToolsVsix
 {
@@ -21,6 +24,11 @@ namespace CodeToolsVsix
             const std::string name = view.name();
             if (!name.empty() && root.nameManager().isTaken(name)) {
                 view.setName(std::string());
+            }
+            // A MenuBar's items aren't views, so nothing names them on attach - give them unique
+            // names here.
+            if (auto* bar = dynamic_cast<newui::MenuBar*>(&view)) {
+                uniquifyMenuItemNames(bar->root(), root.nameManager());
             }
             for (newui::SubView* child : view.childViews()) {
                 uniquifyRecursive(*child, root);
@@ -83,7 +91,47 @@ namespace CodeToolsVsix
 
     void DesignerClipboard::uniquifyNames(newui::SubView& clone, newui::RootView& root)
     {
+        // Menu item names in the document are only reserved once their bar is opened in the menu
+        // designer - reserve them all now so the copy can't reuse one.
+        reserveMenuItemNames(root, root.nameManager());
         uniquifyRecursive(clone, root);
+    }
+
+    std::string DesignerClipboard::toText(const std::vector<std::string>& serializedViews)
+    {
+        if (serializedViews.size() == 1) {
+            return serializedViews.front();
+        }
+        std::string out = "[\n";
+        for (std::size_t i = 0; i < serializedViews.size(); ++i) {
+            out += serializedViews[i];
+            out += i + 1 < serializedViews.size() ? ",\n" : "\n";
+        }
+        out += "]\n";
+        return out;
+    }
+
+    std::vector<std::string> DesignerClipboard::fromText(const std::string& text)
+    {
+        json5::document doc;
+        if (text.empty() || json5::from_string(text, doc)) {
+            return {};
+        }
+        if (doc.is_object()) {
+            return { text };
+        }
+        std::vector<std::string> views;
+        if (doc.is_array()) {
+            for (const json5::value& element : json5::array_view(doc)) {
+                if (!element.is_object()) {
+                    return {};
+                }
+                std::ostringstream os;
+                json5::to_stream(os, element, json5::writer_params(), 0);
+                views.push_back(os.str());
+            }
+        }
+        return views;
     }
 
     std::vector<std::uint8_t> DesignerClipboard::pack(const std::vector<std::string>& serializedViews)
@@ -142,15 +190,29 @@ namespace CodeToolsVsix
         if (serialized.empty()) {
             return false;
         }
-        return newui::ClipboardManager::setMimeData(mimeType(), pack(serialized), owner);
+        return newui::ClipboardManager::setMimeDataSet({
+            { mimeType(), pack(serialized) },
+            { L"text/plain", newui::ClipboardManager::textMimeData(utf8ToWide(toText(serialized))) },
+        }, owner);
     }
 
-    std::vector<std::string> DesignerClipboard::readClipboard()
+    std::vector<std::string> DesignerClipboard::readClipboard(bool* fromText)
     {
+        if (fromText != nullptr) {
+            *fromText = false;
+        }
         std::vector<std::uint8_t> payload;
-        if (!newui::ClipboardManager::getMimeData(mimeType(), payload)) {
+        if (newui::ClipboardManager::getMimeData(mimeType(), payload)) {
+            return unpack(payload);
+        }
+        // No designer data - maybe views copied as text from an editor or a chat.
+        std::wstring text;
+        if (!newui::ClipboardManager::getText(text)) {
             return {};
         }
-        return unpack(payload);
+        if (fromText != nullptr) {
+            *fromText = true;
+        }
+        return DesignerClipboard::fromText(wideToUtf8(text));
     }
 }

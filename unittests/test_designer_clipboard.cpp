@@ -165,3 +165,59 @@ TEST(DesignerClipboard, AGridLayoutCloneKeepsItsTracksAndSpacing)
     clone->destroy();
     delete clone;
 }
+
+TEST(DesignerClipboard, TextForOneViewIsItsJson5AndReadsBack)
+{
+    newui::Button button;
+    button.setName("okButton");
+    button.setText("OK");
+    const std::string serialized = DesignerClipboard::serialize(button);
+    ASSERT_FALSE(serialized.empty());
+
+    const std::string text = DesignerClipboard::toText({ serialized });
+    EXPECT_EQ(text, serialized);
+
+    std::vector<std::string> views = DesignerClipboard::fromText(text);
+    ASSERT_EQ(views.size(), 1u);
+    newui::SubView* clone = DesignerClipboard::create(views[0]);
+    auto* clonedButton = dynamic_cast<newui::Button*>(clone);
+    ASSERT_NE(clonedButton, nullptr);
+    EXPECT_EQ(clonedButton->text(), "OK");
+    clone->destroy();
+    delete clone;
+}
+
+TEST(DesignerClipboard, TextForSeveralViewsIsAJson5ArrayThatSplitsBackIntoViews)
+{
+    newui::Button button;
+    button.setText("OK");
+    newui::Label label;
+    label.setText("Name:");
+    const std::string text = DesignerClipboard::toText({ DesignerClipboard::serialize(button), DesignerClipboard::serialize(label) });
+    EXPECT_EQ(text.front(), '[');
+
+    std::vector<std::string> views = DesignerClipboard::fromText(text);
+    ASSERT_EQ(views.size(), 2u);
+    newui::SubView* first = DesignerClipboard::create(views[0]);
+    newui::SubView* second = DesignerClipboard::create(views[1]);
+    ASSERT_NE(dynamic_cast<newui::Button*>(first), nullptr);
+    ASSERT_NE(dynamic_cast<newui::Label*>(second), nullptr);
+    EXPECT_EQ(static_cast<newui::Label*>(second)->text(), "Name:");
+    for (newui::SubView* view : { first, second }) {
+        view->destroy();
+        delete view;
+    }
+}
+
+TEST(DesignerClipboard, FromTextIgnoresTextThatIsNotViews)
+{
+    EXPECT_TRUE(DesignerClipboard::fromText("just some words").empty());
+    EXPECT_TRUE(DesignerClipboard::fromText("42").empty());
+    EXPECT_TRUE(DesignerClipboard::fromText("[1, 2]").empty());
+    EXPECT_TRUE(DesignerClipboard::fromText("").empty());
+
+    // JSON5 that parses but names no designer class: accepted as text, but nothing is created.
+    std::vector<std::string> views = DesignerClipboard::fromText("{ a: 1 }");
+    ASSERT_EQ(views.size(), 1u);
+    EXPECT_EQ(DesignerClipboard::create(views[0]), nullptr);
+}

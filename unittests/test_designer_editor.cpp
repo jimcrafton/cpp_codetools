@@ -3101,3 +3101,137 @@ TEST(MenuDesignerEditing, CreateSubmenuOpensTheNewItemWithAllItsTextSelected)
     EXPECT_EQ(field->selection().ranges()[0].start(), 0u);
     EXPECT_EQ(field->selection().ranges()[0].length(), field->text().size());
 }
+
+TEST(MenuDesignerNames, NewItemsGetUniqueNamesFromTheirCaptions)
+{
+    MenuDesignerFixture f;
+    f.editor.viewDesignerController().selectExclusive(f.bar);
+
+    newui::MenuItem* saveAs = f.designer().insertItem(f.file, 0, "Save &As...");
+    newui::MenuItem* open2 = f.designer().insertItem(f.file, 0, "Open");
+    newui::MenuItem* separator = f.designer().insertItem(f.file, 0, "-");
+    newui::MenuItem* digits = f.designer().insertItem(f.file, 0, "123");
+
+    EXPECT_EQ(saveAs->name(), "saveAs1");
+    EXPECT_EQ(open2->name(), "open2") << "the fixture's own Open was named open1 when the bar opened";
+    EXPECT_EQ(separator->name(), "separator2") << "the fixture's File menu already has separator1";
+    EXPECT_EQ(digits->name(), "menuItem1") << "not a valid identifier start";
+}
+
+TEST(MenuDesignerNames, OpeningABarNamesItsUnnamedItemsAndKeepsLoadedNames)
+{
+    MenuDesignerFixture f;
+    f.edit->setName("editMenu");   // as if loaded from a file
+
+    f.editor.viewDesignerController().selectExclusive(f.bar);
+
+    EXPECT_EQ(f.file->name(), "file1");
+    EXPECT_EQ(f.open->name(), "open1");
+    EXPECT_EQ(f.edit->name(), "editMenu");
+    EXPECT_TRUE(f.root.nameManager().isTaken("editMenu"));
+}
+
+TEST(MenuDesignerNames, APlaceholderItemIsRenamedFromItsFirstCaptionAndUndoRestoresIt)
+{
+    MenuDesignerFixture f;
+    f.editor.viewDesignerController().selectExclusive(f.bar);
+    f.designer().select(f.open);
+
+    f.designer().createSubmenu(f.open);   // "New Item"
+    newui::MenuItem* created = f.open->children()[0];
+    EXPECT_EQ(created->name(), "newItem1");
+    f.designer().editField()->setText(L"Recent Files");
+    f.designer().commitEdit(false);
+
+    EXPECT_EQ(created->name(), "recentFiles1");
+    f.editor.undoStack().undo();
+    EXPECT_EQ(created->name(), "newItem1");
+    EXPECT_EQ(created->text(), "New Item");
+}
+
+TEST(MenuDesignerNames, RenamingARealItemKeepsItsName)
+{
+    MenuDesignerFixture f;
+    f.editor.viewDesignerController().selectExclusive(f.bar);
+
+    f.designer().renameItem(f.open, "Open File");
+
+    EXPECT_EQ(f.open->name(), "open1");
+}
+
+namespace
+{
+    void collectMenuItemNames(const newui::MenuItem& parent, std::vector<std::string>& out)
+    {
+        for (const newui::MenuItem* item : parent.children()) {
+            out.push_back(item->name());
+            collectMenuItemNames(*item, out);
+        }
+    }
+}
+
+TEST(MenuDesignerNames, DuplicatingAMenuBarGivesTheCopysItemsUniqueNames)
+{
+    MenuDesignerFixture f;
+    f.editor.viewDesignerController().selectExclusive(f.bar);   // names the items: file1, open1, ...
+    std::vector<std::string> originalNames;
+    collectMenuItemNames(f.bar->root(), originalNames);
+
+    ASSERT_TRUE(f.editor.duplicateSelection());
+
+    const auto& surfaceChildren = f.editor.workspace()->rootViewProxy()->childViews();
+    auto* copy = dynamic_cast<newui::MenuBar*>(surfaceChildren.back());
+    ASSERT_NE(copy, nullptr);
+    ASSERT_NE(copy, f.bar);
+    std::vector<std::string> copyNames;
+    collectMenuItemNames(copy->root(), copyNames);
+    ASSERT_EQ(copyNames.size(), originalNames.size());
+    for (const std::string& name : copyNames) {
+        EXPECT_FALSE(name.empty());
+        EXPECT_EQ(std::find(originalNames.begin(), originalNames.end(), name), originalNames.end()) << name;
+    }
+    EXPECT_EQ(copy->menus()[0]->name(), "file2");
+}
+
+TEST(MenuDesignerNames, PastingABarWhoseOriginalWasNeverOpenedStillAvoidsItsNames)
+{
+    MenuDesignerFixture f;
+    f.file->setName("fileMenu");   // as loaded from a file, never opened in the menu designer
+
+    newui::MenuBar copy;
+    copy.addMenu(new newui::MenuItem("File"));
+    copy.menus()[0]->setName("fileMenu");
+    CodeToolsVsix::DesignerClipboard::uniquifyNames(copy, f.root);
+
+    EXPECT_NE(copy.menus()[0]->name(), "fileMenu");
+    EXPECT_EQ(copy.menus()[0]->name(), "file1");
+}
+
+TEST(DesignerPasteText, EditedBoundsInPastedTextAreRespectedUnderAnAnchorLayout)
+{
+    newui::RootView root(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&root);
+    root.setBounds(newui::Rect(0, 0, 1400, 700));
+    newui::RootViewProxy* surface = editor.workspace()->rootViewProxy();
+
+    auto* original = new newui::Button();
+    original->setText("OK");
+    original->setBounds(newui::Rect(10, 20, 80, 24));
+    surface->addChild(original);
+    std::string text = CodeToolsVsix::DesignerClipboard::serialize(*original);
+
+    // What a user does in Notepad: move bounds.pos, leave layoutParams' margins alone.
+    auto replaceFirst = [&text](const std::string& from, const std::string& to) {
+        const std::size_t at = text.find(from, text.find("bounds"));
+        ASSERT_NE(at, std::string::npos) << from;
+        text.replace(at, from.size(), to);
+    };
+    replaceFirst("x: 10", "x: 200");
+    replaceFirst("y: 20", "y: 150");
+
+    ASSERT_TRUE(editor.pasteSerializedViews({ text }, 0.0f));
+    newui::SubView* pasted = surface->childViews().back();
+    ASSERT_NE(pasted, original);
+    EXPECT_FLOAT_EQ(pasted->bounds().left(), 200.0f);
+    EXPECT_FLOAT_EQ(pasted->bounds().top(), 150.0f);
+}

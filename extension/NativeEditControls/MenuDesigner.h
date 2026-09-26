@@ -3,6 +3,7 @@
 #include <newui/geometry.h>
 #include <newui/controls.h>
 #include <newui/menus.h>
+#include <newui/namemanager.h>
 #include <newui/subview.h>
 #include <newui/undostack.h>
 
@@ -10,11 +11,21 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <unordered_set>
 #include <vector>
 
 namespace CodeToolsVsix
 {
     class MenuDesigner;
+
+    // A name for a menu item that names doesn't hold yet, based on its caption, Delphi-style:
+    // "Save &As..." -> "saveAs1", a separator -> "separator1", no usable letters -> "menuItem1".
+    std::string uniqueMenuItemName(newui::NameManager& names, const std::string& caption, bool separator);
+    // Reserves the name of every menu item in every MenuBar under view (view included).
+    void reserveMenuItemNames(const newui::View& view, newui::NameManager& names);
+    // Gives every item under parent that is unnamed, or whose name names already holds, a fresh
+    // unique name, and reserves the rest - for a pasted copy of a menu.
+    void uniquifyMenuItemNames(newui::MenuItem& parent, newui::NameManager& names);
 
     // One open menu on the design surface: parent's children plus a "Type Here" placeholder row,
     // drawn like a native dropdown. Clicking an item selects it (MenuDesigner::select()).
@@ -115,8 +126,11 @@ namespace CodeToolsVsix
 
         // One undoable step each. insertItem() adds a new item at index under parent (bar root for a
         // top-level menu); text "-" makes a separator. The inserted item is detached, not deleted,
-        // on undo.
-        newui::MenuItem* insertItem(newui::MenuItem* parent, std::size_t index, const std::string& text);
+        // on undo. Each item gets a unique name from its caption ("Save As..." -> "saveAs1") through
+        // the root's NameManager; a provisionalName one ("New Item" placeholders) is renamed from
+        // the caption it's first given.
+        newui::MenuItem* insertItem(newui::MenuItem* parent, std::size_t index, const std::string& text,
+            bool provisionalName = false);
         void renameItem(newui::MenuItem* item, const std::string& text);
 
         // In-place text entry over parent's child at index (renaming it), or over parent's "Type
@@ -188,6 +202,10 @@ namespace CodeToolsVsix
         void positionEditField();
         void endEditField();   // hides the field and drops its focus
         void runAction(newui::UndoableAction action);
+        // A NameManager-unique name based on caption.
+        std::string uniqueName(const std::string& caption, bool separator) const;
+        // Reserves every name under parent and names the unnamed ones (a loaded file's items keep theirs).
+        void claimNames(newui::MenuItem* parent);
         void notifyChanged();
 
         newui::SyncReturn handleEditReturn(newui::TextField& sender);
@@ -209,6 +227,7 @@ namespace CodeToolsVsix
         newui::TextField* editField_ = nullptr;
         newui::MenuItem* editParent_ = nullptr;
         std::size_t editIndex_ = 0;
+        std::unordered_set<newui::MenuItem*> provisionalNames_;
         newui::MenuItem* dragItem_ = nullptr;
         newui::Point dragStart_;
         bool dragActive_ = false;

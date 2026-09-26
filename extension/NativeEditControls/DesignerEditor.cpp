@@ -1825,11 +1825,15 @@ namespace CodeToolsVsix
 
     bool DesignerEditor::pasteFromClipboard()
     {
-        std::vector<std::string> texts = DesignerClipboard::readClipboard();
+        bool fromText = false;
+        std::vector<std::string> texts = DesignerClipboard::readClipboard(&fromText);
         if (texts.empty()) {
             return false;
         }
-        return pasteSerializedViews(texts, kPasteOffsetPixels * static_cast<float>(++pasteCount_));
+        // Text from outside the designer lands exactly where it says - its position may have been
+        // edited on purpose. Only the designer's own copies cascade, so repeats don't stack.
+        const float offset = fromText ? 0.0f : kPasteOffsetPixels * static_cast<float>(++pasteCount_);
+        return pasteSerializedViews(texts, offset);
     }
 
     bool DesignerEditor::pasteSerializedViews(const std::vector<std::string>& texts, float offset)
