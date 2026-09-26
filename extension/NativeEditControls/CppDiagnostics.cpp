@@ -4,6 +4,10 @@
 #include <lex/cpp_lexer.h>
 
 #include <algorithm>
+#include <chrono>
+#include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <numeric>
 
 namespace CodeToolsVsix
@@ -207,7 +211,29 @@ namespace CodeToolsVsix
     std::string CppDocument::path() const
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        return path_.empty() ? std::string("untitled.cpp") : path_;
+        if (!path_.empty()) {
+            return path_;
+        }
+        if (untitledPath_.empty()) {
+            namespace fs = std::filesystem;
+            std::error_code error;
+            const fs::path file = fs::temp_directory_path(error) / ("codetools_untitled_" +
+                std::to_string(reinterpret_cast<std::uintptr_t>(this)) + "_" +
+                std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".cpp");
+            if (!error) {
+                std::ofstream(file, std::ios::binary);   // an empty file
+            }
+            untitledPath_ = file.string();
+        }
+        return untitledPath_;
+    }
+
+    CppDocument::~CppDocument()
+    {
+        if (!untitledPath_.empty()) {
+            std::error_code ignored;
+            std::filesystem::remove(untitledPath_, ignored);
+        }
     }
 
     HighlightOverlay analyzeCppDiagnostics(const std::wstring& text, const std::shared_ptr<CppDocument>& document,
@@ -217,8 +243,7 @@ namespace CodeToolsVsix
         try {
             const std::string utf8 = wideToUtf8(text);
             const cpptools::CompileFlags flags = document->flags();
-            cpptools::Parser parser;
-            const cpptools::ParseResult result = parser.parseBuffer(document->path(), utf8, flags.args);
+            const cpptools::ParseResult result = document->session().update(document->path(), utf8, flags.args);
             // With the project's own flags the includes resolve, so what's left is real.
             DiagnosticFilter effective = filter;
             if (flags.fromProject() && filter.followProjectFlags) {

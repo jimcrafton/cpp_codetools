@@ -772,3 +772,50 @@ TEST(CppProjectFlags, AHeaderWithPragmaOnceGetsNoSquiggleWithOrWithoutAProject)
     auto document = std::make_shared<CodeToolsVsix::CppDocument>();
     EXPECT_TRUE(CodeToolsVsix::analyzeCppDiagnostics(text, document).ranges.empty()) << "with the defaults";
 }
+
+// ---- the kept translation unit ------------------------------------------------------------------
+
+TEST(CppProjectFlags, EachPassAfterTheFirstReparsesTheKeptTranslationUnit)
+{
+    Project project;
+    auto document = std::make_shared<CodeToolsVsix::CppDocument>();
+    document->setPath(project.source());
+    const std::wstring text = L"#include \"foo.h\"\nint main() { return 0; }\n";
+
+    CodeToolsVsix::analyzeCppDiagnostics(text, document);
+    CodeToolsVsix::analyzeCppDiagnostics(text + L"int more;\n", document);
+    const CodeToolsVsix::HighlightOverlay third = CodeToolsVsix::analyzeCppDiagnostics(text + L"int more = ;\n", document);
+    EXPECT_EQ(document->session().parseCount(), 1u);
+    EXPECT_EQ(document->session().reparseCount(), 2u);
+    // ...and the reparse still sees the new text.
+    ASSERT_EQ(third.ranges.size(), 1u);
+    EXPECT_EQ(third.ranges[0].start, (text + L"int more = ;\n").rfind(L';'));
+}
+
+TEST(CppProjectFlags, AnUnsavedBufferAlsoReparsesAndItsStandInFileIsRemoved)
+{
+    std::string standIn;
+    {
+        auto document = std::make_shared<CodeToolsVsix::CppDocument>();
+        EXPECT_FALSE(document->hasPath());
+        CodeToolsVsix::analyzeCppDiagnostics(L"int a;\n", document);
+        CodeToolsVsix::analyzeCppDiagnostics(L"int a; int b;\n", document);
+        EXPECT_EQ(document->session().parseCount(), 1u);
+        EXPECT_EQ(document->session().reparseCount(), 1u);
+        standIn = document->path();
+        EXPECT_TRUE(std::filesystem::exists(standIn)) << "libclang needs the main file to exist to reuse a preamble";
+        EXPECT_EQ(std::filesystem::path(standIn).extension(), ".cpp");
+    }
+    EXPECT_FALSE(std::filesystem::exists(standIn));
+}
+
+TEST(CppProjectFlags, SavingUnderANameStartsTheParseOverForThatFile)
+{
+    Project project;
+    auto document = std::make_shared<CodeToolsVsix::CppDocument>();
+    CodeToolsVsix::analyzeCppDiagnostics(L"int a;\n", document);
+    document->setPath(project.source());
+    CodeToolsVsix::analyzeCppDiagnostics(L"int a;\n", document);
+    EXPECT_EQ(document->session().parseCount(), 2u) << "a different file";
+    EXPECT_TRUE(document->flags().fromProject());
+}

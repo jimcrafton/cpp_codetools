@@ -1,13 +1,20 @@
 #include "cpptools/parser.h"
 
+#include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <string>
+#include <thread>
+#include <vector>
 
 #include <gtest/gtest.h>
 
 namespace {
 
+namespace fs = std::filesystem;
 using cpptools::Parser;
 using cpptools::Severity;
 using cpptools::Symbol;
@@ -227,19 +234,120 @@ TEST(ParserTest, ExtraTokensAfterAnIncludeAreAPreprocessorWarning) {
     EXPECT_EQ(extra->location.offset, code.find("zsd"));   // reported at the first extra token
 }
 
-TEST(ParserTest, DISABLED_ProbeMsvcHeaders) {
-    struct Case { const char* name; std::vector<std::string> args; };
-    const Case cases[] = {
-        { "default (-std=c++17 -xc++)", {"-std=c++17", "-xc++"} },
-        { "cl driver mode", {"--driver-mode=cl", "/std:c++17", "/EHsc", "/TP"} },
-        { "cl driver mode, no /TP", {"--driver-mode=cl", "/std:c++17", "/EHsc"} },
-    };
-    for (const Case& c : cases) {
-        Parser parser;
-        auto result = parser.parseBuffer("probe.cpp", "#include <vector>\n#include <string>\nstd::vector<int> v; std::string s; int x = ;\n", c.args);
-        std::printf("---- %s\n", c.name);
-        for (const cpptools::Diagnostic& d : result.diagnostics) {
-            std::printf("  [%d] %s | cat='%s' main=%d\n", static_cast<int>(d.severity), d.message.c_str(), d.category.c_str(), d.fromMainFile ? 1 : 0);
-        }
+// ---- Session: a kept translation unit, reparsed ------------------------------------------------
+
+namespace {
+long errorCount(const cpptools::ParseResult& result) {
+    return std::count_if(result.diagnostics.begin(), result.diagnostics.end(), [](const cpptools::Diagnostic& d) {
+        return d.severity == Severity::Error || d.severity == Severity::Fatal;
+    });
+}
+} // namespace
+
+TEST(SessionTest, TheFirstUpdateParsesAndTheNextOnesReparseWithTheNewContent) {
+    cpptools::Session session;
+    auto first = session.update("session.cpp", "int x = ;\n");
+    EXPECT_GT(errorCount(first), 0);
+    EXPECT_EQ(session.parseCount(), 1u);
+    EXPECT_EQ(session.reparseCount(), 0u);
+
+    auto second = session.update("session.cpp", "int x = 1;\nvoid later();\n");
+    EXPECT_EQ(errorCount(second), 0) << "the new content, not the old";
+    EXPECT_NE(findChild(second.symbols, "later"), nullptr);
+    EXPECT_EQ(session.parseCount(), 1u);
+    EXPECT_EQ(session.reparseCount(), 1u);
+
+    auto third = session.update("session.cpp", "void changed();\n");
+    EXPECT_EQ(findChild(third.symbols, "later"), nullptr);
+    EXPECT_NE(findChild(third.symbols, "changed"), nullptr);
+    EXPECT_EQ(session.reparseCount(), 2u);
+}
+
+TEST(SessionTest, ADifferentFileOrDifferentFlagsStartOver) {
+    cpptools::Session session;
+    session.update("a.cpp", "int a;\n");
+    session.update("a.cpp", "int a2;\n");
+    EXPECT_EQ(session.parseCount(), 1u);
+
+    session.update("b.cpp", "int b;\n");
+    EXPECT_EQ(session.parseCount(), 2u) << "another file";
+
+    session.update("b.cpp", "int b;\n", { "-std=c++20", "-xc++" });
+    EXPECT_EQ(session.parseCount(), 3u) << "other flags";
+    session.update("b.cpp", "int b2;\n", { "-std=c++20", "-xc++" });
+    EXPECT_EQ(session.parseCount(), 3u);
+    EXPECT_EQ(session.reparseCount(), 2u);
+}
+
+TEST(SessionTest, AnEditInThePreambleIsStillReflected) {
+    cpptools::Session session;
+    session.update("preamble.cpp", "#include <vector>\nstd::vector<int> v;\n");
+    // The includes are the part libclang caches - change them and the answer must change too.
+    auto broken = session.update("preamble.cpp", "#include <no_such_header_at_all.h>\nint x;\n");
+    EXPECT_NE(findDiagnostic(broken, "file not found"), nullptr);
+    auto fixed = session.update("preamble.cpp", "#include <vector>\nstd::vector<int> v;\n");
+    EXPECT_EQ(findDiagnostic(fixed, "file not found"), nullptr);
+    EXPECT_EQ(errorCount(fixed), 0);
+}
+
+TEST(SessionTest, ReparsingAFileWithHeavyIncludesIsMuchFasterThanTheFirstParse) {
+    using clock = std::chrono::steady_clock;
+    const std::string includes =
+        "#include <vector>\n#include <string>\n#include <map>\n#include <unordered_map>\n#include <algorithm>\n"
+        "#include <functional>\n#include <memory>\n#include <sstream>\n#include <regex>\n#include <filesystem>\n";
+    // libclang reuses a preamble only for a main file that exists on disk (it validates it against the file).
+    const fs::path file = fs::temp_directory_path() / "cpptools_session_heavy.cpp";
+    {
+        std::ofstream out(file);
+        out << includes;
     }
+    cpptools::Session session;
+    auto milliseconds = [](clock::time_point from) {
+        return std::chrono::duration<double, std::milli>(clock::now() - from).count();
+    };
+
+    auto start = clock::now();
+    auto first = session.update(file.string(), includes + "int f() { return 1; }\n");
+    const double firstMs = milliseconds(start);
+    if (errorCount(first) > 0 || firstMs < 40.0) {
+        std::error_code ignored;
+        fs::remove(file, ignored);
+        GTEST_SKIP() << "the standard headers weren't found or parsed too fast to compare (" << firstMs << " ms)";
+    }
+
+    double bestReparse = 1e9;
+    std::string sequence;
+    for (int i = 0; i < 4; ++i) {
+        start = clock::now();
+        auto again = session.update(file.string(), includes + "int f() { return " + std::to_string(i) + "; }\nint g" + std::to_string(i) + ";\n");
+        const double ms = milliseconds(start);
+        bestReparse = std::min(bestReparse, ms);
+        sequence += " " + std::to_string(static_cast<int>(ms));
+        EXPECT_EQ(errorCount(again), 0);
+    }
+    std::error_code ignored;
+    fs::remove(file, ignored);
+    std::printf("heavy includes: first parse %.0f ms, reparses (ms):%s\n", firstMs, sequence.c_str());
+    EXPECT_LT(bestReparse, firstMs * 0.5) << "the preamble (the includes) should be reused";
+}
+
+TEST(SessionTest, UpdatesFromSeveralThreadsAreSerializedNotCorrupting) {
+    cpptools::Session session;
+    std::atomic<int> withoutErrors{ 0 };
+    std::vector<std::thread> threads;
+    for (int t = 0; t < 4; ++t) {
+        threads.emplace_back([&, t]() {
+            for (int i = 0; i < 5; ++i) {
+                auto result = session.update("threads.cpp", "int v" + std::to_string(t) + "_" + std::to_string(i) + ";\n");
+                if (errorCount(result) == 0) {
+                    ++withoutErrors;
+                }
+            }
+        });
+    }
+    for (std::thread& thread : threads) {
+        thread.join();
+    }
+    EXPECT_EQ(withoutErrors.load(), 20);
+    EXPECT_EQ(session.parseCount() + session.reparseCount(), 20u);
 }

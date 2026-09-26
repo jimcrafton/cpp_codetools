@@ -48,8 +48,16 @@ namespace CodeToolsVsix
     class CppDocument
     {
     public:
+        CppDocument() = default;
+        ~CppDocument();
+        CppDocument(const CppDocument&) = delete;
+        CppDocument& operator=(const CppDocument&) = delete;
+
         void setPath(std::string path);
-        std::string path() const;   // "untitled.cpp" until set
+        // The file the parse treats the text as: the real one once set. Before that (an unsaved
+        // buffer) an empty temporary .cpp - libclang reuses a precompiled preamble only for a main
+        // file that exists on disk - removed when this is destroyed.
+        std::string path() const;
         bool hasPath() const;
 
         // The flags to parse it with: from the project's compile_commands.json / compile_flags.txt
@@ -57,7 +65,14 @@ namespace CodeToolsVsix
         // use after each setPath() - on whichever thread asks, which is a worker in practice.
         cpptools::CompileFlags flags() const;
 
+        // The libclang translation unit kept between parses of this file, so each pass after the
+        // first is a reparse (the includes at the top aren't parsed again). Safe to use from the
+        // worker: calls are serialized.
+        cpptools::Session& session() { return session_; }
+
     private:
+        cpptools::Session session_;
+        mutable std::string untitledPath_;   // the stand-in file, once made
         mutable std::mutex mutex_;
         std::string path_;
         mutable bool flagsValid_ = false;

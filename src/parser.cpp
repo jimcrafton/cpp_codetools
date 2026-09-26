@@ -10,13 +10,11 @@
 
 namespace cpptools {
 
-namespace {
+void TranslationUnitDeleter::operator()(CXTranslationUnitImpl* tu) const {
+    clang_disposeTranslationUnit(tu);
+}
 
-struct TranslationUnitDeleter {
-    void operator()(CXTranslationUnitImpl* tu) const {
-        clang_disposeTranslationUnit(tu);
-    }
-};
+namespace {
 
 using UniqueTranslationUnit = std::unique_ptr<CXTranslationUnitImpl, TranslationUnitDeleter>;
 
@@ -103,9 +101,11 @@ CXChildVisitResult visitCursor(CXCursor cursor, CXCursor /*parent*/, CXClientDat
     CXSourceLocation location = clang_getCursorLocation(cursor);
 
     // Skip anything pulled in from #include'd headers - only symbols physically in the parsed
-    // file itself.
+    // file itself. And don't look inside it: a declaration written in a header can't contain
+    // anything written in this file, and walking all of <vector>, <string>, ... on every parse was
+    // most of what parsing a file with heavy includes cost.
     if (clang_Location_isFromMainFile(location) == 0) {
-        return CXChildVisit_Recurse;
+        return CXChildVisit_Continue;
     }
 
     CXCursorKind kind = clang_getCursorKind(cursor);
@@ -206,49 +206,115 @@ std::vector<std::string> defaultCompileArgs() {
     return args;
 }
 
-Parser::Parser() = default;
+namespace {
 
-ParseResult Parser::parseBuffer(const std::string& filePath, const std::string& content,
-                                 const std::vector<std::string>& compileArgs) {
+// Editing options (which include the precompiled preamble a reparse reuses). KeepGoing: carry on after
+// a fatal error (a missing #include is one), like an IDE - or every diagnostic after the first missing
+// header would be lost.
+unsigned parseOptions() {
+    // Not clang_defaultEditingTranslationUnitOptions(): that includes CacheCompletionResults, which
+    // rebuilds a code-completion cache over every top-level declaration - all of <vector>, <string>, ...
+    // - on every reparse, and nothing here completes code. The preamble (the includes at the top) is
+    // precompiled on the first parse and reused by every reparse, with the bodies of the functions
+    // in it skipped (nobody looks at those).
+    return CXTranslationUnit_PrecompiledPreamble | CXTranslationUnit_CreatePreambleOnFirstParse |
+           CXTranslationUnit_SkipFunctionBodies | CXTranslationUnit_LimitSkipFunctionBodiesToPreamble |
+           CXTranslationUnit_KeepGoing;
+}
+
+// A parse that produced no translation unit, as a result.
+ParseResult failedParse(const std::string& filePath, int errorCode) {
+    ParseResult result;
+    Diagnostic diagnostic;
+    diagnostic.severity = Severity::Fatal;
+    diagnostic.message = "failed to parse translation unit (libclang error code " + std::to_string(errorCode) + ")";
+    diagnostic.location.file = filePath;
+    log(Severity::Fatal, diagnostic.message + " [" + filePath + "]");
+    result.diagnostics.push_back(std::move(diagnostic));
+    return result;
+}
+
+ParseResult readTranslationUnit(CXTranslationUnit tu) {
+    ParseResult result;
+    result.diagnostics = collectDiagnostics(tu);
+
+    VisitContext context{&result.symbols};
+    CXCursor rootCursor = clang_getTranslationUnitCursor(tu);
+    clang_visitChildren(rootCursor, &visitCursor, &context);
+    return result;
+}
+
+CXUnsavedFile unsavedFileFor(const std::string& filePath, const std::string& content) {
     CXUnsavedFile unsavedFile;
     unsavedFile.Filename = filePath.c_str();
     unsavedFile.Contents = content.c_str();
     unsavedFile.Length = static_cast<unsigned long>(content.size());
+    return unsavedFile;
+}
 
+// Parses from scratch; null (and *error set) when libclang gives nothing back.
+UniqueTranslationUnit parseFresh(CXIndex index, const std::string& filePath, const std::string& content,
+                                 const std::vector<std::string>& compileArgs, CXErrorCode* error) {
+    CXUnsavedFile unsavedFile = unsavedFileFor(filePath, content);
     std::vector<const char*> args = toCStrings(compileArgs);
-
     CXTranslationUnit rawTu = nullptr;
-    CXErrorCode error = clang_parseTranslationUnit2(
-        index_.get(),
-        filePath.c_str(),
-        args.data(), static_cast<int>(args.size()),
-        &unsavedFile, 1,
-        // KeepGoing: carry on after a fatal error (a missing #include is one), like an IDE - or every
-        // diagnostic after the first missing header would be lost.
-        clang_defaultEditingTranslationUnitOptions() | CXTranslationUnit_KeepGoing,
-        &rawTu);
+    *error = clang_parseTranslationUnit2(index, filePath.c_str(), args.data(), static_cast<int>(args.size()),
+                                         &unsavedFile, 1, parseOptions(), &rawTu);
+    if (*error != CXError_Success || !rawTu) {
+        return nullptr;
+    }
+    return UniqueTranslationUnit(rawTu);
+}
 
-    ParseResult result;
-    if (error != CXError_Success || !rawTu) {
-        Diagnostic diagnostic;
-        diagnostic.severity = Severity::Fatal;
-        diagnostic.message = "failed to parse translation unit (libclang error code " +
-            std::to_string(static_cast<int>(error)) + ")";
-        diagnostic.location.file = filePath;
-        log(Severity::Fatal, diagnostic.message + " [" + filePath + "]");
-        result.diagnostics.push_back(std::move(diagnostic));
-        return result;
+} // namespace
+
+Parser::Parser() = default;
+
+ParseResult Parser::parseBuffer(const std::string& filePath, const std::string& content,
+                                 const std::vector<std::string>& compileArgs) {
+    CXErrorCode error = CXError_Success;
+    UniqueTranslationUnit tu = parseFresh(index_.get(), filePath, content, compileArgs, &error);
+    if (!tu) {
+        return failedParse(filePath, static_cast<int>(error));
+    }
+    return readTranslationUnit(tu.get());
+}
+
+Session::Session() = default;
+
+ParseResult Session::update(const std::string& filePath, const std::string& content,
+                            const std::vector<std::string>& compileArgs) {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    if (unit_ && path_ == filePath && args_ == compileArgs) {
+        CXUnsavedFile unsavedFile = unsavedFileFor(filePath, content);
+        if (clang_reparseTranslationUnit(unit_.get(), 1, &unsavedFile, clang_defaultReparseOptions(unit_.get())) == 0) {
+            ++reparses_;
+            return readTranslationUnit(unit_.get());
+        }
+        unit_.reset();   // a failed reparse leaves the unit unusable: start over
     }
 
-    UniqueTranslationUnit tu(rawTu);
+    unit_.reset();
+    CXErrorCode error = CXError_Success;
+    unit_ = parseFresh(index_.get(), filePath, content, compileArgs, &error);
+    if (!unit_) {
+        return failedParse(filePath, static_cast<int>(error));
+    }
+    path_ = filePath;
+    args_ = compileArgs;
+    ++parses_;
+    return readTranslationUnit(unit_.get());
+}
 
-    result.diagnostics = collectDiagnostics(tu.get());
+std::size_t Session::parseCount() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return parses_;
+}
 
-    VisitContext context{&result.symbols};
-    CXCursor rootCursor = clang_getTranslationUnitCursor(tu.get());
-    clang_visitChildren(rootCursor, &visitCursor, &context);
-
-    return result;
+std::size_t Session::reparseCount() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return reparses_;
 }
 
 ParseResult Parser::parseFile(const std::string& filePath,
