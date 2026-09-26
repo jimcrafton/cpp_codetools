@@ -152,8 +152,10 @@ add_subdirectory(${newui_SOURCE_DIR} ${newui_BINARY_DIR} EXCLUDE_FROM_ALL)
 
 add_library(cpptools STATIC
     src/parser.cpp
+    src/compileflags.cpp
     src/log.cpp
     include/cpptools/symbol.h
+    include/cpptools/compileflags.h
     include/cpptools/diagnostic.h
     include/cpptools/parser.h
     include/cpptools/log.h)
@@ -162,7 +164,7 @@ target_include_directories(cpptools PUBLIC include ${CMAKE_CURRENT_BINARY_DIR}/i
 target_link_libraries(cpptools PUBLIC libclang::libclang)
 add_dependencies(cpptools cpptools_version)
 
-# lex - lossless lexing/parsing, semantic diff and syntax highlighting (JSON5 today, C++ later),
+# lex - lossless lexing/parsing, semantic diff and syntax highlighting (JSON5 and C++ lexing),
 # brought over from lexer-base. Standard library only, so the editors can highlight without
 # pulling in libclang the way cpptools does.
 add_library(lex STATIC
@@ -174,6 +176,8 @@ add_library(lex STATIC
     src/lex/json5_presentation.cpp
     src/lex/highlight.cpp
     src/lex/json5_language.cpp
+    src/lex/cpp_lexer.cpp
+    src/lex/cpp_language.cpp
     include/lex/lex.h
     include/lex/lexer_base.h
     include/lex/json5_lexer.h
@@ -183,7 +187,9 @@ add_library(lex STATIC
     include/lex/json5_diff.h
     include/lex/json5_presentation.h
     include/lex/highlight.h
-    include/lex/json5_language.h)
+    include/lex/json5_language.h
+    include/lex/cpp_lexer.h
+    include/lex/cpp_language.h)
 
 target_include_directories(lex PUBLIC include)
 if(MSVC)
@@ -230,6 +236,12 @@ add_library(NativeEditControls SHARED
     extension/NativeEditControls/MenuDesigner.cpp
     extension/NativeEditControls/SourceView.h
     extension/NativeEditControls/SourceView.cpp
+    extension/NativeEditControls/HighlightController.h
+    extension/NativeEditControls/HighlightController.cpp
+    extension/NativeEditControls/CppHighlight.h
+    extension/NativeEditControls/CppHighlight.cpp
+    extension/NativeEditControls/CppDiagnostics.h
+    extension/NativeEditControls/CppDiagnostics.cpp
     extension/NativeEditControls/DesignerClipboard.h
     extension/NativeEditControls/DesignerClipboard.cpp
     extension/NativeEditControls/DesignerArrange.h
@@ -311,6 +323,9 @@ add_executable(testharness
     extension/NativeEditControls/ComponentEditor.cpp
     extension/NativeEditControls/MenuDesigner.cpp
     extension/NativeEditControls/SourceView.cpp
+    extension/NativeEditControls/HighlightController.cpp
+    extension/NativeEditControls/CppHighlight.cpp
+    extension/NativeEditControls/CppDiagnostics.cpp
     extension/NativeEditControls/DesignerClipboard.cpp
     extension/NativeEditControls/DesignerArrange.cpp
     extension/NativeEditControls/ToolboxRegistry.cpp

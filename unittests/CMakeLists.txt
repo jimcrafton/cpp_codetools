@@ -2,6 +2,7 @@ find_package(Threads REQUIRED)
 
 add_executable(cpptools_tests
     test_parser.cpp
+    test_compileflags.cpp
 )
 
 target_link_libraries(cpptools_tests PRIVATE cpptools GTest::gtest_main Threads::Threads)
@@ -17,6 +18,7 @@ add_executable(lex_tests
     lex/lex_tests.cpp
     lex/lexer_base_tests.cpp
     lex/json5_lexer_tests.cpp
+    lex/cpp_lexer_tests.cpp
     lex/json5_parser_tests.cpp
     lex/json5_diff_tests.cpp
     lex/json5_presentation_tests.cpp
@@ -45,6 +47,7 @@ add_executable(nativeeditcontrols_tests
     test_designer_clipboard.cpp
     test_designer_arrange.cpp
     test_designer_editor.cpp
+    test_cpp_editor.cpp
     test_workspace.cpp
     test_canvas_well.cpp
     test_toolbox_registry.cpp
@@ -72,6 +75,9 @@ add_executable(nativeeditcontrols_tests
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/ComponentEditor.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/MenuDesigner.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/SourceView.cpp"
+    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/HighlightController.cpp"
+    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/CppHighlight.cpp"
+    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/CppDiagnostics.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/DesignerClipboard.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/DesignerArrange.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/ToolboxRegistry.cpp"

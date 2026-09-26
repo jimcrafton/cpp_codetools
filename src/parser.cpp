@@ -31,12 +31,14 @@ SourceLocation toSourceLocation(CXSourceLocation location) {
     CXFile file = nullptr;
     unsigned line = 0;
     unsigned column = 0;
-    clang_getSpellingLocation(location, &file, &line, &column, nullptr);
+    unsigned offset = 0;
+    clang_getSpellingLocation(location, &file, &line, &column, &offset);
 
     SourceLocation result;
     result.file = file ? toStdString(clang_getFileName(file)) : std::string();
     result.line = line;
     result.column = column;
+    result.offset = offset;
     return result;
 }
 
@@ -140,6 +142,11 @@ std::vector<Diagnostic> collectDiagnostics(CXTranslationUnit tu) {
         entry.severity = toSeverity(clang_getDiagnosticSeverity(diagnostic));
         entry.message = toStdString(clang_getDiagnosticSpelling(diagnostic));
         entry.location = toSourceLocation(clang_getDiagnosticLocation(diagnostic));
+        entry.category = toStdString(clang_getDiagnosticCategoryText(diagnostic));
+        entry.fromMainFile = clang_Location_isFromMainFile(clang_getDiagnosticLocation(diagnostic)) != 0;
+        if (clang_getDiagnosticNumRanges(diagnostic) > 0) {
+            entry.rangeEndOffset = toSourceLocation(clang_getRangeEnd(clang_getDiagnosticRange(diagnostic, 0))).offset;
+        }
         diagnostics.push_back(std::move(entry));
 
         clang_disposeDiagnostic(diagnostic);
@@ -188,7 +195,15 @@ ClangIndex& ClangIndex::operator=(ClangIndex&& other) noexcept {
 }
 
 std::vector<std::string> defaultCompileArgs() {
-    return {"-std=c++17", "-xc++"};
+    std::vector<std::string> args{"-std=c++17", "-xc++"};
+#ifdef _WIN32
+    // The MSVC STL refuses a compiler it doesn't know (VS 2026's wants Clang 20; this libclang may
+    // be older) with a static_assert in <yvals_core.h> - this is its own switch for that.
+    args.push_back("-D_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH");
+#endif
+    // A header is the main file here: don't warn about "#pragma once" in it.
+    args.push_back("-Wno-pragma-once-outside-header");
+    return args;
 }
 
 Parser::Parser() = default;
@@ -208,7 +223,9 @@ ParseResult Parser::parseBuffer(const std::string& filePath, const std::string& 
         filePath.c_str(),
         args.data(), static_cast<int>(args.size()),
         &unsavedFile, 1,
-        clang_defaultEditingTranslationUnitOptions(),
+        // KeepGoing: carry on after a fatal error (a missing #include is one), like an IDE - or every
+        // diagnostic after the first missing header would be lost.
+        clang_defaultEditingTranslationUnitOptions() | CXTranslationUnit_KeepGoing,
         &rawTu);
 
     ParseResult result;

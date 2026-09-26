@@ -27,6 +27,7 @@ struct SourceLocation {
     std::string file;
     std::size_t line = 0;
     std::size_t column = 0;
+    std::size_t offset = 0;   // byte offset into the file's contents (UTF-8), 0-based
 };
 
 struct Symbol {

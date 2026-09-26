@@ -4,14 +4,20 @@
 #include <cstdint>
 
 #include <newui/controls.h>
+#include <newui/textfolding.h>
 
+#include <memory>
+
+#include "CppDiagnostics.h"
+#include "HighlightController.h"
 #include "NativeEditor.h"
 
 namespace CodeToolsVsix
 {
     // Hosts a real newui::RootView (standalone - no Application/Frame, see newui's HANDOFF.md
-    // Part 91) with two newui::TextControl children stacked vertically, as a child of hwndParent:
-    // the editable source buffer (textControl_, most of the space) and a read-only outline pane
+    // Part 91) with two scrolled text panes stacked vertically, as a child of hwndParent:
+    // the editable source buffer (textControl_, most of the space - syntax highlighted, foldable,
+    // with undo) and a read-only outline pane
     // below it (outlineControl_) - kept as two separate controls, not one buffer with the outline
     // text appended, specifically so save() only ever writes real source text (see load()'s own
     // comment). Replaces StandInEditControl's hand-rolled Win32 window - see "win32 loop in
@@ -61,8 +67,24 @@ namespace CodeToolsVsix
 
 		// contentHost: see the constructor's own comment above.
 		bool setupUI(newui::RootView* root, newui::SubView* contentHost = nullptr);
+
+        // The editable source's control (a TextFoldingControl: line numbers, folding, colors), the
+        // ScrollView that scrolls it, and the read-only outline's control - for tests.
+        newui::TextFoldingControl* textControl() const { return textControl_; }
+        newui::ScrollView* scrollView() const { return scrollView_; }
+        newui::TextControl* outlineControl() const { return outlineControl_; }
     private:
-        newui::TextControl* textControl_ = nullptr;     // owned by the base's RootView child tree - editable source
-        newui::TextControl* outlineControl_ = nullptr;  // owned by the base's RootView child tree - read-only outline
+        // Each pane is a text control hosted by a ScrollView, which scrolls it (a TextControl has no
+        // scrollbar of its own). All owned by the base's RootView child tree.
+        newui::ScrollView* scrollView_ = nullptr;
+        newui::TextFoldingControl* textControl_ = nullptr;   // editable source; keeps its edits for undo
+        newui::ScrollView* outlineScroll_ = nullptr;
+        newui::TextControl* outlineControl_ = nullptr;       // read-only outline
+        // Colors, folds and syntax-error squiggles for textControl_, computed off the UI thread.
+        std::unique_ptr<HighlightController> highlight_;
+        std::shared_ptr<CppDocument> document_;   // what the parse thinks the text is (its path), shared with the worker
+
+        // Shows a new outline in the read-only pane (unchanged: left alone).
+        void setOutlineText(const std::wstring& outline);
     };
 }

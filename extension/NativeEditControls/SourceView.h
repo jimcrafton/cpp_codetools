@@ -1,12 +1,13 @@
 #pragma once
 
 #include <newui/controls.h>
-#include <newui/runloop.h>
 #include <newui/subview.h>
 #include <newui/textfolding.h>
 
 #include <lex/highlight.h>
 #include <lex/json5_parser.h>
+
+#include "HighlightController.h"
 
 #include <memory>
 
@@ -54,46 +55,30 @@ namespace CodeToolsVsix
         const std::vector<newui::text::TextColorRun>& colorRuns() const { return textControl_->colorRuns(); }
         const std::vector<newui::text::TextDecoration>& problems() const { return textControl_->decorations(); }
 
-        // The TextStyleSheet name for a lex style (nullptr: drawn in the control's own look), and
-        // lex's theme as a sheet - one style per name, plus "problem" (a squiggle).
-        static const char* styleNameFor(lex::StyleId style);
-        static std::shared_ptr<const newui::TextStyleSheet> styleSheetFor(const lex::Theme& theme);
-
         // A fold per multi-line object, array (hiding what's between the brackets) and block
         // comment in parsed, expanded; text is what was parsed.
         static std::vector<newui::text::TextFold> foldsFor(const lex::json5::ParseResult& parsed, const std::wstring& text);
 
-    private:
-        struct Analysis;
-        struct AsyncState;
+        // The pure part of highlighting a JSON5 text: lex colors, squiggles for what doesn't lex or
+        // parse, and the folds - with the parse tree as the result's extra (a lex::json5::ParseResult).
+        // Thread-safe; what HighlightController runs on its worker.
+        static HighlightResult analyze(const std::wstring& text);
 
-        // The pure part: lex, parse, style ranges and folds for a text snapshot. Thread-safe.
-        static Analysis analyze(const std::wstring& text);
-        // Recolors (lex's light or dark theme, following the system), squiggles what doesn't parse
-        // and refreshes the folds - keeping collapsed the ones still there. UI thread.
-        void apply(Analysis&& analysis);
-        // analyze + apply, synchronously.
-        void highlight();
-        // analyze on a worker over a snapshot, apply back on the loop; a result for text that has
-        // since changed is dropped, and one worker runs at a time.
-        void startBackgroundHighlight(newui::RunLoop& loop);
-        // Typing shows at once; re-highlighting (whole-document) waits until it pauses, on the
-        // run loop - or runs right away with no loop running (tests).
+    private:
+        // The status bar follows the text as it changes (the colors and folds come from highlight_).
         newui::SyncReturn handleTextChanged(newui::Model& sender);
         newui::SyncReturn handleEditStateChanged(newui::TextController& sender);
         newui::SyncReturn handleWhitespaceToggled(newui::Button& sender);
         // The status bar and the breadcrumbs, for the caret and selection now.
         void updateStatus();
 
-        std::shared_ptr<AsyncState> async_;
         newui::Label* errorBar_ = nullptr;
         newui::ScrollView* scrollView_ = nullptr;
         newui::TextFoldingControl* textControl_ = nullptr;
         newui::Label* statusBar_ = nullptr;
         newui::Label* breadcrumbBar_ = nullptr;
         newui::Button* whitespaceToggle_ = nullptr;
-        lex::json5::ParseResult parsed_;   // the text as of the last highlight()
-        newui::RunLoop* highlightLoop_ = nullptr;
-        newui::RunLoop::TimerHandle highlightTimer_ = newui::RunLoop::kInvalidTimerHandle;
+        lex::json5::ParseResult parsed_;   // the text as of the last highlight pass
+        std::unique_ptr<HighlightController> highlight_;
     };
 }

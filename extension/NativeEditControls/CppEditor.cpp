@@ -1,4 +1,6 @@
 #include "CppEditor.h"
+#include "CppDiagnostics.h"
+#include "CppHighlight.h"
 #include "TextEncoding.h"
 #include "Logging.h"
 
@@ -7,6 +9,7 @@
 #include <cpptools/log.h>
 
 #include <newui/layout.h>
+#include <newui/texthistory.h>
 #include <newui/uicolormanager.h>
 
 #include <vector>
@@ -80,44 +83,6 @@ namespace CodeToolsVsix
             return ok;
         }
 
-        // Fixed strings for cpptools::SymbolKind - deliberately not libclang's own kind spelling
-        // (cpptools::Symbol doesn't retain that), just a readable label for the outline display.
-        const wchar_t* kindSpelling(cpptools::SymbolKind kind)
-        {
-            switch (kind)
-            {
-            case cpptools::SymbolKind::Namespace: return L"Namespace";
-            case cpptools::SymbolKind::Class: return L"Class";
-            case cpptools::SymbolKind::Struct: return L"Struct";
-            case cpptools::SymbolKind::Union: return L"Union";
-            case cpptools::SymbolKind::Enum: return L"Enum";
-            case cpptools::SymbolKind::ClassTemplate: return L"ClassTemplate";
-            case cpptools::SymbolKind::Function: return L"Function";
-            case cpptools::SymbolKind::Method: return L"Method";
-            case cpptools::SymbolKind::Constructor: return L"Constructor";
-            case cpptools::SymbolKind::Destructor: return L"Destructor";
-            case cpptools::SymbolKind::Field: return L"Field";
-            case cpptools::SymbolKind::Variable: return L"Variable";
-            case cpptools::SymbolKind::Typedef: return L"Typedef";
-            default: return L"Other";
-            }
-        }
-
-        void appendSymbols(const std::vector<cpptools::Symbol>& symbols, unsigned depth, std::wstring& out)
-        {
-            for (const cpptools::Symbol& symbol : symbols)
-            {
-                out += L"\r\n";
-                out.append(static_cast<std::size_t>(depth) * 2, L' ');
-                out += kindSpelling(symbol.kind);
-                out += L' ';
-                out += utf8ToWide(symbol.name);
-                out += L" @ " + std::to_wstring(symbol.location.line) + L':' + std::to_wstring(symbol.location.column);
-
-                appendSymbols(symbol.children, depth + 1, out);
-            }
-        }
-
         const wchar_t* commandName(EditorCommand command)
         {
             switch (command)
@@ -151,23 +116,16 @@ namespace CodeToolsVsix
         // Parses contentUtf8 (the buffer just loaded) via cpptools::Parser and formats an
         // indented outline. Never throws - a parse failure just means no outline, not a failure
         // to load the file.
-        std::wstring buildOutline(const std::wstring& filePath, const std::string& contentUtf8)
+        std::wstring buildOutline(const std::wstring& filePath, const std::string& contentUtf8, const cpptools::CompileFlags& flags)
         {
             try
             {
                 registerCppToolsLogSink();
 
                 cpptools::Parser parser;
-                cpptools::ParseResult result = parser.parseBuffer(wideToUtf8(filePath.c_str(), filePath.size()), contentUtf8);
+                cpptools::ParseResult result = parser.parseBuffer(wideToUtf8(filePath.c_str(), filePath.size()), contentUtf8, flags.args);
 
-                if (result.symbols.empty())
-                {
-                    return L"--- Outline (cpptools): no symbols found ---";
-                }
-
-                std::wstring outline = L"--- Outline (cpptools) ---";
-                appendSymbols(result.symbols, 0, outline);
-                return outline;
+                return formatOutline(result, flags.origin);
             }
             catch (...)
             {
@@ -227,20 +185,36 @@ namespace CodeToolsVsix
         rootLayout->setPadding(0.0f);
         host->setLayout(std::move(rootLayout));
 
-        auto* textControl = new newui::TextControl();
+        // Each pane is a text control hosted by a ScrollView, which scrolls it (a TextControl has no
+        // scrollbar of its own). The scroll views share the vertical space: most of it to the source.
+        auto* scrollView = new newui::ScrollView();
+        scrollView->setName("cppEditorScroll");
+        scrollView->setVisible(true);
+        scrollView->setLayoutParams(std::make_unique<newui::FlexLayoutParams>(3.0f));
+        host->addChild(scrollView);
+
+        // A TextFoldingControl: line numbers, folding, colors. Its model remembers edits for undo -
+        // installed before anything subscribes to the model.
+        auto* textControl = new newui::TextFoldingControl();
+        textControl->setName("cppEditorText");
         textControl->setVisible(true);
-        // Most of the space - the outline pane below gets the rest.
-        textControl->setLayoutParams(std::make_unique<newui::FlexLayoutParams>(3.0f));
-        host->addChild(textControl);
+        textControl->setModel(std::make_unique<newui::text::HistoryTextModel>());
+        scrollView->addChild(textControl);
+
+        auto* outlineScroll = new newui::ScrollView();
+        outlineScroll->setName("cppEditorOutlineScroll");
+        outlineScroll->setVisible(true);
+        outlineScroll->setLayoutParams(std::make_unique<newui::FlexLayoutParams>(1.0f));
+        host->addChild(outlineScroll);
 
         auto* outlineControl = new newui::TextControl();
+        outlineControl->setName("cppEditorOutline");
         outlineControl->setVisible(true);
-        outlineControl->setLayoutParams(std::make_unique<newui::FlexLayoutParams>(1.0f));
         outlineControl->inputTraits().setReadOnly(true);
         // Visually distinct from the editable pane above it, so it doesn't read as "more of the
         // same editable buffer" - same UIColorManager pattern the root's own background uses.
         outlineControl->style().setBackgroundColor(newui::UIColorManager::colorFor(newui::UIColorRole::ControlBackground));
-        host->addChild(outlineControl);
+        outlineScroll->addChild(outlineControl);
         if (!this->rootViewOwned_) {
             if (!root->initialize())
             {
@@ -263,8 +237,23 @@ namespace CodeToolsVsix
             });
 
         
+        scrollView_ = scrollView;
         textControl_ = textControl;
+        outlineScroll_ = outlineScroll;
         outlineControl_ = outlineControl;
+
+        // Colors and folds follow the text, off the UI thread; a slower pass parses it with libclang
+        // for syntax-error squiggles, and keeps the outline current.
+        highlight_ = std::make_unique<HighlightController>(*textControl, &analyzeCpp);
+        document_ = std::make_shared<CppDocument>();
+        highlight_->setOverlayAnalyzer([document = document_](const std::wstring& text) {
+            return analyzeCppDiagnostics(text, document);
+        });
+        highlight_->setOnOverlayApplied([this](HighlightOverlay& overlay) {
+            if (const auto* outline = std::any_cast<std::wstring>(&overlay.extra)) {
+                setOutlineText(*outline);
+            }
+        });
 
         return true;
     }
@@ -291,22 +280,31 @@ namespace CodeToolsVsix
             return false;
         }
 
+        // The parse pretends the text is this file (so its own directory is searched for includes).
+        document_->setPath(wideToUtf8(path.c_str(), path.size()));
         textControl_->setText(utf8ToWide(contentUtf8));
         clearDirty();
 
-        if (outlineControl_)
-        {
-            // TextController::handleModelBeforeRangeChanged() (controls.cpp) vetoes *any* model
-            // change - including a programmatic setText(), not just user keystrokes - while
-            // isReadOnly() is true. Lift it only for this call, then restore it immediately, so
-            // the pane can still be refreshed on every load() while staying non-editable to the
-            // user the rest of the time.
-            outlineControl_->inputTraits().setReadOnly(false);
-            outlineControl_->setText(buildOutline(path, contentUtf8));
-            outlineControl_->inputTraits().setReadOnly(true);
-        }
+        // Right away, rather than after the first background parse.
+        setOutlineText(buildOutline(path, contentUtf8, document_->flags()));
 
         return true;
+    }
+
+    void CppEditor::setOutlineText(const std::wstring& outline)
+    {
+        if (!outlineControl_ || outlineControl_->text() == outline)
+        {
+            return;
+        }
+        // TextController::handleModelBeforeRangeChanged() (controls.cpp) vetoes *any* model
+        // change - including a programmatic setText(), not just user keystrokes - while
+        // isReadOnly() is true. Lift it only for this call, then restore it immediately, so
+        // the pane can still be refreshed while staying non-editable to the user the rest of the
+        // time.
+        outlineControl_->inputTraits().setReadOnly(false);
+        outlineControl_->setText(outline);
+        outlineControl_->inputTraits().setReadOnly(true);
     }
 
     bool CppEditor::save(const wchar_t* filePath, std::size_t filePathLength)
@@ -333,8 +331,22 @@ namespace CodeToolsVsix
 
     bool CppEditor::execCommand(EditorCommand command, std::uint32_t flags, const EditorCommandArgs* args)
     {
-        // STUB: every command is a logged no-op today, same as StandInEditControl's own
-        // execCommand - real per-command behavior is out of scope for this phase.
+        // The editing commands act on the source pane (what "handled" means to the caller: false
+        // when there's nothing to undo / redo / copy / paste).
+        if (textControl_ != nullptr)
+        {
+            switch (command)
+            {
+            case EditorCommand::Undo: return textControl_->undo();
+            case EditorCommand::Redo: return textControl_->redo();
+            case EditorCommand::Cut: return textControl_->cut();
+            case EditorCommand::Copy: return textControl_->copy();
+            case EditorCommand::Paste: return textControl_->paste();
+            default: break;
+            }
+        }
+
+        // STUB: Find / Replace / GotoLine are logged no-ops - real behavior is still to come.
         wchar_t buffer[256];
         if (args)
         {

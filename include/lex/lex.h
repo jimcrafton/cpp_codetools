@@ -3,7 +3,7 @@
 // Convenience header: the whole library.
 //
 //   namespace lex          LexerBase, LexerOptions, Token, LineIndex, KeywordTable,
-//                          Json5Lexer, json5Language(),
+//                          Json5Lexer, json5Language(), CppLexer, cppLanguage(),
 //                          SyntaxHighlighter, Theme, Language, highlightLine()
 //   namespace lex::json5   token kinds, parse(), ASTNode, structural hashing,
 //                          diff(), flattenUnified() / flattenSplit(), ViewState
@@ -19,3 +19,5 @@
 #include "json5_presentation.h"
 #include "highlight.h"
 #include "json5_language.h"
+#include "cpp_lexer.h"
+#include "cpp_language.h"
