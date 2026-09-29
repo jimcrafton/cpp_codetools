@@ -1,0 +1,123 @@
+{
+  meta: {
+    author: "",
+    date: "2026-09-26",
+    copyright: "",
+    version: "0.1.0.900"
+  },
+  type: "SubView",
+  visible: true,
+  name: "gotobox",
+  layout: {
+    type: "FlexLayout",
+    orientation: "Vertical",
+    spacing: 4,
+    padding: 8,
+    crossAxisAlignment: "Stretch"
+  },
+  style: {
+    type: "ViewStyle",
+    backgroundFill: {
+      type: "Fill",
+      kind: "Color",
+      color: "ControlBackground"
+    },
+    borderFill: "ControlBorder",
+    borderWidth: 1,
+    rectRadius: 10,
+    elevation: 32.0
+  },
+  desiredSize: {
+    type: "Size",
+    width: 284,
+    height: 60
+  },
+  desiredSizeOverride: true,
+  childViews: [
+    {
+      type: "SubView",
+      visible: true,
+      name: "gotoRow",
+      layout: {
+        type: "FlexLayout",
+        orientation: "Horizontal",
+        spacing: 8,
+        padding: 0,
+        crossAxisAlignment: "Center"
+      },
+      childViews: [
+        {
+          type: "Label",
+          name: "gotoLabel",
+          text: "Go to line",
+          textAlignment: "Left",
+          style: {
+            type: "LabelStyle",
+            text: "Go to line",
+            textColor: "DisabledText",
+            font: {
+              type: "Font",
+              name: "Segoe UI",
+              size: 12
+            }
+          },
+          desiredSize: {
+            type: "Size",
+            width: 64,
+            height: 24
+          },
+          desiredSizeOverride: true
+        },
+        {
+          type: "TextField",
+          name: "gotoInput",
+          placeholder: "line or line:column",
+          font: {
+            type: "Font",
+            name: "Consolas",
+            size: 13
+          },
+          textColor: "ControlText",
+          desiredSize: {
+            type: "Size",
+            width: 190,
+            height: 24
+          },
+          desiredSizeOverride: true,
+          layoutParams: {
+            type: "FlexLayoutParams",
+            weight: 1.0
+          }
+        }
+      ],
+      desiredSize: {
+        type: "Size",
+        width: 268,
+        height: 24
+      },
+      desiredSizeOverride: true
+    },
+    {
+      type: "Label",
+      name: "gotoMsg",
+      text: "",
+      textAlignment: "Left",
+      style: {
+        type: "LabelStyle",
+        text: "",
+        textColor: "DisabledText",
+        font: {
+          type: "Font",
+          name: "Segoe UI",
+          size: 11.5
+        }
+      },
+      desiredSize: {
+        type: "Size",
+        width: 268,
+        height: 14
+      },
+      desiredSizeOverride: true
+    }
+  ]
+}

@@ -1,0 +1,512 @@
+{
+  meta: {
+    author: "",
+    date: "2026-09-26",
+    copyright: "",
+    version: "0.1.0.900"
+  },
+  type: "SubView",
+  visible: true,
+  name: "findbar",
+  layout: {
+    type: "FlexLayout",
+    orientation: "Vertical",
+    spacing: 4,
+    padding: 6,
+    crossAxisAlignment: "Stretch"
+  },
+  style: {
+    type: "ViewStyle",
+    backgroundFill: {
+      type: "Fill",
+      kind: "Color",
+      color: "ControlBackground"
+    },
+    borderFill: "ControlBorder",
+    borderWidth: 1,
+    rectRadius: 10,
+    elevation: 32.0
+  },
+  desiredSize: {
+    type: "Size",
+    width: 420,
+    height: 118
+  },
+  desiredSizeOverride: true,
+  childViews: [
+    {
+      type: "SubView",
+      visible: true,
+      name: "gripRow",
+      layout: {
+        type: "FlexLayout",
+        orientation: "Horizontal",
+        spacing: 0,
+        padding: 0,
+        crossAxisAlignment: "Center",
+        mainAxisAlignment: "Center"
+      },
+      childViews: [
+        {
+          type: "SubView",
+          visible: true,
+          name: "grip",
+          style: {
+            type: "ViewStyle",
+            backgroundFill: {
+              type: "Fill",
+              kind: "Color",
+              color: "ControlBorder"
+            },
+            rectRadius: 2
+          },
+          desiredSize: {
+            type: "Size",
+            width: 36,
+            height: 4
+          },
+          desiredSizeOverride: true
+        }
+      ],
+      desiredSize: {
+        type: "Size",
+        width: 408,
+        height: 4
+      },
+      desiredSizeOverride: true
+    },
+    {
+      type: "SubView",
+      visible: true,
+      name: "findRow",
+      layout: {
+        type: "FlexLayout",
+        orientation: "Horizontal",
+        spacing: 4,
+        padding: 0,
+        crossAxisAlignment: "Center"
+      },
+      childViews: [
+        {
+          type: "ToolbarButton",
+          name: "expandBtn",
+          icon: "Images/icons/find/chevron-right.svg",
+          desiredSize: {
+            type: "Size",
+            width: 18,
+            height: 24
+          },
+          desiredSizeOverride: true
+        },
+        {
+          type: "TextField",
+          name: "findInput",
+          placeholder: "Find",
+          font: {
+            type: "Font",
+            name: "Consolas",
+            size: 13
+          },
+          textColor: "ControlText",
+          desiredSize: {
+            type: "Size",
+            width: 186,
+            height: 24
+          },
+          desiredSizeOverride: true,
+          layoutParams: {
+            type: "FlexLayoutParams",
+            weight: 1.0
+          }
+        },
+        {
+          type: "ToolbarButton",
+          name: "caseBtn",
+          text: "Aa",
+          toggleButton: true,
+          desiredSize: {
+            type: "Size",
+            width: 24,
+            height: 24
+          },
+          desiredSizeOverride: true
+        },
+        {
+          type: "ToolbarButton",
+          name: "wordBtn",
+          text: "ab",
+          toggleButton: true,
+          desiredSize: {
+            type: "Size",
+            width: 24,
+            height: 24
+          },
+          desiredSizeOverride: true
+        },
+        {
+          type: "Label",
+          name: "count",
+          text: "",
+          textAlignment: "Center",
+          style: {
+            type: "LabelStyle",
+            text: "",
+            textColor: "DisabledText",
+            font: {
+              type: "Font",
+              name: "Segoe UI",
+              size: 11.5
+            }
+          },
+          desiredSize: {
+            type: "Size",
+            width: 56,
+            height: 24
+          },
+          desiredSizeOverride: true
+        },
+        {
+          type: "ToolbarButton",
+          name: "prevBtn",
+          icon: "Images/icons/find/chevron-up.svg",
+          desiredSize: {
+            type: "Size",
+            width: 24,
+            height: 24
+          },
+          desiredSizeOverride: true
+        },
+        {
+          type: "ToolbarButton",
+          name: "nextBtn",
+          icon: "Images/icons/find/chevron-down.svg",
+          desiredSize: {
+            type: "Size",
+            width: 24,
+            height: 24
+          },
+          desiredSizeOverride: true
+        },
+        {
+          type: "ToolbarButton",
+          name: "closeBtn",
+          icon: "Images/icons/find/close.svg",
+          desiredSize: {
+            type: "Size",
+            width: 24,
+            height: 24
+          },
+          desiredSizeOverride: true
+        }
+      ],
+      desiredSize: {
+        type: "Size",
+        width: 408,
+        height: 24
+      },
+      desiredSizeOverride: true
+    },
+    {
+      type: "SubView",
+      visible: true,
+      name: "replaceRow",
+      layout: {
+        type: "FlexLayout",
+        orientation: "Horizontal",
+        spacing: 4,
+        padding: 0,
+        crossAxisAlignment: "Center"
+      },
+      childViews: [
+        {
+          type: "SubView",
+          visible: true,
+          desiredSize: {
+            type: "Size",
+            width: 18,
+            height: 24
+          },
+          desiredSizeOverride: true
+        },
+        {
+          type: "TextField",
+          name: "replaceInput",
+          placeholder: "Replace",
+          font: {
+            type: "Font",
+            name: "Consolas",
+            size: 13
+          },
+          textColor: "ControlText",
+          desiredSize: {
+            type: "Size",
+            width: 176,
+            height: 24
+          },
+          desiredSizeOverride: true,
+          layoutParams: {
+            type: "FlexLayoutParams",
+            weight: 1.0
+          }
+        },
+        {
+          type: "Button",
+          name: "replaceBtn",
+          text: "Replace",
+          desiredSize: {
+            type: "Size",
+            width: 64,
+            height: 24
+          },
+          desiredSizeOverride: true
+        },
+        {
+          type: "Button",
+          name: "renameBtn",
+          text: "Rename",
+          desiredSize: {
+            type: "Size",
+            width: 58,
+            height: 24
+          },
+          desiredSizeOverride: true
+        },
+        {
+          type: "Button",
+          name: "replaceAllBtn",
+          text: "Replace all",
+          desiredSize: {
+            type: "Size",
+            width: 76,
+            height: 24
+          },
+          desiredSizeOverride: true
+        }
+      ],
+      desiredSize: {
+        type: "Size",
+        width: 408,
+        height: 24
+      },
+      desiredSizeOverride: true
+    },
+    {
+      type: "SubView",
+      visible: true,
+      name: "scopeRow",
+      layout: {
+        type: "FlexLayout",
+        orientation: "Horizontal",
+        spacing: 8,
+        padding: 0,
+        crossAxisAlignment: "Center"
+      },
+      childViews: [
+        {
+          type: "SubView",
+          visible: true,
+          desiredSize: {
+            type: "Size",
+            width: 12,
+            height: 20
+          },
+          desiredSizeOverride: true
+        },
+        {
+          type: "SubView",
+          visible: true,
+          name: "kindSeg",
+          layout: {
+            type: "FlexLayout",
+            orientation: "Horizontal",
+            spacing: 2,
+            padding: 2,
+            crossAxisAlignment: "Center"
+          },
+          style: {
+            type: "ViewStyle",
+            backgroundFill: {
+              type: "Fill",
+              kind: "Color",
+              color: "WindowBackground"
+            },
+            rectRadius: 7
+          },
+          childViews: [
+            {
+              type: "ToolbarButton",
+              name: "kindAll",
+              text: "All",
+              toggleButton: true,
+              checked: true,
+              desiredSize: {
+                type: "Size",
+                width: 32,
+                height: 20
+              },
+              desiredSizeOverride: true
+            },
+            {
+              type: "ToolbarButton",
+              name: "kindCode",
+              text: "Code",
+              toggleButton: true,
+              desiredSize: {
+                type: "Size",
+                width: 40,
+                height: 20
+              },
+              desiredSizeOverride: true
+            },
+            {
+              type: "ToolbarButton",
+              name: "kindComment",
+              text: "Comments",
+              toggleButton: true,
+              desiredSize: {
+                type: "Size",
+                width: 62,
+                height: 20
+              },
+              desiredSizeOverride: true
+            },
+            {
+              type: "ToolbarButton",
+              name: "kindString",
+              text: "Strings",
+              toggleButton: true,
+              desiredSize: {
+                type: "Size",
+                width: 50,
+                height: 20
+              },
+              desiredSizeOverride: true
+            }
+          ],
+          desiredSize: {
+            type: "Size",
+            width: 194,
+            height: 24
+          },
+          desiredSizeOverride: true
+        },
+        {
+          type: "SubView",
+          visible: true,
+          name: "regionSeg",
+          layout: {
+            type: "FlexLayout",
+            orientation: "Horizontal",
+            spacing: 2,
+            padding: 2,
+            crossAxisAlignment: "Center"
+          },
+          style: {
+            type: "ViewStyle",
+            backgroundFill: {
+              type: "Fill",
+              kind: "Color",
+              color: "WindowBackground"
+            },
+            rectRadius: 7
+          },
+          childViews: [
+            {
+              type: "ToolbarButton",
+              name: "regionFile",
+              text: "File",
+              toggleButton: true,
+              checked: true,
+              desiredSize: {
+                type: "Size",
+                width: 32,
+                height: 20
+              },
+              desiredSizeOverride: true
+            },
+            {
+              type: "ToolbarButton",
+              name: "regionFn",
+              text: "Function",
+              toggleButton: true,
+              desiredSize: {
+                type: "Size",
+                width: 106,
+                height: 20
+              },
+              desiredSizeOverride: true
+            }
+          ],
+          desiredSize: {
+            type: "Size",
+            width: 144,
+            height: 24
+          },
+          desiredSizeOverride: true
+        }
+      ],
+      desiredSize: {
+        type: "Size",
+        width: 408,
+        height: 24
+      },
+      desiredSizeOverride: true
+    },
+    {
+      type: "SubView",
+      visible: true,
+      name: "breakdownRow",
+      layout: {
+        type: "FlexLayout",
+        orientation: "Horizontal",
+        spacing: 0,
+        padding: 0,
+        crossAxisAlignment: "Center"
+      },
+      childViews: [
+        {
+          type: "SubView",
+          visible: true,
+          desiredSize: {
+            type: "Size",
+            width: 18,
+            height: 14
+          },
+          desiredSizeOverride: true
+        },
+        {
+          type: "Label",
+          name: "breakdown",
+          text: "",
+          textAlignment: "Left",
+          style: {
+            type: "LabelStyle",
+            text: "",
+            textColor: "DisabledText",
+            font: {
+              type: "Font",
+              name: "Segoe UI",
+              size: 11
+            }
+          },
+          desiredSize: {
+            type: "Size",
+            width: 390,
+            height: 14
+          },
+          desiredSizeOverride: true,
+          layoutParams: {
+            type: "FlexLayoutParams",
+            weight: 1.0
+          }
+        }
+      ],
+      desiredSize: {
+        type: "Size",
+        width: 408,
+        height: 14
+      },
+      desiredSizeOverride: true
+    }
+  ]
+}
