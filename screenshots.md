@@ -20,3 +20,27 @@ Claude Code design skill to convert an HTML mockup to newui file format
 
 .newui format example, what the previous UI's file representation looks like
 <img width="1097" height="862" alt="sc7" src="https://github.com/user-attachments/assets/bb1de46a-28af-42ff-a14d-37332b49b908" />
+
+More updates:
+
+<img width="1144" height="753" alt="sc8" src="https://github.com/user-attachments/assets/233350d0-1d5a-47d7-b632-4ceaea5fd20c" />
+
+Changing layout
+<img width="825" height="354" alt="sc9" src="https://github.com/user-attachments/assets/50928c3c-eb94-4023-afd7-3a4af31cd75e" />
+
+Changing theme
+<img width="594" height="323" alt="sc11" src="https://github.com/user-attachments/assets/f24249ad-9e4a-40d7-bc85-ca23d7386d6e" />
+
+Switch to .newui source
+<img width="841" height="712" alt="sc10" src="https://github.com/user-attachments/assets/2c51863f-402e-4f02-82f5-84973acee9bf" />
+
+C++ Editor
+<img width="1004" height="938" alt="sc12" src="https://github.com/user-attachments/assets/faba7f5e-79b7-4169-b5f2-94d507197286" />
+
+C++ Editor Find
+<img width="963" height="759" alt="sc13" src="https://github.com/user-attachments/assets/3a69848e-a50b-4e6e-ba38-3efbd408bc2a" />
+
+C++ Editor Replace
+<img width="925" height="727" alt="sc14" src="https://github.com/user-attachments/assets/c6a44020-1849-4499-b051-0ed9dc2cc76f" />
+
+
