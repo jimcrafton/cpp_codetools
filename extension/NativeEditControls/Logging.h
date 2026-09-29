@@ -10,8 +10,10 @@ namespace CodeToolsVsix
     // typically a real VS Output window pane (OutputWindowLogger.cs). cpptools::setLogSink is
     // wired (see ensureCpptoolsLogSinkRegistered in CppEditorControl.cpp) to call this too, so
     // cpptools's own internal logging (e.g. a parse failure) ends up here alongside this DLL's
-    // own log calls. A no-op (besides the OutputDebugStringA... no, see below) if no sink is
-    // registered yet.
+    // own log calls. Falls back to plain stdout (fputs, not OutputDebugString - see below for why
+    // that's excluded) when no managed sink is registered - the real case this matters for is
+    // testharness, which never has one (setManagedLogSink() is only ever called from the VS-managed
+    // side), so without this fallback every log() call there was silently discarded.
     //
     // Deliberately does NOT call OutputDebugStringA, despite that looking like an "always safe,
     // any thread" baseline - it isn't. OutputDebugString(A/W) serializes through a process-wide

@@ -27,6 +27,12 @@ struct ParseResult {
     std::vector<Diagnostic> diagnostics;
 };
 
+// A byte range [offset, offset + length) in the file a Session is holding, for a rename.
+struct Occurrence {
+    std::size_t offset = 0;
+    std::size_t length = 0;
+};
+
 // Move-only RAII wrapper around a libclang CXIndex. CXIndex is itself a `void*` alias (see
 // clang-c/Index.h), so it doesn't fit std::unique_ptr's pointer-to-object model cleanly - a
 // small hand-rolled wrapper is simpler here, same reasoning newui's own ClipboardScope uses for
@@ -89,6 +95,13 @@ public:
     // (diagnostics and tests).
     std::size_t parseCount() const;
     std::size_t reparseCount() const;
+
+    // Every occurrence of the symbol at byte offset `offset`, in the file update() was last called
+    // with: its declaration and every reference to it that is itself written in that file (not one
+    // pulled in via #include), sorted by offset - what a rename replaces. Empty when offset isn't
+    // on a renamable symbol (whitespace, punctuation, a keyword, a macro, ...) or update() has not
+    // been called yet. May be called from any thread; serialized with update() like it.
+    std::vector<Occurrence> findOccurrences(std::size_t offset) const;
 
 private:
     mutable std::mutex mutex_;

@@ -3,6 +3,7 @@
 
 #include <clang-c/Index.h>
 
+#include <algorithm>
 #include <fstream>
 #include <memory>
 #include <sstream>
@@ -80,6 +81,70 @@ SymbolKind toSymbolKind(CXCursorKind kind) {
         case CXCursor_TypedefDecl: return SymbolKind::Typedef;
         default: return SymbolKind::Other;
     }
+}
+
+// Cursor kinds worth renaming - the same idea as isOutlineWorthy, plus the local/parameter kinds
+// that never show up there but are common rename targets.
+bool isRenamableCursorKind(CXCursorKind kind) {
+    switch (kind) {
+        case CXCursor_Namespace:
+        case CXCursor_ClassDecl:
+        case CXCursor_StructDecl:
+        case CXCursor_UnionDecl:
+        case CXCursor_EnumDecl:
+        case CXCursor_ClassTemplate:
+        case CXCursor_FunctionDecl:
+        case CXCursor_CXXMethod:
+        case CXCursor_Constructor:
+        case CXCursor_Destructor:
+        case CXCursor_FieldDecl:
+        case CXCursor_VarDecl:
+        case CXCursor_ParmDecl:
+        case CXCursor_TypedefDecl:
+        case CXCursor_TypeAliasDecl:
+        case CXCursor_EnumConstantDecl:
+        case CXCursor_NonTypeTemplateParameter:
+        case CXCursor_TemplateTypeParameter:
+        case CXCursor_TemplateTemplateParameter:
+            return true;
+        default:
+            return false;
+    }
+}
+
+// What cursor stands for the same symbol everywhere it's spelled: a reference's target, or the
+// cursor itself when it isn't a reference (clang_getCursorReferenced already returns a declaration
+// cursor unchanged).
+CXCursor resolveReferenced(CXCursor cursor) {
+    CXCursor referenced = clang_getCursorReferenced(cursor);
+    return clang_Cursor_isNull(referenced) ? cursor : referenced;
+}
+
+struct OccurrenceContext {
+    CXCursor target;   // canonical
+    std::vector<Occurrence>* result;
+};
+
+CXChildVisitResult visitForOccurrences(CXCursor cursor, CXCursor /*parent*/, CXClientData clientData) {
+    auto* context = static_cast<OccurrenceContext*>(clientData);
+    CXCursor referenced = resolveReferenced(cursor);
+    if (!clang_Cursor_isNull(referenced) && clang_equalCursors(clang_getCanonicalCursor(referenced), context->target)) {
+        CXSourceLocation location = clang_getCursorLocation(cursor);
+        if (clang_Location_isFromMainFile(location) != 0) {
+            // Just the name, not (say) a VarDecl's whole "int x = 1" extent.
+            CXSourceRange nameRange = clang_Cursor_getSpellingNameRange(cursor, 0, 0);
+            CXFile file = nullptr;
+            unsigned start = 0;
+            unsigned end = 0;
+            clang_getSpellingLocation(clang_getRangeStart(nameRange), &file, nullptr, nullptr, &start);
+            clang_getSpellingLocation(clang_getRangeEnd(nameRange), &file, nullptr, nullptr, &end);
+            if (file != nullptr && end > start) {
+                context->result->push_back(Occurrence{ start, end - start });
+            }
+        }
+    }
+    // Always recurse: a match can be nested inside another (e.g. a call's callee reference).
+    return CXChildVisit_Recurse;
 }
 
 Severity toSeverity(CXDiagnosticSeverity severity) {
@@ -315,6 +380,52 @@ std::size_t Session::parseCount() const {
 std::size_t Session::reparseCount() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return reparses_;
+}
+
+std::vector<Occurrence> Session::findOccurrences(std::size_t offset) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::vector<Occurrence> result;
+    if (!unit_) {
+        return result;
+    }
+    CXFile file = clang_getFile(unit_.get(), path_.c_str());
+    if (file == nullptr) {
+        return result;
+    }
+    CXSourceLocation location = clang_getLocationForOffset(unit_.get(), file, static_cast<unsigned>(offset));
+    CXCursor cursor = clang_getCursor(unit_.get(), location);
+    if (clang_Cursor_isNull(cursor) || clang_isInvalid(clang_getCursorKind(cursor))) {
+        return result;
+    }
+    // clang_getCursor snaps to the cursor whose EXTENT contains the location, which for a
+    // declaration is the whole "int count = 0;" - so also require offset be within the symbol's
+    // own spelling name range (just "count"), not merely somewhere inside its declaration.
+    {
+        CXSourceRange ownName = clang_Cursor_getSpellingNameRange(cursor, 0, 0);
+        CXFile ownFile = nullptr;
+        unsigned ownStart = 0;
+        unsigned ownEnd = 0;
+        clang_getSpellingLocation(clang_getRangeStart(ownName), &ownFile, nullptr, nullptr, &ownStart);
+        clang_getSpellingLocation(clang_getRangeEnd(ownName), nullptr, nullptr, nullptr, &ownEnd);
+        if (ownFile == nullptr || offset < ownStart || offset >= ownEnd) {
+            return result;
+        }
+    }
+    CXCursor referenced = resolveReferenced(cursor);
+    if (clang_Cursor_isNull(referenced) || !isRenamableCursorKind(clang_getCursorKind(referenced))) {
+        return result;
+    }
+
+    OccurrenceContext context{ clang_getCanonicalCursor(referenced), &result };
+    CXCursor rootCursor = clang_getTranslationUnitCursor(unit_.get());
+    clang_visitChildren(rootCursor, &visitForOccurrences, &context);
+
+    std::sort(result.begin(), result.end(),
+              [](const Occurrence& a, const Occurrence& b) { return a.offset < b.offset; });
+    result.erase(std::unique(result.begin(), result.end(),
+                             [](const Occurrence& a, const Occurrence& b) { return a.offset == b.offset; }),
+                 result.end());
+    return result;
 }
 
 ParseResult Parser::parseFile(const std::string& filePath,

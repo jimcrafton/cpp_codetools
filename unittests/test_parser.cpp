@@ -331,7 +331,94 @@ TEST(SessionTest, ReparsingAFileWithHeavyIncludesIsMuchFasterThanTheFirstParse) 
     EXPECT_LT(bestReparse, firstMs * 0.5) << "the preamble (the includes) should be reused";
 }
 
-TEST(SessionTest, UpdatesFromSeveralThreadsAreSerializedNotCorrupting) {
+// ---- Session::findOccurrences: what a rename would replace -------------------------------------
+
+TEST(SessionOccurrencesTest, FindsAVariableDeclarationAndEveryUseOfIt) {
+    cpptools::Session session;
+    const std::string code = "int count = 0;\nvoid f() { count = count + 1; }\n";
+    session.update("occ.cpp", code);
+
+    auto occurrences = session.findOccurrences(code.find("count"));   // the declaration
+    ASSERT_EQ(occurrences.size(), 3u);
+    std::size_t at = 0;
+    for (const cpptools::Occurrence& occurrence : occurrences) {
+        at = code.find("count", at);
+        ASSERT_NE(at, std::string::npos);
+        EXPECT_EQ(occurrence.offset, at);
+        EXPECT_EQ(occurrence.length, 5u);
+        at += 5;
+    }
+}
+
+TEST(SessionOccurrencesTest, StartingFromAUseFindsTheDeclarationAndEveryOtherUse) {
+    cpptools::Session session;
+    const std::string code = "int count = 0;\nvoid f() { count = count + 1; }\n";
+    session.update("occ.cpp", code);
+
+    const std::size_t secondUse = code.find("count", code.find("count = ") + 1);
+    auto occurrences = session.findOccurrences(secondUse);
+    EXPECT_EQ(occurrences.size(), 3u);
+}
+
+TEST(SessionOccurrencesTest, FindsAFunctionsDeclarationDefinitionAndCallSite) {
+    cpptools::Session session;
+    const std::string code = "void greet();\nvoid greet() { }\nint main() { greet(); return 0; }\n";
+    session.update("occ.cpp", code);
+
+    auto occurrences = session.findOccurrences(code.find("greet"));
+    ASSERT_EQ(occurrences.size(), 3u);
+    for (const cpptools::Occurrence& occurrence : occurrences) {
+        EXPECT_EQ(code.substr(occurrence.offset, occurrence.length), "greet");
+    }
+}
+
+TEST(SessionOccurrencesTest, FindsAFieldFromItsMemberAccessUse) {
+    cpptools::Session session;
+    const std::string code = "struct Widget { int width; };\nvoid f(Widget& w) { w.width = w.width + 1; }\n";
+    session.update("occ.cpp", code);
+
+    auto occurrences = session.findOccurrences(code.find("width", code.find("w.") + 2));
+    ASSERT_EQ(occurrences.size(), 3u);   // the field itself and both member accesses
+}
+
+TEST(SessionOccurrencesTest, EmptyWhenTheOffsetIsNotOnARenamableSymbol) {
+    cpptools::Session session;
+    const std::string code = "int count = 0;\n";
+    session.update("occ.cpp", code);
+
+    EXPECT_TRUE(session.findOccurrences(code.find('=')).empty());
+    EXPECT_TRUE(session.findOccurrences(code.find(';')).empty());
+}
+
+TEST(SessionOccurrencesTest, DoesNotMatchAnUnrelatedIdentifierWithTheSameSpelling) {
+    cpptools::Session session;
+    const std::string code = "int count = 0;\nint recount = count;\n";
+    session.update("occ.cpp", code);
+
+    auto occurrences = session.findOccurrences(code.find("count"));
+    for (const cpptools::Occurrence& occurrence : occurrences) {
+        EXPECT_EQ(code.substr(occurrence.offset, occurrence.length), "count");
+        EXPECT_NE(code.substr(occurrence.offset > 0 ? occurrence.offset - 2 : 0, 2), "re");
+    }
+    EXPECT_EQ(occurrences.size(), 2u);   // the declaration and the read in "= count", not "recount"
+}
+
+TEST(SessionOccurrencesTest, EmptyBeforeAnyUpdate) {
+    cpptools::Session session;
+    EXPECT_TRUE(session.findOccurrences(0).empty());
+}
+
+TEST(SessionOccurrencesTest, UpdatingTheContentMovesTheOccurrencesToTheNewOffsets) {
+    cpptools::Session session;
+    session.update("occ.cpp", "int count = 0;\n");
+    const std::string code = "\nint count = 0;\nint total = count;\n";
+    session.update("occ.cpp", code);
+
+    auto occurrences = session.findOccurrences(code.find("count"));
+    EXPECT_EQ(occurrences.size(), 2u);
+}
+
+TEST(SessionOccurrencesTest, UpdatesFromSeveralThreadsAreSerializedNotCorrupting) {
     cpptools::Session session;
     std::atomic<int> withoutErrors{ 0 };
     std::vector<std::thread> threads;

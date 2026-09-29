@@ -12,6 +12,24 @@ cpptools_copy_libclang_dll(cpptools_tests)
 include(GoogleTest)
 gtest_discover_tests(cpptools_tests)
 
+# cpptools_codegen's own tests - a separate executable, not folded into cpptools_tests above,
+# since it links Clang's much heavier LibTooling/AST/ASTMatchers libraries (see the root
+# CMakeLists.txt's own "Clang LibTooling - Dependency" section) that cpptools_tests has no need
+# of and that meaningfully slow down its link. Also links plain cpptools (libclang) - the
+# ClassBuilder round-trip test feeds generated text back through cpptools::Parser to prove it
+# actually parses, per bluesky/cpp-codegen-plan.md's own "Testing approach" section, not just
+# trusting the builder's own string-building logic.
+add_executable(cpptools_codegen_tests
+    test_codegen.cpp
+    test_methodbuilder.cpp
+    test_classbuilder.cpp
+    test_methodinsertion.cpp
+    test_delegatewiring.cpp
+)
+
+target_link_libraries(cpptools_codegen_tests PRIVATE cpptools_codegen cpptools GTest::gtest_main Threads::Threads)
+cpptools_copy_libclang_dll(cpptools_codegen_tests)
+
 # The lex library's checks (from lexer-base) - their CHECK macro reports through GoogleTest, see
 # lex/test_util.h.
 add_executable(lex_tests
@@ -48,6 +66,8 @@ add_executable(nativeeditcontrols_tests
     test_designer_arrange.cpp
     test_designer_editor.cpp
     test_cpp_editor.cpp
+    test_find_engine.cpp
+    test_find_replace_controller.cpp
     test_workspace.cpp
     test_canvas_well.cpp
     test_toolbox_registry.cpp
@@ -76,6 +96,9 @@ add_executable(nativeeditcontrols_tests
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/MenuDesigner.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/SourceView.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/HighlightController.cpp"
+    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/FindEngine.cpp"
+    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/FindReplaceController.cpp"
+    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/MinimapStrip.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/CppHighlight.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/CppDiagnostics.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/DesignerClipboard.cpp"

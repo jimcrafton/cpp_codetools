@@ -35,6 +35,12 @@ namespace CodeToolsVsix
     // workspace()->rootViewProxy() instead.
     class DesignerEditor;
 
+    // The two shapes a designer document can have on disk. Frame is what the designer authors: a
+    // "rootView" object (plus Frame properties such as the title). Fragment is a bare View tree - one
+    // root object with a "type", the shape Bundle::loadView()/writeView() use for a panel, popup or
+    // overlay that a program loads into an existing tree. A file keeps the shape it was opened in.
+    enum class DocumentShape { Frame, Fragment };
+
     // The designer's newui::Document - owns path/modified tracking and (via Document::save())
     // the ".bak" of the original file. readFromFile()/writeToFile() just hand back to the
     // editor's own Bundle-based load/save; see DesignerEditor::document().
@@ -200,6 +206,8 @@ namespace CodeToolsVsix
         // step - or, if it doesn't parse, stays in Source with the error shown and returns false.
         bool setSourceMode(bool source);
         bool isSourceMode() const { return sourceMode_; }
+        // The shape the current document was opened (or started) in; New is always a Frame.
+        DocumentShape documentShape() const { return shape_; }
         // The document as text - exactly what Save writes.
         std::string documentText() const;
         // Rebuilds the canvas from text as one undoable step (the old controls are detached and
@@ -400,6 +408,11 @@ namespace CodeToolsVsix
         // bookkeeping and the .bak happen in Document::load()/save()). UTF-8 paths.
         bool loadFromFile(const std::string& utf8Path);
         bool saveToFile(const std::string& utf8Path);
+        // loadFromFile() for a Fragment document: its one root view becomes the surface's only child.
+        bool loadFragment(const std::string& text);
+        // What every load ends with: repaint, refresh the Outline, drop selection and undo history.
+        void finishLoad();
+        DocumentShape shape_ = DocumentShape::Frame;
 
         newui::DocumentController documentController_;
         DesignerDocument* document_ = nullptr;  // owned by documentController_

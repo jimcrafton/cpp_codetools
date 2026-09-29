@@ -98,7 +98,7 @@ namespace CodeToolsVsix
         if (parent == nullptr) {
             return false;
         }
-        return policyFor(const_cast<newui::Layout*>(parent->layout())).kind() == GeometryEditKind::FreePosition;
+        return policyFor(parent, view).kind() == GeometryEditKind::FreePosition;
     }
 
     std::vector<BoundsChange> computeAlign(const std::vector<newui::SubView*>& views,

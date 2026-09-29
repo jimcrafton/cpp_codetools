@@ -67,6 +67,27 @@ namespace CodeToolsVsix
         warning->setDecoration(newui::text::TextDecorationKind::Squiggle);
         warning->setDecorationColor(colorFromArgb(brightness < 128 ? 0xFF6CC070u : 0xFF2E8B2Eu));
         sheet->addStyle(warning);
+
+        // A translucent tint (white on a dark theme, black on a light one) - the text's own colors show
+        // through, and the current match is the stronger of the two.
+        const bool dark = brightness < 128;
+        auto* match = new newui::TextStyle(kMatchStyleName);
+        match->setBackgroundColor(dark ? newui::Color(1.0f, 1.0f, 1.0f, 0.16f) : newui::Color(0.0f, 0.0f, 0.0f, 0.12f));
+        sheet->addStyle(match);
+        auto* current = new newui::TextStyle(kCurrentMatchStyleName);
+        current->setBackgroundColor(dark ? newui::Color(1.0f, 1.0f, 1.0f, 0.38f) : newui::Color(0.0f, 0.0f, 0.0f, 0.30f));
+        sheet->addStyle(current);
+
+        // The theme's own accent role (HighlightBackground - the closest thing to an "accent" this
+        // framework has; the Rename button, FindReplaceController.cpp, borrows the same role)
+        // rather than a new hardcoded hue, so it tracks the active theme automatically - at the
+        // exact same translucency as kMatchStyleName just above (reused, not a new invented
+        // opacity), so only the hue differs, distinguishing it from Find's own neutral tint.
+        newui::Color occurrenceColor = newui::UIColorManager::colorFor(newui::UIColorRole::HighlightBackground);
+        occurrenceColor.a = dark ? 0.16f : 0.12f;
+        auto* occurrence = new newui::TextStyle(kOccurrenceStyleName);
+        occurrence->setBackgroundColor(occurrenceColor);
+        sheet->addStyle(occurrence);
         return sheet;
     }
 
@@ -299,6 +320,20 @@ namespace CodeToolsVsix
     {
         std::vector<newui::text::TextStyleRange> ranges = colors_;
         ranges.insert(ranges.end(), overlay_.begin(), overlay_.end());
+        ranges.insert(ranges.end(), extra_.begin(), extra_.end());
+        ranges.insert(ranges.end(), occurrences_.begin(), occurrences_.end());
         control_.setStyledRanges(std::move(ranges));
+    }
+
+    void HighlightController::setOccurrenceRanges(std::vector<newui::text::TextStyleRange> ranges)
+    {
+        occurrences_ = std::move(ranges);
+        publishRanges();
+    }
+
+    void HighlightController::setExtraRanges(std::vector<newui::text::TextStyleRange> ranges)
+    {
+        extra_ = std::move(ranges);
+        publishRanges();
     }
 }

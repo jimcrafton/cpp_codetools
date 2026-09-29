@@ -47,11 +47,20 @@ add_custom_target(cpptools_version ALL
 # ======================
 # Not vendored (unlike newui's blend2d/wil/json5/googletest) - libclang is a large, separately
 # versioned LLVM install, not something to check into this repo. CPPCODETOOLS_LLVM_ROOT points at
-# a standalone LLVM install (https://github.com/llvm/llvm-project/releases,
-# `LLVM-*-win64.exe`) - override with -DCPPCODETOOLS_LLVM_ROOT=... if yours isn't at the default.
+# a standalone LLVM install - override with -DCPPCODETOOLS_LLVM_ROOT=... if yours isn't at the
+# default.
+#
+# As of 2026-09-28 this is a from-source LLVM+Clang+clang-tools-extra build (llvmorg-23.1.2, built
+# on a separate machine with -DLLVM_ENABLE_PROJECTS=clang;clang-tools-extra and no CRT override -
+# the same /MD-by-default recipe already proven for D:\code\llvm-project-llvmorg-19.1.6 (see
+# scratch-lang), then `cmake --install`'d and transferred here), not the plain official llvm.org
+# binary release (`LLVM-*-win64.exe`) this used to point at - that release only ships libclang, no
+# LibTooling/AST/ASTMatchers/Format libs or their CMake package files, which cpptools_codegen
+# (below) needs. Deliberately reusing this one root for both rather than keeping the old binary
+# release around separately - one LLVM version for the whole project.
 
-set(CPPCODETOOLS_LLVM_ROOT "C:/Program Files/LLVM" CACHE PATH
-    "Root of a standalone LLVM install containing include/clang-c, lib/libclang.lib, bin/libclang.dll")
+set(CPPCODETOOLS_LLVM_ROOT "D:/code/LLVM-23.1.2" CACHE PATH
+    "Root of an LLVM+Clang install containing include/clang-c, lib/libclang.lib, bin/libclang.dll, and (for cpptools_codegen) lib/cmake/clang's Clang CMake package")
 
 find_path(CPPCODETOOLS_LIBCLANG_INCLUDE_DIR clang-c/Index.h
     HINTS "${CPPCODETOOLS_LLVM_ROOT}/include")
@@ -82,6 +91,64 @@ function(cpptools_copy_libclang_dll target)
             "${CPPCODETOOLS_LIBCLANG_DLL}" "$<TARGET_FILE_DIR:${target}>"
         COMMENT "Copying libclang.dll for ${target}")
 endfunction()
+
+# Clang LibTooling - Dependency (cpptools_codegen)
+# ==================================================
+# See bluesky/cpp-codegen-plan.md - libclang (above) has no write API at all, so generating new
+# C++ source (starting with delegate-wiring, DE-01/CCE-06) needs Clang's own C++ libraries (AST
+# Matchers to find WHERE, a Fluent Builder + clang::format::reformat to build/format WHAT) linked
+# in-process, not just the C ABI cpptools already uses. Same CPPCODETOOLS_LLVM_ROOT as libclang
+# above (see its own comment) - resolved via Clang's own exported CMake package rather than
+# hand-listing library names: ClangConfig.cmake's own CLANG_EXPORTED_TARGETS pulls in every
+# transitively-required LLVM*.lib itself (~30-40 of them), which would be easy to get wrong by
+# hand and silently break on a future LLVM version bump.
+find_package(Clang CONFIG QUIET HINTS "${CPPCODETOOLS_LLVM_ROOT}" NO_DEFAULT_PATH)
+if(NOT Clang_FOUND)
+    message(FATAL_ERROR
+        "Clang's CMake package (LibTooling/AST/ASTMatchers/Format) not found under "
+        "CPPCODETOOLS_LLVM_ROOT='${CPPCODETOOLS_LLVM_ROOT}'. This needs a from-source LLVM build "
+        "configured with -DLLVM_ENABLE_PROJECTS=clang;clang-tools-extra and cmake --install'd (the "
+        "official llvm.org binary release doesn't ship these) - see bluesky/cpp-codegen-plan.md, "
+        "or pass -DCPPCODETOOLS_LLVM_ROOT=<path> pointing at one.")
+endif()
+
+# find_package(Clang) above only knows one configuration's library paths - whichever
+# CMAKE_BUILD_TYPE the CPPCODETOOLS_LLVM_ROOT tree itself was built+installed with (Release, a
+# /MD build). This project's own build is a multi-config MSBuild tree though, and
+# NativeEditControls/testharness build --config Debug (/MDd) - linking cpptools_codegen's
+# Release-CRT Clang static libs into a Debug target is exactly the LNK2038 CRT mismatch recorded
+# in bluesky/cpp-codegen-plan.md's "First slice" section. Rather than hand-listing the ~30-40
+# transitively-pulled LLVM*/clang* imported targets a second time, patch an IMPORTED_LOCATION_DEBUG
+# onto every already-declared imported target above whose name matches a .lib under a separate,
+# Debug-configured (/MDd) install of the *same* LLVM version - CMake's imported-target config
+# matching (case-insensitive) then picks the Debug path automatically for a --config Debug build
+# and the Release path (set by find_package(Clang) above) for --config Release, same as any other
+# multi-config imported target.
+set(CPPCODETOOLS_LLVM_ROOT_DEBUG "D:/code/LLVM-23.1.2_debug" CACHE PATH
+    "Root of a Debug (/MDd) install of the same LLVM+Clang version as CPPCODETOOLS_LLVM_ROOT (built with -DCMAKE_BUILD_TYPE=Debug, then cmake --install'd) - patches in Debug-configuration library paths for cpptools_codegen's Clang imported targets so it can link into a --config Debug build. Leave unset/nonexistent to skip - cpptools_codegen will then only link in Release builds.")
+
+if(EXISTS "${CPPCODETOOLS_LLVM_ROOT_DEBUG}")
+    file(GLOB _cpptools_debug_clang_libs "${CPPCODETOOLS_LLVM_ROOT_DEBUG}/lib/*.lib")
+    foreach(_cpptools_debug_lib ${_cpptools_debug_clang_libs})
+        get_filename_component(_cpptools_debug_lib_target "${_cpptools_debug_lib}" NAME_WE)
+        if(TARGET ${_cpptools_debug_lib_target})
+            get_target_property(_cpptools_debug_lib_configs ${_cpptools_debug_lib_target} IMPORTED_CONFIGURATIONS)
+            if(NOT _cpptools_debug_lib_configs)
+                set(_cpptools_debug_lib_configs "")
+            endif()
+            if(NOT "DEBUG" IN_LIST _cpptools_debug_lib_configs)
+                list(APPEND _cpptools_debug_lib_configs DEBUG)
+                set_property(TARGET ${_cpptools_debug_lib_target} PROPERTY IMPORTED_CONFIGURATIONS ${_cpptools_debug_lib_configs})
+            endif()
+            set_property(TARGET ${_cpptools_debug_lib_target} PROPERTY IMPORTED_LOCATION_DEBUG "${_cpptools_debug_lib}")
+        endif()
+    endforeach()
+    unset(_cpptools_debug_clang_libs)
+else()
+    message(STATUS
+        "CPPCODETOOLS_LLVM_ROOT_DEBUG='${CPPCODETOOLS_LLVM_ROOT_DEBUG}' not found - cpptools_codegen "
+        "will only link in Release builds (see its CMakeLists.txt comment above).")
+endif()
 
 # newui - Dependency
 # ===================
@@ -164,6 +231,39 @@ target_include_directories(cpptools PUBLIC include ${CMAKE_CURRENT_BINARY_DIR}/i
 target_link_libraries(cpptools PUBLIC libclang::libclang)
 add_dependencies(cpptools cpptools_version)
 
+# cpptools_codegen - Clang LibTooling-based C++ source generation (bluesky/cpp-codegen-plan.md).
+# Deliberately separate from cpptools (above), not folded into it - cpptools's own consumers
+# (cppoutline, the existing NativeEditControls outline/diagnostics/rename/occurrence-highlighting
+# code) only ever need the small, stable libclang C ABI; this pulls in Clang's much larger,
+# non-ABI-stable C++ libraries (clangTooling/clangASTMatchers, see the Clang LibTooling dependency
+# section above), which nothing else in this repo needs yet. First real slice, per the design
+# doc's own "suggested first slice": classInsertionPoint() - given a class's current source, where
+# does a new member go - proven with AST Matchers/getBraceRange() before any text-generation
+# (Fluent Builder) work starts.
+add_library(cpptools_codegen STATIC
+    src/codegen/classinsertion.cpp
+    include/cpptools_codegen/classinsertion.h
+    src/codegen/methodbuilder.cpp
+    include/cpptools_codegen/methodbuilder.h
+    src/codegen/classbuilder.cpp
+    include/cpptools_codegen/classbuilder.h
+    src/codegen/methodinsertion.cpp
+    include/cpptools_codegen/methodinsertion.h
+    src/codegen/delegatewiring.cpp
+    include/cpptools_codegen/delegatewiring.h)
+
+target_include_directories(cpptools_codegen PUBLIC include)
+# LLVM's own exported CMake targets (ClangTargets.cmake) don't set INTERFACE_INCLUDE_DIRECTORIES/
+# INTERFACE_COMPILE_DEFINITIONS on themselves at all (confirmed - a known LLVM CMake quirk, unlike
+# a "modern" CMake package) - LLVM_INCLUDE_DIRS/LLVM_DEFINITIONS (set by LLVMConfig.cmake, pulled
+# in transitively by find_package(Clang) above) are the documented way to add them by hand.
+# PRIVATE: only classinsertion.cpp itself needs Clang's headers - the public
+# cpptools_codegen/classinsertion.h above is deliberately Clang-opaque (plain std types only), so
+# consumers of this library don't need them too.
+target_include_directories(cpptools_codegen PRIVATE ${LLVM_INCLUDE_DIRS})
+target_compile_definitions(cpptools_codegen PRIVATE ${LLVM_DEFINITIONS})
+target_link_libraries(cpptools_codegen PUBLIC clangTooling clangASTMatchers)
+
 # lex - lossless lexing/parsing, semantic diff and syntax highlighting (JSON5 and C++ lexing),
 # brought over from lexer-base. Standard library only, so the editors can highlight without
 # pulling in libclang the way cpptools does.
@@ -238,6 +338,12 @@ add_library(NativeEditControls SHARED
     extension/NativeEditControls/SourceView.cpp
     extension/NativeEditControls/HighlightController.h
     extension/NativeEditControls/HighlightController.cpp
+    extension/NativeEditControls/FindEngine.h
+    extension/NativeEditControls/FindEngine.cpp
+    extension/NativeEditControls/FindReplaceController.h
+    extension/NativeEditControls/FindReplaceController.cpp
+    extension/NativeEditControls/MinimapStrip.h
+    extension/NativeEditControls/MinimapStrip.cpp
     extension/NativeEditControls/CppHighlight.h
     extension/NativeEditControls/CppHighlight.cpp
     extension/NativeEditControls/CppDiagnostics.h
@@ -295,7 +401,7 @@ set(VSEXT_INCLUDES "C:/Program Files/Microsoft Visual Studio/18/Community/VSSDK/
 
 target_include_directories(NativeEditControls PUBLIC include ${VSEXT_INCLUDES})
 
-target_link_libraries(NativeEditControls PRIVATE cpptools newui lex user32.lib gdi32.lib)
+target_link_libraries(NativeEditControls PRIVATE cpptools cpptools_codegen newui lex user32.lib gdi32.lib)
 add_dependencies(NativeEditControls cpptools_version)
 
 # testharness - a plain newui::Application/newui::Frame .exe (extension/NativeEditControls/
@@ -324,6 +430,9 @@ add_executable(testharness
     extension/NativeEditControls/MenuDesigner.cpp
     extension/NativeEditControls/SourceView.cpp
     extension/NativeEditControls/HighlightController.cpp
+    extension/NativeEditControls/FindEngine.cpp
+    extension/NativeEditControls/FindReplaceController.cpp
+    extension/NativeEditControls/MinimapStrip.cpp
     extension/NativeEditControls/CppHighlight.cpp
     extension/NativeEditControls/CppDiagnostics.cpp
     extension/NativeEditControls/DesignerClipboard.cpp
@@ -353,7 +462,7 @@ target_compile_definitions(testharness PRIVATE
 
 target_include_directories(testharness PRIVATE include ${VSEXT_INCLUDES})
 
-target_link_libraries(testharness PRIVATE cpptools newui lex user32.lib gdi32.lib comdlg32.lib)
+target_link_libraries(testharness PRIVATE cpptools cpptools_codegen newui lex user32.lib gdi32.lib comdlg32.lib)
 add_dependencies(testharness cpptools_version)
 
 cpptools_copy_libclang_dll(NativeEditControls)

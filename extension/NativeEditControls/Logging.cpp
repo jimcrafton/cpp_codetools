@@ -3,6 +3,7 @@
 
 #include <newui/runloop.h>
 
+#include <cstdio>
 #include <mutex>
 #include <utility>
 #include <vector>
@@ -74,6 +75,17 @@ namespace CodeToolsVsix
 
         if (!g_managedSink)
         {
+            // No managed sink means no VS Output window pane to reach - either this is
+            // testharness (nothing there ever calls setManagedLogSink(), which is only wired from
+            // the VS-managed side; NativeEditControl_SetLogSink is never invoked outside VS), or a
+            // real VS host that just hasn't called SetLogSink yet. Print to stdout instead of
+            // silently discarding, so cpptools's own log messages (now always registered, see
+            // CppEditor::setupUI()) are visible somewhere when running in testharness - plain
+            // console I/O, not OutputDebugString, so none of the process-wide DBWIN mutex hazard
+            // this function's own doc comment rules that out for applies here.
+            std::fputs(line.c_str(), stdout);
+            std::fputc('\n', stdout);
+            std::fflush(stdout);
             return;
         }
 

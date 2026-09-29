@@ -175,6 +175,11 @@ int main()
         {
             printf("testharness: already hosting a %ls editor - restart to open a %ls document\n",
                    documentTypeName(editorType), documentTypeName(type));
+            // Where a person actually sees it - stdout is usually nowhere.
+            std::wstring message = std::wstring(L"This run is already hosting a ") + documentTypeName(editorType)
+                + L" editor, and testharness can host only one per run.\n\nRestart testharness to open a "
+                + documentTypeName(type) + L" document.";
+            MessageBoxW(root.windowHandle(), message.c_str(), L"codetools++ testharness", MB_OK | MB_ICONINFORMATION);
             return;
         }
 

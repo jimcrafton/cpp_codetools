@@ -147,4 +147,13 @@ namespace CodeToolsVsix
     // unrecognized Layout subtype) -> None. Never returns a null reference;
     // always resolves to one of the four singletons below.
     const LayoutEditingPolicy& policyFor(newui::Layout* layout);
+
+    // The policy for editing child's geometry inside parent: what parent's Layout affords - except a
+    // layout-ignored child (View::isLayoutIgnored()), which no Layout ever positions, so its bounds
+    // are simply its own: always FreePosition, whatever kind of Layout the parent has (a Flex or Grid
+    // parent included - dragging it moves its bounds, no reorder line, no cell). Use this wherever a
+    // specific child is being dragged, reparented or having its bounds edited; the Layout-only
+    // overload above is for a Layout with no particular child in mind (e.g. a toolbox drop of a new
+    // control). parent may be null (treated as no Layout).
+    const LayoutEditingPolicy& policyFor(const newui::View* parent, const newui::View* child);
 }

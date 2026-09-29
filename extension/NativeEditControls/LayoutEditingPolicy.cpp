@@ -454,4 +454,12 @@ namespace CodeToolsVsix
         }
         return noGeometry;
     }
+
+    const LayoutEditingPolicy& policyFor(const newui::View* parent, const newui::View* child)
+    {
+        if (child != nullptr && child->isLayoutIgnored()) {
+            return policyFor(nullptr);   // no Layout positions it: free, like a child of no layout at all
+        }
+        return policyFor(parent != nullptr ? const_cast<newui::Layout*>(parent->layout()) : nullptr);
+    }
 }

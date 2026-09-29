@@ -9,6 +9,7 @@
 #include <memory>
 
 #include "CppDiagnostics.h"
+#include "FindReplaceController.h"
 #include "HighlightController.h"
 #include "NativeEditor.h"
 
@@ -49,6 +50,7 @@ namespace CodeToolsVsix
         // means the two TextControls below are added directly to rootView, matching every
         // pre-existing caller.
         CppEditor(newui::RootView* rootView, newui::SubView* contentHost = nullptr);
+        ~CppEditor() override;
 
         // Reads filePath (UTF-8), sets it as the editable TextControl's text, and separately
         // populates the read-only outline pane with a cpptools outline if parsing finds any
@@ -61,8 +63,9 @@ namespace CodeToolsVsix
         // pane, which is a separate, read-only control. Returns false on I/O failure.
         bool save(const wchar_t* filePath, std::size_t filePathLength) override;
 
-        // Generic stub dispatch, unchanged from StandInEditControl - every command just logs and
-        // returns true; real per-command behavior is out of scope for this phase.
+        // Editing commands act on the source pane (false when there is nothing to undo / redo / copy /
+        // paste). Find / Replace / GotoLine open the Find and Go to line overlays (a GotoLine that names a
+        // line goes straight there; text the command carries seeds the search). Anything else is logged.
         bool execCommand(EditorCommand command, std::uint32_t flags, const EditorCommandArgs* args) override;
 
 		// contentHost: see the constructor's own comment above.
@@ -73,6 +76,8 @@ namespace CodeToolsVsix
         newui::TextFoldingControl* textControl() const { return textControl_; }
         newui::ScrollView* scrollView() const { return scrollView_; }
         newui::TextControl* outlineControl() const { return outlineControl_; }
+        // Find / Replace / Go to line (null if construction failed) - for tests.
+        FindReplaceController* findReplace() const { return find_.get(); }
     private:
         // Each pane is a text control hosted by a ScrollView, which scrolls it (a TextControl has no
         // scrollbar of its own). All owned by the base's RootView child tree.
@@ -84,7 +89,41 @@ namespace CodeToolsVsix
         std::unique_ptr<HighlightController> highlight_;
         std::shared_ptr<CppDocument> document_;   // what the parse thinks the text is (its path), shared with the worker
 
+        // host as passed to setupUI() (root itself, or a caller-supplied contentHost - see
+        // setupUI()'s own comment) - kept so load() can size/position loadingProgress_ against it;
+        // nothing else here previously needed to remember it.
+        newui::View* host_ = nullptr;
+
+        // A thin, indeterminate progress bar across the top of the editor, shown for however long
+        // the first background parse of a freshly loaded file takes (see load()'s own comment on
+        // why that can't run synchronously) and hidden once it lands - there's no way to know real
+        // percent-complete from an opaque libclang parse, so this just animates to say "working",
+        // the same "at least show it's not locked up" ask this exists for in the first place.
+        newui::Progress* loadingProgress_ = nullptr;
+        newui::RunLoop::TimerHandle loadingProgressTimer_ = newui::RunLoop::kInvalidTimerHandle;
+        float loadingProgressPhase_ = 0.0f;   // radians; drives a smooth 0<->1 back-and-forth sweep
+        void startLoadingAnimation();
+        void stopLoadingAnimation();
+        // Find / Replace / Go to line overlays over the editor. Declared after highlight_ (which it feeds
+        // matches to) so it is destroyed first.
+        std::unique_ptr<FindReplaceController> find_;
+
         // Shows a new outline in the read-only pane (unchanged: left alone).
         void setOutlineText(const std::wstring& outline);
+
+        // Ctrl+F / Ctrl+H / Ctrl+G, for a host that doesn't route those commands to execCommand() itself
+        // (VS does, through the managed Exec; a plain newui window such as testharness does not). Subscribed
+        // to the root's onKeyDown, which fires for every key before the focused control sees it - the same
+        // way the designer's own hot keys are hooked.
+        newui::SyncReturn handleKeyDown(newui::View& sender, std::uint32_t keyMask, int keyCharVal,
+            int repeatCount, std::uint32_t VKeyCode);
+        newui::Connection keyConnection_;
+
+        // Re-resolves the symbol-occurrence highlight (semantic, via cpptools) for wherever the
+        // caret now is, every time it moves. Subscribed to textControl_'s own caret, not any
+        // higher-level "the document changed" event - this needs to react to a plain caret move
+        // with no edit at all (e.g. arrow keys, clicking around).
+        newui::SyncReturn handleCaretMoved(newui::text::Caret& sender);
+        newui::Connection caretConnection_;
     };
 }

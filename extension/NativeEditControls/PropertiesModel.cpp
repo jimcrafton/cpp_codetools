@@ -51,7 +51,7 @@ namespace CodeToolsVsix
             if (parent == nullptr) {
                 return false;
             }
-            if (policyFor(parent->layout()).kind() == GeometryEditKind::FreePosition) {
+            if (policyFor(parent, view).kind() == GeometryEditKind::FreePosition) {
                 return false;
             }
             const Class* layoutClass = parent->layout() != nullptr ? classinfo(typeid(*parent->layout())) : nullptr;

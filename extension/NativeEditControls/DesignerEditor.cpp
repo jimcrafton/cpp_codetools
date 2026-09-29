@@ -17,6 +17,15 @@
 #include <newui/dragndrop.h>
 #include <newui/frame.h>
 #include <newui/viewbuilder.h>
+// json5's writer uses std::numeric_limits<>::max(), which the windows.h min/max macros break.
+#pragma push_macro("min")
+#pragma push_macro("max")
+#undef min
+#undef max
+#include <newui/reflection.h>
+#include <newui/reflectionio.h>
+#pragma pop_macro("max")
+#pragma pop_macro("min")
 #include <newui/keyboard_constants.h>
 
 #include <algorithm>
@@ -69,6 +78,93 @@ namespace CodeToolsVsix
                 return std::wstring();
             }
             return std::wstring(filePath, filePathLength);
+        }
+
+        // Which shape a document's text is in - see DocumentShape (DesignerEditor.h). Frame if it has
+        // a "rootView" object; Fragment if it is instead a single root object naming a View class
+        // (a panel/popup/overlay saved with Bundle::writeView()).
+        bool detectShape(const std::string& text, DocumentShape& shape, std::string* error)
+        {
+            auto fail = [error](const char* message) {
+                if (error != nullptr) {
+                    *error = message;
+                }
+                return false;
+            };
+            if (text.empty()) {
+                return fail("the document is empty");
+            }
+            json5::document doc;
+            if (json5::error parseError = json5::from_string(text, doc)) {
+                if (error != nullptr) {
+                    *error = json5::to_string(parseError);
+                }
+                return false;
+            }
+            if (!doc.is_object()) {
+                return fail("the document is not an object");
+            }
+            bool hasType = false;
+            for (const auto& [key, value] : json5::object_view(doc)) {
+                const std::string name(key);
+                if (name == "rootView" && value.is_object()) {
+                    shape = DocumentShape::Frame;
+                    return true;
+                }
+                if (name == "type" && value.is_string()) {
+                    hasType = true;
+                }
+            }
+            if (!hasType) {
+                return fail("the document has neither a rootView object nor a root view type");
+            }
+            shape = DocumentShape::Fragment;
+            return true;
+        }
+
+        // Canvas left around a fragment. A View draws its drop shadow (and focus ring) outside its own
+        // bounds, but the design surface clips to its own - a fragment flush against the edge would lose
+        // them - so it sits this far in from the canvas edge. Design-time only: not saved (below).
+        constexpr float kFragmentCanvasMargin = 24.0f;
+
+        // Positions a freshly loaded fragment on the canvas and returns the canvas size it needs (empty
+        // if the fragment has no size at all, so the default canvas is kept). A fragment usually has a
+        // fixed desiredSize and no saved bounds.
+        newui::Size placeFragmentOnCanvas(newui::SubView& fragment)
+        {
+            newui::Size size = fragment.bounds().size();
+            if (size.width <= 0.0f || size.height <= 0.0f) {
+                size = fragment.desiredSize();
+            }
+            if (size.width <= 0.0f || size.height <= 0.0f) {
+                return newui::Size();
+            }
+            fragment.setBounds(newui::Rect(kFragmentCanvasMargin, kFragmentCanvasMargin, size.width, size.height));
+            return newui::Size(size.width + 2.0f * kFragmentCanvasMargin, size.height + 2.0f * kFragmentCanvasMargin);
+        }
+
+        // A Fragment document's file text: the one root view, exactly as Bundle::writeView() writes it -
+        // except its position is written as (0,0): where a program puts it is up to that program, and the
+        // canvas margin above is only a design-time convenience.
+        std::string fragmentText(newui::SubView& view)
+        {
+            const newui::reflection::Class* clazz = newui::reflection::classinfo(typeid(view));
+            if (clazz == nullptr) {
+                return std::string();
+            }
+            const newui::Rect placed = view.bounds();
+            view.setBounds(newui::Rect(0.0f, 0.0f, placed.size().width, placed.size().height));
+            newui::reflection::ObjectWriter writer;
+            writer.setDesignMode(true);
+            clazz->write(&view, &writer, std::string());
+            view.setBounds(placed);
+            return json5::to_string(writer.doc);
+        }
+
+        std::string readTextFile(const std::string& utf8Path)
+        {
+            std::ifstream in(utf8ToWide(utf8Path), std::ios::binary);
+            return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
         }
 
         // Splits at the final \ or / into (everything before, everything
@@ -705,7 +801,7 @@ namespace CodeToolsVsix
                 if (parent == nullptr) {                    
                     continue;
                 }
-                const LayoutEditingPolicy& policy = policyFor(parent->layout());
+                const LayoutEditingPolicy& policy = policyFor(parent, view);   // a layout-ignored view is free wherever it sits
                 if (policy.kind() == GeometryEditKind::None) {
                     
                     continue;
@@ -766,7 +862,7 @@ namespace CodeToolsVsix
                 // insertion-line cue here, resolved fresh against the target itself - the same
                 // "view isn't actually attached there yet, don't trust its own bounds()" trap
                 // buildReparentAction() already has to work around.
-                const LayoutEditingPolicy& targetPolicy = policyFor(entry.pendingReparentTarget->layout());
+                const LayoutEditingPolicy& targetPolicy = policyFor(entry.pendingReparentTarget, entry.view);
                 if (targetPolicy.kind() == GeometryEditKind::LinearReorder) {
                     newui::Rect viewRootLocalBounds = currentDraggedRootLocalBounds(entry);
                     newui::Point targetRootLocalOrigin = SelectionOverlay::boundsInRootView(entry.pendingReparentTarget).pos();
@@ -870,7 +966,7 @@ namespace CodeToolsVsix
         newCtx.startBounds = targetLocalBounds;
         newCtx.startPt = entry.lastPt;
         newCtx.currentPt = entry.lastPt;
-        const LayoutEditingPolicy& newPolicy = policyFor(target->layout());
+        const LayoutEditingPolicy& newPolicy = policyFor(target, view);
         GeometryEditResult newResult = newPolicy.resolve(newCtx);
         // Zero-delta commit (start == end) against the fresh context - reuses the same,
         // already-tested placement logic a brand-new same-parent commit uses (writes fresh
@@ -1406,7 +1502,7 @@ namespace CodeToolsVsix
         // local space, the "on-screen position preserved" placement buildReparentAction() itself
         // computes from a real drag's current point instead.
         newui::Rect startBounds = dragged->bounds();
-        const LayoutEditingPolicy& oldPolicy = policyFor(oldParent->layout());
+        const LayoutEditingPolicy& oldPolicy = policyFor(oldParent, dragged);
         GeometryDragContext oldCtx;
         oldCtx.view = dragged;
         oldCtx.parent = oldParent;
@@ -1423,7 +1519,7 @@ namespace CodeToolsVsix
         newCtx.view = dragged;
         newCtx.parent = newParent;
         newCtx.startBounds = targetLocalBounds;
-        const LayoutEditingPolicy& newPolicy = policyFor(newParent->layout());
+        const LayoutEditingPolicy& newPolicy = policyFor(newParent, dragged);
         GeometryEditResult newResult = newPolicy.resolve(newCtx);
         newui::UndoableAction newPlacement = newPolicy.commit(newCtx, newResult, newResult);
         newui::UndoableAction oldPlacement = oldPolicy.commit(oldCtx, startResult, startResult);
@@ -1467,6 +1563,14 @@ namespace CodeToolsVsix
 
     std::string DesignerEditor::documentText() const
     {
+        if (shape_ == DocumentShape::Fragment) {
+            const std::vector<newui::SubView*>& top = workspace_->rootViewProxy()->childViews();
+            if (top.size() == 1) {
+                return fragmentText(*top.front());
+            }
+            return newui::Bundle::instance().writeRootViewToText(*workspace_->rootViewProxy(), std::string(), /*designMode=*/true);
+        }
+
         // The saved file's other top-level keys (its title, ...) ride along, as they do on Save.
         std::string existing;
         if (document_ != nullptr && document_->hasFilePath()) {
@@ -1478,20 +1582,47 @@ namespace CodeToolsVsix
 
     bool DesignerEditor::applyDocumentText(const std::string& text, std::string* error)
     {
-        // Read into a scratch surface first: a text that doesn't parse changes nothing.
-        auto* scratch = new newui::RootViewProxy();
-        if (!newui::Bundle::instance().loadRootViewFromText(*scratch, text, /*designMode=*/true, error)) {
-            scratch->destroy();
-            delete scratch;
+        DocumentShape incomingShape = DocumentShape::Frame;
+        if (!detectShape(text, incomingShape, error)) {
             return false;
         }
-        std::vector<newui::SubView*> incoming = scratch->childViews();
-        for (newui::SubView* child : incoming) {
-            scratch->removeChild(child);
+        if (incomingShape != shape_) {
+            if (error != nullptr) {
+                *error = shape_ == DocumentShape::Fragment
+                    ? "this document is a View fragment - it can't be changed into a Frame here"
+                    : "this document is a Frame - it can't be changed into a View fragment here";
+            }
+            return false;
         }
-        const newui::Size clientSize = scratch->bounds().size();
-        scratch->destroy();
-        delete scratch;
+
+        // Read into a scratch surface first: a text that doesn't parse changes nothing.
+        std::vector<newui::SubView*> incoming;
+        newui::Size clientSize;
+        if (shape_ == DocumentShape::Fragment) {
+            newui::SubView* fragment = DesignerClipboard::create(text);
+            if (fragment == nullptr) {
+                if (error != nullptr) {
+                    *error = "the document's root is not a View the designer can edit";
+                }
+                return false;
+            }
+            clientSize = placeFragmentOnCanvas(*fragment);
+            incoming.push_back(fragment);
+        } else {
+            auto* scratch = new newui::RootViewProxy();
+            if (!newui::Bundle::instance().loadRootViewFromText(*scratch, text, /*designMode=*/true, error)) {
+                scratch->destroy();
+                delete scratch;
+                return false;
+            }
+            incoming = scratch->childViews();
+            for (newui::SubView* child : incoming) {
+                scratch->removeChild(child);
+            }
+            clientSize = scratch->bounds().size();
+            scratch->destroy();
+            delete scratch;
+        }
 
         newui::RootViewProxy* surface = workspace_->rootViewProxy();
         const std::vector<newui::SubView*> outgoing = surface->childViews();
@@ -1501,9 +1632,13 @@ namespace CodeToolsVsix
         const newui::Size oldFrameSize = workspace_->frameProxy()->bounds().size();
         const std::string oldTitle = workspace_->frameProxy()->title();
         std::string newTitle = oldTitle;
-        newui::Frame scratchFrame;
-        if (newui::Bundle::instance().loadFrameFromText(scratchFrame, text)) {
-            newTitle = scratchFrame.getTitle();
+        if (shape_ == DocumentShape::Fragment) {
+            newTitle = incoming.front()->name();
+        } else {
+            newui::Frame scratchFrame;
+            if (newui::Bundle::instance().loadFrameFromText(scratchFrame, text)) {
+                newTitle = scratchFrame.getTitle();
+            }
         }
 
         // Swaps whole trees rather than rebuilding: the detached one is kept alive by this
@@ -1904,7 +2039,7 @@ namespace CodeToolsVsix
             }
             DesignerClipboard::uniquifyNames(*clone, *getRootView());
             newui::Rect bounds = clone->bounds();
-            const bool free = policyFor(plan.target->layout()).kind() == GeometryEditKind::FreePosition;
+            const bool free = policyFor(plan.target, clone).kind() == GeometryEditKind::FreePosition;
             if (free) {
                 bounds = newui::Rect(bounds.left() + offset, bounds.top() + offset, bounds.width(), bounds.height());
             }
@@ -2050,6 +2185,7 @@ namespace CodeToolsVsix
         savedDragCursors_.clear();
         newui::RootViewProxy* surface = workspace_->rootViewProxy();
 
+        shape_ = DocumentShape::Frame;   // New and every load start as a Frame; loadFragment() overrides
         viewDesignerController_.clearSelection();
 
         // removeChild() only detaches - it never deletes (same "raw-
@@ -2225,6 +2361,19 @@ namespace CodeToolsVsix
         std::wstring path = utf8ToWide(absolutePath);
         std::string bundleName = bundleDisplayNameFor(path);
 
+        const std::string text = readTextFile(absolutePath);
+        DocumentShape shape = DocumentShape::Frame;
+        std::string shapeError;
+        if (!detectShape(text, shape, &shapeError))
+        {
+            logToDebugOut(L"DesignerEditor::load: not a recognizable document");
+            return false;
+        }
+        if (shape == DocumentShape::Fragment)
+        {
+            return loadFragment(text);
+        }
+
         // A failed load never touches its target (missing/empty/unparsable file - see
         // Bundle::loadRootViewFromFile()), but clearDocument() below would already have wiped the
         // open document by then. Load into a throwaway proxy first so a bad file can't do that.
@@ -2307,6 +2456,43 @@ namespace CodeToolsVsix
         // meaningful for a target standing in for a real top-level window.
         workspace_->rootViewProxy()->setVisible(true);
 
+        finishLoad();
+
+        // Document::load() marks the document clean and adopts the path once this returns true.
+        return true;
+    }
+
+    bool DesignerEditor::loadFragment(const std::string& text)
+    {
+        // Read into a detached view first: a fragment that can't be read changes nothing.
+        newui::SubView* fragment = DesignerClipboard::create(text);
+        if (fragment == nullptr)
+        {
+            logToDebugOut(L"DesignerEditor::load: the fragment's root is not a View the designer can edit");
+            return false;
+        }
+
+        clearDocument(/*resetDocument=*/false);
+        shape_ = DocumentShape::Fragment;
+
+        // The fragment is the document's one top-level view, sitting on the design surface like any
+        // other control; its own size (plus a margin, see kFragmentCanvasMargin) sets the canvas.
+        const newui::Size canvas = placeFragmentOnCanvas(*fragment);
+        workspace_->rootViewProxy()->addChild(fragment);
+        const bool hasSize = canvas.width > 0.0f && canvas.height > 0.0f;
+        workspace_->setCanvasFrameSize(hasSize
+            ? newui::Size(canvas.width, canvas.height + newui::FrameProxy::kTitleBarHeight)
+            : newui::Size());
+        workspace_->frameProxy()->updateLayout();
+        workspace_->frameProxy()->setTitle(fragment->name());
+        workspace_->rootViewProxy()->setVisible(true);
+
+        finishLoad();
+        return true;
+    }
+
+    void DesignerEditor::finishLoad()
+    {
         // Same reasoning as setupUI()'s own markDirty() call - loadRootView()
         // just repopulated rootViewProxy()'s children in place, and nothing
         // in that path asks Windows to actually paint the result.
@@ -2330,9 +2516,6 @@ namespace CodeToolsVsix
         if (sourceMode_) {
             reloadSourceText();
         }
-
-        // Document::load() marks the document clean and adopts the path once this returns true.
-        return true;
     }
 
     bool DesignerEditor::save(const wchar_t* filePath, std::size_t filePathLength)
@@ -2356,6 +2539,38 @@ namespace CodeToolsVsix
                 return false;
             }
             sourceBaseline_ = text;
+        }
+
+        // A Fragment goes back out as the fragment it came in as - one root view - so a program
+        // that loads it with Bundle::loadView() still can. If it no longer has exactly one top-level
+        // view (one was deleted, or another added) it can't be that, so it is written as a Frame
+        // document instead (from a blank base, so none of the old fragment's keys leak in).
+        if (shape_ == DocumentShape::Fragment)
+        {
+            const std::vector<newui::SubView*>& top = workspace_->rootViewProxy()->childViews();
+            std::string out;
+            if (top.size() == 1)
+            {
+                out = fragmentText(*top.front());
+            }
+            else
+            {
+                logToDebugOut(L"DesignerEditor::save: fragment no longer has exactly one top-level view; saving as a Frame document");
+                out = newui::Bundle::instance().writeRootViewToText(*workspace_->rootViewProxy(), std::string(), /*designMode=*/true);
+            }
+            std::ofstream file(utf8ToWide(absolutePath), std::ios::binary | std::ios::trunc);
+            file << out;
+            file.flush();
+            if (out.empty() || !file)
+            {
+                logToDebugOut(L"DesignerEditor::save: writing the document failed");
+                return false;
+            }
+            if (top.size() != 1)
+            {
+                shape_ = DocumentShape::Frame;
+            }
+            return true;
         }
 
         // No Bundle::setExecutableDirOverride() call here - see load()'s

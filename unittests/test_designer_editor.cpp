@@ -20,6 +20,7 @@
 
 #include <any>
 #include <chrono>
+#include <filesystem>
 #include <fstream>
 #include <future>
 #include <thread>
@@ -1113,6 +1114,243 @@ TEST_F(DesignerEditorFileFixture, LoadingAnUnreadableFileLeavesTheOpenDocumentUn
     EXPECT_FALSE(editor.load(path.c_str(), path.size()));
 
     EXPECT_EQ(editor.workspace()->rootViewProxy()->childViews().size(), 1u);
+}
+
+// --- View fragments: a file whose root is one View (Bundle::loadView()/writeView() shape) rather
+// than a Frame with a rootView. The designer opens it as the surface's single top-level view and
+// saves it back the same way.
+
+namespace
+{
+    const char* const kFragmentText = R"({
+        type: "SubView",
+        name: "panel",
+        visible: true,
+        desiredSize: { type: "Size", width: 200, height: 100 },
+        desiredSizeOverride: true,
+        childViews: [
+            { type: "SubView", name: "inner" },
+        ],
+    })";
+
+    std::string readWholeFile(const std::string& path)
+    {
+        std::ifstream in(path, std::ios::binary);
+        return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    }
+}
+
+TEST_F(DesignerEditorFileFixture, LoadingAViewFragmentOpensItAsTheSingleTopLevelView)
+{
+    writeFile(kFragmentText);
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+
+    std::wstring path = filePath();
+    ASSERT_TRUE(editor.load(path.c_str(), path.size()));
+
+    EXPECT_EQ(editor.documentShape(), CodeToolsVsix::DocumentShape::Fragment);
+    newui::RootViewProxy* surface = editor.workspace()->rootViewProxy();
+    ASSERT_EQ(surface->childViews().size(), 1u);
+    newui::SubView* panel = surface->childViews()[0];
+    EXPECT_EQ(panel->name(), "panel");
+    EXPECT_TRUE(panel->isDesignTime());
+    ASSERT_EQ(panel->childViews().size(), 1u);
+    EXPECT_EQ(panel->childViews()[0]->name(), "inner");
+
+    // The canvas is sized to the fragment (which has no saved bounds - only a desiredSize) plus a
+    // 24px margin all round, so effects drawn outside its bounds (its drop shadow) aren't clipped.
+    EXPECT_FLOAT_EQ(panel->bounds().left(), 24.0f);
+    EXPECT_FLOAT_EQ(panel->bounds().top(), 24.0f);
+    EXPECT_FLOAT_EQ(panel->bounds().size().width, 200.0f);
+    EXPECT_FLOAT_EQ(editor.workspace()->frameProxy()->bounds().width(), 200.0f + 48.0f);
+    EXPECT_FLOAT_EQ(editor.workspace()->frameProxy()->bounds().height(), 100.0f + 48.0f + newui::FrameProxy::kTitleBarHeight);
+    EXPECT_EQ(editor.workspace()->frameProxy()->title(), "panel");
+}
+
+TEST_F(DesignerEditorFileFixture, SavingAFragmentWritesItBackAsAFragmentNotAFrame)
+{
+    writeFile(kFragmentText);
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+    std::wstring path = filePath();
+    ASSERT_TRUE(editor.load(path.c_str(), path.size()));
+
+    ASSERT_TRUE(editor.save(path.c_str(), path.size()));
+    ::DeleteFileA((path_ + ".bak").c_str());
+
+    const std::string saved = readWholeFile(path_);
+    EXPECT_EQ(saved.find("rootView"), std::string::npos) << "a fragment must stay a fragment";
+    EXPECT_NE(saved.find("panel"), std::string::npos);
+    EXPECT_NE(saved.find("inner"), std::string::npos);
+
+    // The design-time canvas margin is not saved: the file's position is (0,0), size unchanged, and the
+    // open document is left exactly where it was.
+    newui::SubView* onDisk = CodeToolsVsix::DesignerClipboard::create(saved);
+    ASSERT_NE(onDisk, nullptr);
+    EXPECT_FLOAT_EQ(onDisk->bounds().left(), 0.0f);
+    EXPECT_FLOAT_EQ(onDisk->bounds().top(), 0.0f);
+    EXPECT_FLOAT_EQ(onDisk->bounds().size().width, 200.0f);
+    onDisk->destroy();
+    delete onDisk;
+    EXPECT_FLOAT_EQ(editor.workspace()->rootViewProxy()->childViews()[0]->bounds().left(), 24.0f);
+
+    // And it opens again the same way.
+    ASSERT_TRUE(editor.load(path.c_str(), path.size()));
+    EXPECT_EQ(editor.documentShape(), CodeToolsVsix::DocumentShape::Fragment);
+    ASSERT_EQ(editor.workspace()->rootViewProxy()->childViews().size(), 1u);
+    EXPECT_EQ(editor.workspace()->rootViewProxy()->childViews()[0]->name(), "panel");
+}
+
+TEST_F(DesignerEditorFileFixture, AFragmentThatNoLongerHasExactlyOneTopLevelViewIsSavedAsAFrame)
+{
+    writeFile(kFragmentText);
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+    std::wstring path = filePath();
+    ASSERT_TRUE(editor.load(path.c_str(), path.size()));
+    editor.workspace()->rootViewProxy()->addChild(new newui::SubView());   // a second top-level view
+
+    ASSERT_TRUE(editor.save(path.c_str(), path.size()));
+    ::DeleteFileA((path_ + ".bak").c_str());
+
+    const std::string saved = readWholeFile(path_);
+    EXPECT_NE(saved.find("rootView"), std::string::npos);
+    EXPECT_EQ(editor.documentShape(), CodeToolsVsix::DocumentShape::Frame);
+
+    // Nothing of the old fragment's own top-level keys leaked into the Frame document.
+    newui::Frame reloaded;
+    ASSERT_TRUE(newui::Bundle::instance().loadFrameFromFile(reloaded, path_));
+    EXPECT_EQ(reloaded.rootView().childViews().size(), 2u);
+}
+
+TEST_F(DesignerEditorFileFixture, SourceTextOfAFragmentIsTheFragmentAndCannotBecomeAFrame)
+{
+    writeFile(kFragmentText);
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+    std::wstring path = filePath();
+    ASSERT_TRUE(editor.load(path.c_str(), path.size()));
+
+    const std::string text = editor.documentText();
+    EXPECT_EQ(text.find("rootView"), std::string::npos);
+
+    std::string error;
+    ASSERT_TRUE(editor.applyDocumentText(text, &error)) << error;
+    ASSERT_EQ(editor.workspace()->rootViewProxy()->childViews().size(), 1u);
+    EXPECT_EQ(editor.workspace()->rootViewProxy()->childViews()[0]->name(), "panel");
+
+    EXPECT_FALSE(editor.applyDocumentText(R"({ type: "Frame", rootView: { type: "RootView" } })", &error));
+    EXPECT_FALSE(error.empty());
+    EXPECT_EQ(editor.workspace()->rootViewProxy()->childViews().size(), 1u);   // unchanged
+}
+
+TEST_F(DesignerEditorFileFixture, NewAndLoadingAFrameAfterAFragmentGoBackToTheFrameShape)
+{
+    writeFile(kFragmentText);
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+    std::wstring path = filePath();
+    ASSERT_TRUE(editor.load(path.c_str(), path.size()));
+    ASSERT_EQ(editor.documentShape(), CodeToolsVsix::DocumentShape::Fragment);
+
+    writeFile(R"({ type: "Frame", rootView: { type: "RootView", childViews: [ { type: "SubView", name: "c" } ] } })");
+    ASSERT_TRUE(editor.load(path.c_str(), path.size()));
+    EXPECT_EQ(editor.documentShape(), CodeToolsVsix::DocumentShape::Frame);
+
+    writeFile(kFragmentText);
+    ASSERT_TRUE(editor.load(path.c_str(), path.size()));
+    ASSERT_EQ(editor.documentShape(), CodeToolsVsix::DocumentShape::Fragment);
+    editor.workspace()->newButton()->onClick(*editor.workspace()->newButton());
+    EXPECT_EQ(editor.documentShape(), CodeToolsVsix::DocumentShape::Frame);
+    EXPECT_TRUE(editor.workspace()->rootViewProxy()->childViews().empty());
+}
+
+TEST_F(DesignerEditorFileFixture, ADocumentWithNeitherARootViewNorARootTypeStillFailsToLoad)
+{
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+    editor.workspace()->rootViewProxy()->addChild(new newui::SubView());
+    std::wstring path = filePath();
+
+    writeFile(R"({ title: "no root anywhere" })");
+    EXPECT_FALSE(editor.load(path.c_str(), path.size()));
+    writeFile(R"({ type: "NoSuchViewClass" })");
+    EXPECT_FALSE(editor.load(path.c_str(), path.size()));
+
+    EXPECT_EQ(editor.workspace()->rootViewProxy()->childViews().size(), 1u);   // still the old document
+}
+
+// The real overlay resources this feature was written for (copied next to the test exe).
+TEST_F(DesignerEditorFileFixture, TheFindBarAndGoToLineResourcesOpenAsFragments)
+{
+    const char* const files[] = { "findbar", "gotoline" };
+    const char* const requiredNames[][2] = { { "findbar", "findInput" }, { "gotobox", "gotoInput" } };
+    for (int i = 0; i < 2; ++i) {
+        const std::filesystem::path resource = std::filesystem::path(newui::Bundle::instance().resourcesDir()) / (std::string(files[i]) + ".newui");
+        if (!std::filesystem::exists(resource)) {
+            GTEST_SKIP() << resource.string() << " was not copied next to the test binary";
+        }
+        newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+        CodeToolsVsix::DesignerEditor editor(&view);
+        const std::wstring path = resource.wstring();
+        ASSERT_TRUE(editor.load(path.c_str(), path.size())) << files[i];
+        EXPECT_EQ(editor.documentShape(), CodeToolsVsix::DocumentShape::Fragment) << files[i];
+        newui::RootViewProxy* surface = editor.workspace()->rootViewProxy();
+        ASSERT_EQ(surface->childViews().size(), 1u) << files[i];
+        EXPECT_EQ(surface->childViews()[0]->name(), requiredNames[i][0]);
+        EXPECT_NE(surface->findView(requiredNames[i][1]), nullptr) << requiredNames[i][1];
+    }
+}
+
+// Real pixels: findbar.newui's `elevation` has to be read into its style and painted as a drop shadow
+// *outside* the view's own bounds - visible whenever the parent leaves room around it.
+TEST_F(DesignerEditorFileFixture, TheFindBarsElevationPaintsARealDropShadowOutsideItsBounds)
+{
+    const std::filesystem::path resource = std::filesystem::path(newui::Bundle::instance().resourcesDir()) / "findbar.newui";
+    if (!std::filesystem::exists(resource)) {
+        GTEST_SKIP() << resource.string() << " was not copied next to the test binary";
+    }
+    const std::string text = readWholeFile(resource.string());
+
+    auto shadowAlphaRightOfTheBar = [&text](bool keepElevation, float& elevationRead) {
+        newui::SubView* bar = CodeToolsVsix::DesignerClipboard::create(text);
+        EXPECT_NE(bar, nullptr);
+        if (bar == nullptr) {
+            return 0u;
+        }
+        elevationRead = bar->style().elevation();
+        if (!keepElevation) {
+            bar->style().setElevation(0.0f);
+        }
+        newui::SubView host;
+        host.setBounds(newui::Rect(0, 0, 500, 220));
+        bar->setBounds(newui::Rect(24, 24, 420, 118));
+        host.addChild(bar);
+
+        BLImage image(500, 220, BL_FORMAT_PRGB32);
+        {
+            BLContext ctx(image);
+            ctx.clear_all();
+            host.paintChildren(ctx);
+            ctx.end();
+        }
+        BLImageData data{};
+        EXPECT_EQ(image.get_data(&data), BL_SUCCESS);
+        // 6 px right of the bar's right edge (444), mid-height: only a shadow can have painted there.
+        const auto* row = static_cast<const std::uint8_t*>(data.pixel_data) + (24 + 60) * data.stride;
+        const std::uint32_t alpha = reinterpret_cast<const std::uint32_t*>(row)[444 + 6] >> 24;
+        host.removeChild(bar);
+        bar->destroy();
+        delete bar;
+        return alpha;
+    };
+
+    float elevation = 0.0f;
+    EXPECT_GT(shadowAlphaRightOfTheBar(true, elevation), 0u) << "elevation " << elevation << " painted no shadow";
+    EXPECT_FLOAT_EQ(elevation, 32.0f);
+    float ignored = 0.0f;
+    EXPECT_EQ(shadowAlphaRightOfTheBar(false, ignored), 0u) << "the control (elevation 0) must paint nothing there";
 }
 
 TEST_F(DesignerEditorFileFixture, LoadAdoptsThePathAndLeavesTheDocumentCleanThenNewResetsBoth)

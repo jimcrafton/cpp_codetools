@@ -819,3 +819,255 @@ TEST(CppProjectFlags, SavingUnderANameStartsTheParseOverForThatFile)
     EXPECT_EQ(document->session().parseCount(), 2u) << "a different file";
     EXPECT_TRUE(document->flags().fromProject());
 }
+
+// ---- Find / Replace / Go to line hosted by CppEditor ------------------------------------------------------
+
+TEST(CppEditorFind, TheOverlaysAreLayoutIgnoredChildrenPaintedOnTopOfThePanes)
+{
+    auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 900, 700), "cppFindRoot");
+    CodeToolsVsix::CppEditor editor(root);
+    ASSERT_NE(editor.findReplace(), nullptr);
+    ASSERT_TRUE(editor.findReplace()->loaded());
+
+    newui::SubView* findBar = editor.findReplace()->findBar();
+    newui::SubView* goToBar = editor.findReplace()->goToBar();
+    newui::SubView* minimap = editor.findReplace()->minimap();
+    EXPECT_TRUE(findBar->isLayoutIgnored());
+    EXPECT_TRUE(goToBar->isLayoutIgnored());
+    ASSERT_NE(minimap, nullptr);
+    EXPECT_TRUE(minimap->isLayoutIgnored());
+    EXPECT_EQ(findBar->parent(), goToBar->parent());
+    EXPECT_EQ(findBar->parent(), minimap->parent());
+
+    // Last in the child order = drawn last = on top - of the source/outline panes for all three,
+    // and of the minimap specifically for findBar/goToBar (minimap is added first among these
+    // three so an open bar always reads on top where the two happen to overlap - a real, reported
+    // bug when the minimap was added last and drew over the bar instead).
+    const auto& children = findBar->parent()->childViews();
+    ASSERT_GE(children.size(), 5u);
+    EXPECT_EQ(children[children.size() - 3], minimap);
+    EXPECT_EQ(children[children.size() - 2], findBar);
+    EXPECT_EQ(children[children.size() - 1], goToBar);
+}
+
+TEST(CppEditorFind, AResizeRepositionsAnOpenOverlayAndMinimapAgainstTheNewBounds)
+{
+    auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 900, 700), "cppFindRoot");
+    CodeToolsVsix::CppEditor editor(root);
+    editor.textControl()->setText(L"int path = 1;\nreturn path;\n");
+    editor.textControl()->caret().setPosition(newui::text::TextPosition(6));
+
+    ASSERT_TRUE(editor.execCommand(EditorCommand::Find, 0, nullptr));
+    newui::SubView* findBar = editor.findReplace()->findBar();
+    ASSERT_TRUE(findBar->isVisible());
+    const newui::Rect placed = findBar->bounds();
+    EXPECT_GT(placed.size().width, 0.0f);
+
+    CodeToolsVsix::MinimapStrip* minimap = editor.findReplace()->minimap();
+    ASSERT_TRUE(minimap->isVisible());
+    const float placedMinimapRight = minimap->bounds().right();
+
+    // The host re-runs its flex layout on a resize; the overlay/minimap aren't tracked children of
+    // that layout themselves, but FindReplaceController's own onSizeChanged handler (on the
+    // editor's ScrollView, not the host directly - see wire()'s own comment for why: a handler on
+    // the host's onSizeChanged fires too early, before the host's own updateLayout() has resized
+    // that ScrollView, leaving a stale viewport - a real, live-found bug this test now guards
+    // against) re-places them against the new, much wider bounds.
+    root->setBounds(newui::Rect(0, 0, 1900, 800));
+    EXPECT_TRUE(findBar->isVisible());
+    EXPECT_GT(minimap->bounds().right(), placedMinimapRight);
+}
+
+TEST(CppEditorFind, TheFindReplaceAndGotoLineCommandsOpenTheirOverlays)
+{
+    auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 900, 700), "cppFindRoot");
+    CodeToolsVsix::CppEditor editor(root);
+    editor.textControl()->setText(L"int path = 1;\nreturn path;\n");
+    editor.textControl()->caret().setPosition(newui::text::TextPosition(6));   // inside "path"
+    CodeToolsVsix::FindReplaceController* find = editor.findReplace();
+
+    EXPECT_FALSE(find->isFindOpen());
+    EXPECT_TRUE(editor.execCommand(EditorCommand::Find, 0, nullptr));
+    EXPECT_TRUE(find->isFindOpen());
+    EXPECT_FALSE(find->isReplaceShown());
+    EXPECT_EQ(find->query(), L"path");     // seeded from the token under the caret
+    EXPECT_EQ(find->matches().size(), 2u);
+
+    EXPECT_TRUE(editor.execCommand(EditorCommand::Replace, 0, nullptr));
+    EXPECT_TRUE(find->isReplaceShown());
+
+    EXPECT_TRUE(editor.execCommand(EditorCommand::GotoLine, 0, nullptr));   // no line named: opens the bar
+    EXPECT_TRUE(find->isGoToLineOpen());
+    EXPECT_FALSE(find->isFindOpen());
+}
+
+TEST(CppEditorFind, CommandArgumentsSeedTheSearchAndGoToALineDirectly)
+{
+    auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 900, 700), "cppFindRoot");
+    CodeToolsVsix::CppEditor editor(root);
+    editor.textControl()->setText(L"int path = 1;\nreturn path;\n");
+    CodeToolsVsix::FindReplaceController* find = editor.findReplace();
+
+    const wchar_t search[] = L"return";
+    const wchar_t replacement[] = L"yield";
+    EditorCommandArgs args{ search, 6, replacement, 5, 0 };
+    EXPECT_TRUE(editor.execCommand(EditorCommand::Replace, 0, &args));
+    EXPECT_EQ(find->query(), L"return");
+    EXPECT_EQ(find->matches().size(), 1u);
+    EXPECT_TRUE(find->replaceCurrent());
+    EXPECT_EQ(editor.textControl()->text(), L"int path = 1;\nyield path;\n");
+
+    EditorCommandArgs line{ nullptr, 0, nullptr, 0, 2 };
+    EXPECT_TRUE(editor.execCommand(EditorCommand::GotoLine, 0, &line));
+    EXPECT_EQ(editor.textControl()->caret().position().offset(), 14u);   // the start of line 2
+    EXPECT_FALSE(find->isGoToLineOpen());
+
+    EditorCommandArgs past{ nullptr, 0, nullptr, 0, 99 };
+    EXPECT_FALSE(editor.execCommand(EditorCommand::GotoLine, 0, &past));   // no such line: reported, not moved
+}
+
+TEST(CppEditorFind, GoToLineLeavesRoomAroundTheLineInsteadOfLandingOnTheEdgeOfThePage)
+{
+    auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 900, 400), "cppFindRoot");
+    CodeToolsVsix::CppEditor editor(root);
+    std::wstring document;
+    for (int i = 1; i <= 300; ++i) {
+        document += L"line " + std::to_wstring(i) + L"\n";
+    }
+    editor.textControl()->setText(document);
+    root->setBounds(newui::Rect(0, 0, 900, 401));   // re-runs the layout with the text in place
+    (void)editor.textControl()->contentSize();      // builds the text layout (what a paint would)
+    editor.scrollView()->updateLayout();
+    newui::ScrollBar* bar = editor.scrollView()->vBar();
+    ASSERT_TRUE(bar->isVisible());
+    ASSERT_GT(bar->pageSize(), 0.0f);
+
+    auto lineMiddle = [&]() {
+        const newui::Rect caret = editor.textControl()->controller().caretDocumentRect();
+        return caret.top() + caret.size().height * 0.5f;
+    };
+
+    // A far jump puts the line in the middle of the page, not on its edge.
+    ASSERT_TRUE(editor.findReplace()->goToLine(L"150"));
+    const newui::Rect caret = editor.textControl()->controller().caretDocumentRect();
+    ASSERT_GT(caret.size().height, 0.0f);
+    EXPECT_NEAR(lineMiddle(), bar->value() + bar->pageSize() * 0.5f, caret.size().height * 1.5f);
+
+    // A line already comfortably in view leaves the page alone.
+    const float before = bar->value();
+    ASSERT_TRUE(editor.findReplace()->goToLine(L"152"));
+    EXPECT_FLOAT_EQ(bar->value(), before);
+
+    // A line right at the bottom edge is not comfortable: it is brought toward the middle.
+    bar->setValue(lineMiddle() + caret.size().height - bar->pageSize());   // line 152's bottom now at the very edge
+    ASSERT_TRUE(editor.findReplace()->goToLine(L"152"));
+    EXPECT_NEAR(lineMiddle(), bar->value() + bar->pageSize() * 0.5f, caret.size().height * 1.5f);
+}
+
+TEST(CppEditorFind, RenameUsesLibclangToRenameTheDeclarationAndEveryRealReferenceToIt)
+{
+    auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 900, 700), "cppFindRoot");
+    CodeToolsVsix::CppEditor editor(root);
+    ASSERT_NE(editor.findReplace(), nullptr);
+    const std::wstring text = L"int count = 0;\nvoid f() { count = count + 1; }\n";
+    editor.textControl()->setText(text);
+    editor.textControl()->caret().setPosition(newui::text::TextPosition(text.find(L"count")));   // the declaration
+    CodeToolsVsix::FindReplaceController* find = editor.findReplace();
+
+    find->showReplace();   // seeds Find and Replace from the token under the caret
+    find->setReplacement(L"total");
+
+    EXPECT_EQ(find->renameCurrent(), 3u);
+    EXPECT_EQ(editor.textControl()->text(), L"int total = 0;\nvoid f() { total = total + 1; }\n");
+    EXPECT_TRUE(editor.textControl()->undo());   // one step
+    EXPECT_EQ(editor.textControl()->text(), text);
+}
+
+TEST(CppEditorFind, CaretOnASymbolHighlightsEveryOtherRealReferenceToIt)
+{
+    auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 900, 700), "cppFindRoot");
+    CodeToolsVsix::CppEditor editor(root);
+    const std::wstring text = L"int count = 0;\nvoid f() { count = count + 1; }\n";
+    editor.textControl()->setText(text);   // no RunLoop in tests: HighlightController parses synchronously
+
+    editor.textControl()->caret().setPosition(newui::text::TextPosition(text.find(L"count")));   // the declaration
+
+    std::size_t occurrenceRanges = 0;
+    for (const auto& range : editor.textControl()->styledRanges()) {
+        if (range.style == CodeToolsVsix::kOccurrenceStyleName) {
+            ++occurrenceRanges;
+        }
+    }
+    EXPECT_EQ(occurrenceRanges, 3u);   // the declaration and both uses - semantic, not textual (see below)
+}
+
+TEST(CppEditorFind, OccurrenceHighlightIsSemanticNotJustSameSpelledText)
+{
+    auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 900, 700), "cppFindRoot");
+    CodeToolsVsix::CppEditor editor(root);
+    // Two unrelated locals named "count" in different, non-overlapping scopes.
+    const std::wstring text = L"void f() { int count = 1; count = 2; }\nvoid g() { int count = 3; }\n";
+    editor.textControl()->setText(text);
+
+    editor.textControl()->caret().setPosition(newui::text::TextPosition(text.find(L"count")));   // f's count
+
+    std::size_t occurrenceRanges = 0;
+    for (const auto& range : editor.textControl()->styledRanges()) {
+        if (range.style == CodeToolsVsix::kOccurrenceStyleName) {
+            ++occurrenceRanges;
+        }
+    }
+    EXPECT_EQ(occurrenceRanges, 2u);   // f's declaration + assignment only, not g's unrelated "count"
+}
+
+TEST(CppEditorFind, DoubleClickWordSelectStillHighlightsOccurrencesDespiteTheCaretLandingPastTheWord)
+{
+    auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 900, 700), "cppFindRoot");
+    CodeToolsVsix::CppEditor editor(root);
+    const std::wstring text = L"int count = 0;\nvoid f() { count = count + 1; }\n";
+    editor.textControl()->setText(text);
+
+    const std::size_t start = text.find(L"count");
+    const std::size_t end = start + 5;   // wcslen(L"count")
+    // Mirrors TextController::selectWordAt()'s own double-click sequence (controls.cpp): select
+    // the word, then land the caret one past its last character - outside the identifier's own
+    // spelling range, which findOccurrences() alone would reject.
+    editor.textControl()->selection().setRange(newui::text::TextRange(start, end - start));
+    editor.textControl()->caret().setPosition(newui::text::TextPosition(end));
+
+    std::size_t occurrenceRanges = 0;
+    for (const auto& range : editor.textControl()->styledRanges()) {
+        if (range.style == CodeToolsVsix::kOccurrenceStyleName) {
+            ++occurrenceRanges;
+        }
+    }
+    EXPECT_EQ(occurrenceRanges, 3u);
+}
+
+TEST(CppEditorFind, MovingTheCaretOffARenamableSymbolClearsTheOccurrenceHighlight)
+{
+    auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 900, 700), "cppFindRoot");
+    CodeToolsVsix::CppEditor editor(root);
+    const std::wstring text = L"int count = 0;\n";
+    editor.textControl()->setText(text);
+
+    editor.textControl()->caret().setPosition(newui::text::TextPosition(text.find(L"count")));
+    const auto hasOccurrence = [&]() {
+        return std::any_of(editor.textControl()->styledRanges().begin(), editor.textControl()->styledRanges().end(),
+            [](const newui::text::TextStyleRange& r) { return r.style == CodeToolsVsix::kOccurrenceStyleName; });
+    };
+    ASSERT_TRUE(hasOccurrence());
+
+    editor.textControl()->caret().setPosition(newui::text::TextPosition(0));   // "i" of "int" - a keyword
+    EXPECT_FALSE(hasOccurrence());
+}
+
+TEST(CppEditorFind, EditingCommandsStillActOnTheSourcePane)
+{
+    auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 900, 700), "cppFindRoot");
+    CodeToolsVsix::CppEditor editor(root);
+    editor.textControl()->setText(L"x");
+    editor.textControl()->model().insert(1, L"y");
+    EXPECT_TRUE(editor.execCommand(EditorCommand::Undo, 0, nullptr));
+    EXPECT_EQ(editor.textControl()->text(), L"x");
+}

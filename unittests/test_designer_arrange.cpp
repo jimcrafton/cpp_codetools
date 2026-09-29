@@ -229,6 +229,21 @@ TEST(DesignerEditorArrange, ControlsInAFlexParentAreLeftAloneAndNeedingTwoFreeOn
     EXPECT_TRUE(hasFreeGeometry(freeButton));
 }
 
+TEST(DesignerEditorArrange, ALayoutIgnoredControlInAFlexParentHasFreeGeometryAndCanBeAligned)
+{
+    ArrangeFixture f;
+    auto* freeButton = f.button(f.free, 10, 10);
+    auto* overlay = f.button(f.flex, 0, 0);
+    const newui::Rect placed(40, 30, 50, 20);
+    overlay->setLayoutIgnored(true);   // the flex layout no longer positions it...
+    overlay->setBounds(placed);        // ...so its bounds are its own
+    EXPECT_TRUE(hasFreeGeometry(overlay));
+
+    f.editor.viewDesignerController().setSelection({ overlay, freeButton });
+    ASSERT_TRUE(f.editor.alignSelection(AlignKind::Left));   // two controls with geometry of their own
+    EXPECT_FLOAT_EQ(SelectionOverlay::boundsInRootView(overlay).left(), SelectionOverlay::boundsInRootView(freeButton).left());
+}
+
 TEST(DesignerArrange, DistributeSpacesTheMiddleViewsEvenlyBetweenTheOutermost)
 {
     ArrangeFixture f;

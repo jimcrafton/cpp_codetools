@@ -605,3 +605,96 @@ TEST(SyncChildLayoutParams, ParamsOfTheRightKindKeepTheirValuesAndInternalChildr
     EXPECT_FLOAT_EQ(kept->weight(), 3.0f);
     EXPECT_EQ(f.children[1]->layoutParams(), nullptr);  // internal: untouched
 }
+
+// ---------------------------------------------------------------------------
+// A layout-ignored child (View::isLayoutIgnored()) - no Layout positions it, so whatever kind of
+// Layout its parent has, its bounds are its own to drag and edit.
+// ---------------------------------------------------------------------------
+
+TEST(PolicyForChild, ALayoutIgnoredChildIsFreePositionInAnyKindOfParent) {
+    auto makeParent = [](std::unique_ptr<newui::Layout> layout) {
+        auto* parent = new newui::SubView();
+        parent->setLayout(std::move(layout));
+        return parent;
+    };
+    std::vector<newui::SubView*> parents = {
+        makeParent(std::make_unique<newui::AnchorLayout>()),
+        makeParent(std::make_unique<newui::FlexLayout>()),
+        makeParent(std::make_unique<newui::GridLayout>()),
+        makeParent(std::make_unique<newui::CardLayout>()),
+        makeParent(nullptr),
+    };
+    auto* ordinary = new newui::SubView();
+    auto* overlay = new newui::SubView();
+    overlay->setLayoutIgnored(true);
+
+    for (newui::SubView* parent : parents) {
+        // An ordinary child follows its parent's Layout, exactly as before...
+        EXPECT_EQ(policyFor(parent, ordinary).kind(), policyFor(parent->layout()).kind());
+        // ...an ignored one is free, whatever the parent's Layout affords (even Card's "nothing").
+        EXPECT_EQ(policyFor(parent, overlay).kind(), GeometryEditKind::FreePosition);
+    }
+    EXPECT_EQ(policyFor(nullptr, overlay).kind(), GeometryEditKind::FreePosition);
+    EXPECT_EQ(policyFor(nullptr, ordinary).kind(), GeometryEditKind::FreePosition);   // no parent = no Layout
+    EXPECT_EQ(policyFor(parents[1], nullptr).kind(), GeometryEditKind::LinearReorder);   // no particular child
+
+    delete ordinary;
+    delete overlay;
+    for (newui::SubView* parent : parents) {
+        delete parent;
+    }
+}
+
+TEST(PolicyForChild, DraggingALayoutIgnoredChildOfAFlexParentMovesItsBoundsAndNeverReorders) {
+    auto* container = new newui::SubView();
+    container->setBounds(newui::Rect(0, 0, 300, 100));
+    container->setLayout(std::make_unique<newui::FlexLayout>(newui::Orientation::Horizontal));
+    auto* a = new newui::SubView();
+    a->setDesiredSize(newui::Size(100.0f, 20.0f));
+    a->setVisible(true);
+    auto* overlay = new newui::SubView();
+    overlay->setVisible(true);
+    auto* b = new newui::SubView();
+    b->setDesiredSize(newui::Size(100.0f, 20.0f));
+    b->setVisible(true);
+    container->addChild(a);
+    container->addChild(overlay);
+    container->addChild(b);
+    overlay->setLayoutIgnored(true);
+    overlay->setBounds(newui::Rect(50, 50, 40, 40));
+
+    const LayoutEditingPolicy& policy = policyFor(container, overlay);
+    ASSERT_EQ(policy.kind(), GeometryEditKind::FreePosition);
+
+    GeometryDragContext ctx;
+    ctx.view = overlay;
+    ctx.parent = container;
+    ctx.startBounds = overlay->bounds();
+    ctx.startPt = newui::Point(0, 0);
+    ctx.currentPt = newui::Point(10, 5);
+    const GeometryEditResult startResult = policy.resolve([&] { GeometryDragContext zero = ctx; zero.currentPt = zero.startPt; return zero; }());
+    const GeometryEditResult result = policy.resolve(ctx);
+    EXPECT_EQ(result.kind, GeometryEditKind::FreePosition);
+    EXPECT_EQ(result.proposedBounds, newui::Rect(60, 55, 40, 40));
+
+    policy.applyPreview(ctx, result);
+    EXPECT_EQ(overlay->bounds(), newui::Rect(60, 55, 40, 40));   // it moved with the drag
+    ASSERT_EQ(container->childViews().size(), 3u);               // and nothing was reordered
+    EXPECT_EQ(container->childViews()[0], a);
+    EXPECT_EQ(container->childViews()[1], overlay);
+    EXPECT_EQ(container->childViews()[2], b);
+    EXPECT_FLOAT_EQ(b->bounds().left(), 100.0f);                 // the siblings didn't move either
+
+    newui::UndoableAction action = policy.commit(ctx, startResult, result);
+    overlay->setBounds(newui::Rect(0, 0, 1, 1));
+    action.doIt();
+    EXPECT_EQ(overlay->bounds(), newui::Rect(60, 55, 40, 40));
+    action.undoIt();
+    EXPECT_EQ(overlay->bounds(), newui::Rect(50, 50, 40, 40));
+    EXPECT_EQ(container->childViews()[1], overlay);
+
+    delete a;
+    delete overlay;
+    delete b;
+    delete container;
+}

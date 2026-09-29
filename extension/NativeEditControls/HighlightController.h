@@ -24,8 +24,18 @@ namespace CodeToolsVsix
     constexpr const char* kProblemStyleName = "problem";
     constexpr const char* kWarningStyleName = "warning";
 
+    // Find's matches: every match ("match") and the one being stepped to ("matchCurrent"), as a
+    // background tint that reads on the theme's background.
+    constexpr const char* kMatchStyleName = "match";
+    constexpr const char* kCurrentMatchStyleName = "matchCurrent";
+
+    // Every other real reference to the symbol under the caret (semantic, via
+    // cpptools::Session::findOccurrences - not a lookalike-named symbol), as a distinct tint from
+    // Find's own matches so both can be shown at once.
+    constexpr const char* kOccurrenceStyleName = "occurrence";
+
     // lex's theme as a sheet: one style per highlightStyleName(), plus "problem" and "warning"
-    // (squiggles).
+    // (squiggles) and "match" / "matchCurrent" (Find).
     std::shared_ptr<const newui::TextStyleSheet> highlightStyleSheet(const lex::Theme& theme);
 
     // A squiggle (kProblemStyleName, or kWarningStyleName) over [start, start + length) of a text
@@ -111,6 +121,16 @@ namespace CodeToolsVsix
         // Run every pass on the current text and apply the results now, on this thread.
         void refresh();
 
+        // A third set of ranges, shown along with the two passes' and kept apart from them: Find's
+        // matches. They are for the text as it is now - the caller supplies new ones when it
+        // changes (an edit doesn't move them). UI thread.
+        void setExtraRanges(std::vector<newui::text::TextStyleRange> ranges);
+
+        // A fourth, independent set: the symbol-occurrence highlight (every other real reference to
+        // whatever's under the caret). Kept apart from setExtraRanges() so Find's matches and this
+        // can both be shown together - one doesn't overwrite the other. UI thread.
+        void setOccurrenceRanges(std::vector<newui::text::TextStyleRange> ranges);
+
     private:
         static constexpr int kColorPass = 0;
         static constexpr int kOverlayPass = 1;
@@ -150,6 +170,8 @@ namespace CodeToolsVsix
         std::vector<newui::text::TextStyleRange> colors_;    // the first pass's, for the text as of colorsGeneration_
         std::size_t colorsGeneration_ = static_cast<std::size_t>(-1);
         std::vector<newui::text::TextStyleRange> overlay_;   // the second pass's, for overlayText_
+        std::vector<newui::text::TextStyleRange> extra_;     // Find's matches (setExtraRanges)
+        std::vector<newui::text::TextStyleRange> occurrences_;   // symbol-occurrence highlight (setOccurrenceRanges)
         newui::text::PieceTree overlayText_;
     };
 }
