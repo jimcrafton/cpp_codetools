@@ -409,6 +409,10 @@ add_library(NativeEditControls SHARED
     extension/NativeEditControls/IssuesPopup.cpp
     extension/NativeEditControls/IssuePeek.cpp
     extension/NativeEditControls/IssuePeek.h
+    extension/NativeEditControls/ProblemList.cpp
+    extension/NativeEditControls/ProblemList.h
+    extension/NativeEditControls/EditorStatusBar.cpp
+    extension/NativeEditControls/EditorStatusBar.h
     extension/NativeEditControls/PropertiesPanel.h
     extension/NativeEditControls/PropertiesPanel.cpp
     extension/NativeEditControls/DocumentOutline.h
@@ -497,6 +501,8 @@ add_executable(testharness
     extension/NativeEditControls/PropertiesGrid.cpp
     extension/NativeEditControls/IssuesPopup.cpp
     extension/NativeEditControls/IssuePeek.cpp
+    extension/NativeEditControls/ProblemList.cpp
+    extension/NativeEditControls/EditorStatusBar.cpp
     extension/NativeEditControls/DocumentTabs.cpp
     extension/NativeEditControls/PropertiesPanel.cpp
     extension/NativeEditControls/DocumentOutline.cpp

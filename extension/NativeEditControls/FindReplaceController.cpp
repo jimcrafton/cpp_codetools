@@ -392,6 +392,9 @@ namespace CodeToolsVsix
                 } else if (isGoToLineOpen()) {
                     place(*goToBar_);
                 }
+                if (!isFindOpen() && minimap_ != nullptr && minimap_->isVisible()) {
+                    updateMinimap();   // just the problem ticks showing: still pinned to the resized viewport
+                }
                 return newui::SyncReturn::Ignored;
             });
         }
@@ -528,7 +531,10 @@ namespace CodeToolsVsix
             highlight_->setExtraRanges({});
         }
         if (minimap_ != nullptr) {
-            minimap_->setVisible(false);
+            minimap_->setVisible(!problemMarks_.empty());   // the problem ticks stay
+            if (!problemMarks_.empty()) {
+                updateMinimap();
+            }
         }
     }
 
@@ -823,8 +829,8 @@ namespace CodeToolsVsix
 
         const std::wstring& document = text_->text();
         minimap_->setLineCount(lineCount(document));
-        std::vector<MinimapStrip::Mark> marks;
-        marks.reserve(matches_.size());
+        std::vector<MinimapStrip::Mark> marks = problemMarks_;   // under Find's matches, which come after
+        marks.reserve(marks.size() + matches_.size());
         for (std::size_t i = 0; i < matches_.size(); ++i) {
             MinimapStrip::Mark mark;
             mark.line = lineOfOffset(document, matches_[i].start) - 1;   // 1-based -> 0-based
@@ -834,6 +840,18 @@ namespace CodeToolsVsix
         }
         minimap_->setMarks(std::move(marks));
         minimap_->setCaretLine(lineOfOffset(document, caretOffset()) - 1);
+    }
+
+    void FindReplaceController::setProblemMarks(std::vector<MinimapStrip::Mark> marks)
+    {
+        problemMarks_ = std::move(marks);
+        if (minimap_ == nullptr) {
+            return;
+        }
+        minimap_->setVisible(isFindOpen() || !problemMarks_.empty());
+        if (minimap_->isVisible()) {
+            updateMinimap();
+        }
     }
 
     void FindReplaceController::next()

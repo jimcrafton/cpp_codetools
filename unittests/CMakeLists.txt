@@ -76,6 +76,7 @@ add_executable(nativeeditcontrols_tests
     test_designer_editor.cpp
     test_document_tabs.cpp
     test_issue_peek.cpp
+    test_problem_list.cpp
     test_cpp_editor.cpp
     test_find_engine.cpp
     test_document_edit_service.cpp
@@ -151,6 +152,8 @@ add_executable(nativeeditcontrols_tests
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/PropertiesGrid.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/IssuesPopup.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/IssuePeek.cpp"
+    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/ProblemList.cpp"
+    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/EditorStatusBar.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/DocumentTabs.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/PropertiesPanel.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/DocumentOutline.cpp"

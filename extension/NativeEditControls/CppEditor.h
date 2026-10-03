@@ -10,6 +10,7 @@
 
 #include "CppDiagnostics.h"
 #include "DocumentEditService.h"
+#include "EditorStatusBar.h"
 #include "FindReplaceController.h"
 #include "HighlightController.h"
 #include "NativeEditor.h"
@@ -86,6 +87,7 @@ namespace CodeToolsVsix
         newui::TextControl* outlineControl() const { return outlineControl_; }
         // Find / Replace / Go to line (null if construction failed) - for tests.
         FindReplaceController* findReplace() const { return find_.get(); }
+        EditorStatusBar* statusBar() const { return status_.get(); }
     private:
         std::uint64_t editVersion_ = 1;
         std::filesystem::path registeredPath_;
@@ -119,6 +121,9 @@ namespace CodeToolsVsix
         // Find / Replace / Go to line overlays over the editor. Declared after highlight_ (which it feeds
         // matches to) so it is destroyed first.
         std::unique_ptr<FindReplaceController> find_;
+        // The row under the panes: the caret's position and `< 1 of N problems >`. Declared after find_
+        // (its arrows and ticks go through it) so it is destroyed first.
+        std::unique_ptr<EditorStatusBar> status_;
 
         // Shows a new outline in the read-only pane (unchanged: left alone).
         void setOutlineText(const std::wstring& outline);

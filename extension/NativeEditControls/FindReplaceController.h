@@ -93,6 +93,11 @@ namespace CodeToolsVsix
         // would be.
         MinimapStrip* minimap() const { return minimap_; }
 
+        // Ticks that are always on the minimap - the editor's problem lines - whether or not Find is open.
+        // While there are any the strip stays visible (its own click just moves the caret there); Find's
+        // matches are drawn over them while it is open. UI thread.
+        void setProblemMarks(std::vector<MinimapStrip::Mark> marks);
+
         // The search state (also what the controls drive; public for tests and for a host that wants to
         // start a search itself).
         const std::wstring& query() const { return query_; }
@@ -160,7 +165,8 @@ namespace CodeToolsVsix
         HighlightController* highlight_;
         newui::SubView* findBar_ = nullptr;   // both owned by host_
         newui::SubView* goToBar_ = nullptr;
-        MinimapStrip* minimap_ = nullptr;     // also owned by host_; shown/hidden with findBar_
+        MinimapStrip* minimap_ = nullptr;     // also owned by host_; shown with findBar_, or while problemMarks_ has any
+        std::vector<MinimapStrip::Mark> problemMarks_;   // setProblemMarks()
 
         newui::TextField* findInput_ = nullptr;
         newui::TextField* replaceInput_ = nullptr;

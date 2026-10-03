@@ -307,6 +307,10 @@ namespace CodeToolsVsix
         // same editable buffer" - same UIColorManager pattern the root's own background uses.
         outlineControl->style().setBackgroundColor(newui::UIColorManager::colorFor(newui::UIColorRole::ControlBackground));
         outlineScroll->addChild(outlineControl);
+
+        // The status row: before the progress bar and the Find overlays, which must stay the last
+        // children (see TheOverlaysAreLayoutIgnoredChildrenPaintedOnTopOfThePanes).
+        status_ = std::make_unique<EditorStatusBar>(*host, *textControl);
         if (!this->rootViewOwned_) {
             if (!root->initialize())
             {
@@ -359,6 +363,14 @@ namespace CodeToolsVsix
                 setOutlineText(*outline);
             }
             stopLoadingAnimation();
+            if (status_ != nullptr) {
+                status_->refresh();   // the squiggles - and so the problems - may have changed
+            }
+        });
+        highlight_->setOnApplied([this](HighlightResult&) {
+            if (status_ != nullptr) {
+                status_->refresh();   // the colors pass republishes the overlay's squiggles, moved along
+            }
         });
 
         // Find / Replace / Go to line: overlays added to the same host as the two panes.
@@ -367,6 +379,20 @@ namespace CodeToolsVsix
             return renameOccurrencesAt(text, offset, document);
         });
         keyConnection_ = root->onKeyDown.add(this, &CppEditor::handleKeyDown);
+
+        // The status row's arrows move the caret the way Go to line does; its problem ticks go on the
+        // minimap.
+        status_->setGoTo([this](std::size_t line, std::size_t column) {
+            if (find_ != nullptr) {
+                find_->goToLine(std::to_wstring(line) + L":" + std::to_wstring(column));
+            }
+        });
+        status_->setMarksSink([this](std::vector<MinimapStrip::Mark> marks) {
+            if (find_ != nullptr) {
+                find_->setProblemMarks(std::move(marks));
+            }
+        });
+        status_->refresh();
 
         // Highlights every other real reference to whatever symbol the caret is on (semantic, via
         // libclang - not just same-spelled text) - see symbolOccurrencesAt()'s own comment above.
@@ -451,6 +477,10 @@ namespace CodeToolsVsix
 
     newui::SyncReturn CppEditor::handleCaretMoved(newui::text::Caret& /*sender*/)
     {
+        if (status_ != nullptr)
+        {
+            status_->caretMoved();
+        }
         if (highlight_ == nullptr || textControl_ == nullptr || document_ == nullptr)
         {
             return newui::SyncReturn::Ignored;

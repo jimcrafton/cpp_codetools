@@ -262,6 +262,132 @@ TEST(CppEditor, HostsTheSourceInAScrollViewAndTheOutlineInAnother)
     EXPECT_TRUE(editor.textControl()->canUndo());
 }
 
+namespace {
+    // The editor holding a four-line text with squiggles on lines 2 and 4 (1-based), as a finished highlight
+    // pass would leave it - the ranges are set by hand so no parse decides what the problems are.
+    struct EditorWithProblems
+    {
+        newui::RootView* root = new newui::RootView(nullptr, newui::Rect(0, 0, 900, 700), "cppTestRoot");
+        CodeToolsVsix::CppEditor editor{ root };
+
+        EditorWithProblems()
+        {
+            editor.textControl()->setText(L"int a;\nint b = ;\nint c;\nint d = e;\n");
+            editor.textControl()->setStyledRanges({
+                { 15, 1, CodeToolsVsix::kProblemStyleName, "expected expression" },
+                { 32, 1, CodeToolsVsix::kWarningStyleName, "unused" } });
+            editor.statusBar()->refresh();
+        }
+        void caretAt(std::size_t offset)
+        {
+            editor.textControl()->selection().clear();
+            editor.textControl()->caret().setPosition(newui::text::TextPosition(offset));
+        }
+    };
+}
+
+TEST(CppEditor, AStatusRowShowsTheCaretsLineAndColumn)
+{
+    auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 900, 700), "cppTestRoot");
+    CodeToolsVsix::CppEditor editor(root);
+    ASSERT_NE(editor.statusBar(), nullptr);
+    editor.textControl()->setText(L"int a;\nint b = ;\n");
+
+    editor.textControl()->caret().setPosition(newui::text::TextPosition(0));
+    EXPECT_EQ(editor.statusBar()->positionText(), "  Ln 1, Col 1");
+    editor.textControl()->caret().setPosition(newui::text::TextPosition(11));   // the ' ' before '='
+    EXPECT_EQ(editor.statusBar()->positionText(), "  Ln 2, Col 5");
+}
+
+TEST(CppEditor, WithNoProblemsThereIsNoNavigatorAndNoProblemTicks)
+{
+    auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 900, 700), "cppTestRoot");
+    CodeToolsVsix::CppEditor editor(root);
+    editor.textControl()->setText(L"int a;\n");
+    editor.statusBar()->refresh();
+
+    EXPECT_FALSE(editor.statusBar()->navigatorVisible());
+    EXPECT_EQ(editor.statusBar()->summaryText(), "");
+    EXPECT_FALSE(editor.findReplace()->minimap()->isVisible());
+}
+
+TEST(CppEditor, TheStatusRowCountsTheProblemsAndSaysWhichOneTheCaretIsOn)
+{
+    EditorWithProblems fixture;
+    CodeToolsVsix::EditorStatusBar& status = *fixture.editor.statusBar();
+
+    ASSERT_EQ(status.problems().size(), 2u);
+    EXPECT_TRUE(status.navigatorVisible());
+    fixture.caretAt(0);   // line 1: not on a problem
+    EXPECT_EQ(status.summaryText(), "2 problems");
+    fixture.caretAt(15);  // line 2: the first
+    EXPECT_EQ(status.summaryText(), "1 of 2 problems");
+    fixture.caretAt(32);  // line 4: the second
+    EXPECT_EQ(status.summaryText(), "2 of 2 problems");
+}
+
+TEST(CppEditor, NextAndPreviousProblemMoveTheCaretToTheLineWithOneWrapping)
+{
+    EditorWithProblems fixture;
+    CodeToolsVsix::EditorStatusBar& status = *fixture.editor.statusBar();
+    auto caretOffset = [&] { return fixture.editor.textControl()->caret().position().offset(); };
+
+    fixture.caretAt(0);
+    status.goToNextProblem();
+    EXPECT_EQ(caretOffset(), 15u) << "line 2, at the squiggle";
+    status.goToNextProblem();
+    EXPECT_EQ(caretOffset(), 32u) << "line 4";
+    status.goToNextProblem();
+    EXPECT_EQ(caretOffset(), 15u) << "wrapped to the first";
+    status.goToPreviousProblem();
+    EXPECT_EQ(caretOffset(), 32u) << "wrapped back to the last";
+    status.goToPreviousProblem();
+    EXPECT_EQ(caretOffset(), 15u);
+}
+
+TEST(CppEditor, TheMinimapShowsATickPerProblemLineEvenWithFindClosed)
+{
+    EditorWithProblems fixture;
+    CodeToolsVsix::MinimapStrip* minimap = fixture.editor.findReplace()->minimap();
+    ASSERT_NE(minimap, nullptr);
+    fixture.caretAt(15);
+
+    EXPECT_FALSE(fixture.editor.findReplace()->isFindOpen());
+    EXPECT_TRUE(minimap->isVisible());
+    ASSERT_EQ(minimap->marks().size(), 2u);
+    EXPECT_EQ(minimap->marks()[0].line, 1u);
+    EXPECT_EQ(minimap->marks()[1].line, 3u);
+    EXPECT_TRUE(minimap->marks()[0].current) << "the caret is on the first";
+    EXPECT_FALSE(minimap->marks()[1].current);
+}
+
+TEST(CppEditor, FindingKeepsTheProblemTicksAndClosingFindKeepsTheStrip)
+{
+    EditorWithProblems fixture;
+    CodeToolsVsix::FindReplaceController& find = *fixture.editor.findReplace();
+    CodeToolsVsix::MinimapStrip* minimap = find.minimap();
+
+    find.showFind();
+    find.setQuery(L"int");
+    EXPECT_GT(minimap->marks().size(), 2u) << "the matches too, over the problem ticks";
+    EXPECT_EQ(minimap->marks()[0].line, 1u) << "the problem ticks come first";
+
+    find.close();
+    EXPECT_TRUE(minimap->isVisible()) << "still two problems";
+    EXPECT_EQ(minimap->marks().size(), 2u);
+}
+
+TEST(CppEditor, TheProblemTicksGoWhenTheProblemsDo)
+{
+    EditorWithProblems fixture;
+    ASSERT_TRUE(fixture.editor.findReplace()->minimap()->isVisible());
+
+    fixture.editor.textControl()->setStyledRanges({});
+    fixture.editor.statusBar()->refresh();
+    EXPECT_FALSE(fixture.editor.statusBar()->navigatorVisible());
+    EXPECT_FALSE(fixture.editor.findReplace()->minimap()->isVisible());
+}
+
 TEST(CppEditor, TheSourceDoesNotWrapAndAVeryLongLineMakesItScrollSideways)
 {
     auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 900, 700), "cppTestRoot");
