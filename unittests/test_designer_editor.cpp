@@ -1985,6 +1985,67 @@ TEST_F(DesignerEditorFileFixture, ActivatingAnEventThatIsAlreadyWiredJustSaysSoA
     EXPECT_FALSE(std::filesystem::exists(std::filesystem::path(path_).parent_path() / "DesignerEditorProbeController.h"));
 }
 
+TEST_F(DesignerEditorFileFixture, WiringWithAChosenNameUsesThatNameInTheControllersCode)
+{
+    writeFile(R"({ title: "T", rootView: { type: "RootView", childViews: [ { type: "Button", name: "saveButton" } ] } })");
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+    std::wstring path = filePath();
+    ASSERT_TRUE(editor.load(path.c_str(), path.size()));
+
+    editor.wireDelegateAs(*firstButton(editor), "onClick", "handleSave");
+
+    const std::string header = (std::filesystem::path(path_).parent_path() / "DesignerEditorProbeController.h").string();
+    const std::string text = readAll(header);
+    EXPECT_NE(text.find("&DesignerEditorProbeController::handleSave);"), std::string::npos) << text;
+    EXPECT_EQ(text.find("onSaveButtonClick"), std::string::npos);
+    EXPECT_EQ(editor.delegateStatusMessage(), "Wired onClick to DesignerEditorProbeController::handleSave");
+    ::DeleteFileA(header.c_str());
+}
+
+TEST_F(DesignerEditorFileFixture, WiringAgainWithAnotherNameAddsASecondListener)
+{
+    writeFile(R"({ title: "T", rootView: { type: "RootView", childViews: [ { type: "Button", name: "saveButton" } ] } })");
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+    std::wstring path = filePath();
+    ASSERT_TRUE(editor.load(path.c_str(), path.size()));
+    newui::Button* button = firstButton(editor);
+
+    editor.activateDelegate(*button, "onClick", {});
+    editor.wireDelegateAs(*button, "onClick", "alsoOnSave");
+
+    const std::string header = (std::filesystem::path(path_).parent_path() / "DesignerEditorProbeController.h").string();
+    const std::string text = readAll(header);
+    EXPECT_NE(text.find("&DesignerEditorProbeController::onSaveButtonClick);"), std::string::npos) << text;
+    EXPECT_NE(text.find("&DesignerEditorProbeController::alsoOnSave);"), std::string::npos) << text;
+    const std::string row = delegateRowTextFor(editor, *button, "onClick");
+    EXPECT_NE(row.find("onSaveButtonClick"), std::string::npos) << row;
+    EXPECT_NE(row.find("alsoOnSave"), std::string::npos) << row;
+    ::DeleteFileA(header.c_str());
+}
+
+TEST_F(DesignerEditorFileFixture, AHandlerNameThatIsNotAnIdentifierIsRefusedAndCreatesNothing)
+{
+    writeFile(R"({ title: "T", rootView: { type: "RootView", childViews: [ { type: "Button", name: "saveButton" } ] } })");
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+    std::wstring path = filePath();
+    ASSERT_TRUE(editor.load(path.c_str(), path.size()));
+
+    editor.wireDelegateAs(*firstButton(editor), "onClick", "not a name");
+
+    EXPECT_NE(editor.delegateStatusMessage().find("isn't a valid C++ name"), std::string::npos);
+    EXPECT_EQ(editor.controllerRef(), nullptr);
+}
+
+TEST(DesignerEditorDelegateNaming, TheDefaultHandlerNameIsOnControlEvent)
+{
+    newui::Button button;
+    button.setName("saveButton");
+    EXPECT_EQ(CodeToolsVsix::DesignerEditor::defaultHandlerNameFor(button, "onClick"), "onSaveButtonClick");
+}
+
 TEST_F(DesignerEditorFileFixture, ActivatingInAnUnsavedDocumentAsksForASaveFirstAndCreatesNothing)
 {
     newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");

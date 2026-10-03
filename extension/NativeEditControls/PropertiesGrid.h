@@ -107,6 +107,34 @@ namespace CodeToolsVsix
                                                             const std::vector<std::string>& recordedDescriptors)>;
         void setDelegateActivatedHandler(DelegateActivatedHandler handler) { delegateActivatedHandler_ = std::move(handler); }
 
+        // The Delegates row's "..." picker: lists the handlers already wired and "+ Generate new
+        // handler...", which swaps the cell for a name field prefilled from the default-name provider;
+        // Enter fires the wire handler with the typed name, Escape cancels. Wiring itself is the caller's.
+        using DelegateDefaultNameProvider = std::function<std::string(newui::Component* owner, const std::string& delegateName)>;
+        using DelegateWireHandler = std::function<void(newui::Component* owner, const std::string& delegateName,
+                                                       const std::string& handlerName)>;
+        void setDelegateNaming(DelegateDefaultNameProvider defaultName, DelegateWireHandler wire)
+        {
+            delegateDefaultName_ = std::move(defaultName);
+            delegateWireHandler_ = std::move(wire);
+        }
+
+        // Where the grid tells the user what to do next (the name field's "type a name, press Enter").
+        void setDelegateHint(std::function<void(const std::string&)> hint) { delegateHint_ = std::move(hint); }
+        // `wanted`, or - if it is already in `taken` - `wanted` with 2, 3, ... appended until it isn't.
+        static std::string uniqueHandlerName(const std::string& wanted, const std::vector<std::string>& taken);
+        // Opens the picker for the selected Delegates row: a popup (the same CalloutTool the Layout type picker uses) beside its "...". What clicking
+        // the row's "..." does; public so it can be driven without a real click.
+        void openDelegatePicker();
+        // Whether the picker is open (or its popup is on its way up) or its name field is the live editor,
+        // and the rows the picker lists (wired handlers first, "+ Generate new handler..." last) - for tests.
+        bool delegatePickerOpen() const { return liveEditorIsDelegatePicker_; }
+        const std::vector<std::string>& delegatePickerRows() const { return delegatePickerRows_; }
+        bool delegateNameEditorOpen() const { return liveEditorIsDelegateName_; }
+        // Picks the picker's row `index` / types `name` into the name field and presses Enter.
+        void chooseDelegatePickerRow(std::size_t index);
+        void commitDelegateName(const std::string& name);
+
     private:
         newui::SyncReturn handleSelectionChanged(newui::TreeView& sender);
         // Commits the typed text (rebuildLiveEditor()'s own TextField),
@@ -291,6 +319,23 @@ namespace CodeToolsVsix
         // all, so liveEditor_ == nullptr can't be reused as the signal: that's also the
         // otherwise-unreachable "no editor built" case).
         bool liveEditorIsParentPicker_ = false;
+
+        // The Delegates row picker (a DropDownList) or its name field (a TextField) is the live editor;
+        // the owner and event are what Enter wires, and delegatePickerWired_ is how many listed rows
+        // are already-wired handlers (the "Generate" row follows them).
+        bool liveEditorIsDelegatePicker_ = false;
+        bool liveEditorIsDelegateName_ = false;
+        newui::Component* delegateEditorOwner_ = nullptr;
+        std::string delegateEditorName_;
+        std::size_t delegatePickerWired_ = 0;
+        std::vector<std::string> delegatePickerRows_;
+        void showDelegatePickerPopup(const newui::Rect& anchorScreenRect);
+        DelegateDefaultNameProvider delegateDefaultName_;
+        DelegateWireHandler delegateWireHandler_;
+        std::function<void(const std::string&)> delegateHint_;
+        void openDelegateNameEditor();
+        // The selected row's value cell, or nothing when the row isn't visible.
+        std::optional<newui::Rect> selectedValueRect() const;
 
         // Set only when the currently-selected row is a
         // PropertiesModel::Kind::SubPropertyEntry (e.g. bounds' own "x"

@@ -1,11 +1,15 @@
 #include "PropertiesGrid.h"
 #include "LayoutEditingPolicy.h"
+#include "CalloutPlacement.h"
 #include "PaintUtils.h"
 #include "TextEncoding.h"
 
+#include <newui/application.h>
+#include <newui/popuptool.h>
 #include <newui/rootview.h>
 #include <newui/uicolormanager.h>
 
+#include <algorithm>
 #include <cmath>
 #include <typeindex>
 
@@ -240,6 +244,8 @@ namespace CodeToolsVsix
         liveEditor_.reset();
         liveEditorSubIndex_.reset();
         liveEditorIsParentPicker_ = false;
+        liveEditorIsDelegatePicker_ = false;
+        liveEditorIsDelegateName_ = false;
         parentPickerCandidates_.clear();
 
         // An ordinary teardown path (this class is still alive throughout, unlike the destructor
@@ -459,6 +465,265 @@ namespace CodeToolsVsix
         focusLiveEditorView();
     }
 
+    std::optional<newui::Rect> PropertiesGrid::selectedValueRect() const
+    {
+        std::optional<std::vector<std::size_t>> path = treeView_->selectedPath();
+        std::optional<newui::Rect> rowRect = path.has_value() ? treeView_->rectForPath(*path) : std::nullopt;
+        if (!rowRect.has_value()) {
+            return std::nullopt;
+        }
+        auto* propsController = dynamic_cast<PropertiesTreeController*>(&treeView_->controller());
+        float keyColumnFraction = propsController != nullptr
+            ? propsController->keyColumnFraction() : PropertiesTreeController::kDefaultKeyColumnFraction;
+        return PropertyItem::valueRectFor(*rowRect, *path, keyColumnFraction);
+    }
+
+    namespace
+    {
+        // Prefix of a wired handler's row: a bullet (the UI font has no check mark).
+        const std::string kPickerRowMarker = "\xE2\x80\xA2 ";
+        constexpr float kPickerRowHeight = 26.0f;
+        constexpr float kPickerPadding = 8.0f;
+        constexpr float kPickerTopReserve = 20.0f;   // clears CalloutTool's own top tail + margin
+
+        // One line in the delegate picker popup. A wired handler's row is informational (no action);
+        // the Generate row calls onChosen.
+        class PickerRow : public newui::SubView
+        {
+        public:
+            PickerRow(const std::string& text, std::function<void()> onChosen)
+                : onChosen_(std::move(onChosen))
+            {
+                setVisible(true);
+                onMouseDown.add(this, &PickerRow::handleMouseDown);
+                auto* label = new newui::Label();
+                label->setText(text);
+                label_ = label;
+                // A click lands on the deepest view under the cursor and doesn't bubble, so the label
+                // (which covers most of the row) has to run the row's action itself.
+                label->onMouseDown.add(this, &PickerRow::handleMouseDown);
+                addChild(label);
+            }
+
+            void setBounds(const newui::Rect& bounds) override
+            {
+                newui::SubView::setBounds(bounds);
+                const newui::Rect local = getClientBounds();
+                label_->setBounds(newui::Rect(8.0f, 0.0f, local.width() - 16.0f, local.height()));
+            }
+
+            void paint(BLContext& ctx) override
+            {
+                const newui::Rect bounds = getClientBounds();
+                if (bounds.width() <= 0.0f || bounds.height() <= 0.0f) {
+                    return;
+                }
+                ctx.save();
+                ctx.set_fill_style(newui::UIColorManager::colorFor(newui::UIColorRole::ControlBackground).toBLRgba32());
+                ctx.fill_round_rect(BLRect(bounds), 4.0);
+                if (onChosen_) {
+                    ctx.set_stroke_style(newui::UIColorManager::colorFor(newui::UIColorRole::ControlBorder).toBLRgba32());
+                    ctx.set_stroke_width(1.0);
+                    ctx.stroke_round_rect(BLRect(bounds), 4.0);
+                }
+                ctx.restore();
+            }
+
+        private:
+            newui::SyncReturn handleMouseDown(newui::View&, const newui::Point&, std::uint32_t, std::uint32_t)
+            {
+                if (onChosen_) {
+                    onChosen_();
+                }
+                return newui::SyncReturn::Handled;
+            }
+
+            std::function<void()> onChosen_;
+            newui::Label* label_ = nullptr;
+        };
+    }
+
+    void PropertiesGrid::openDelegatePicker()
+    {
+        destroyLiveEditor();
+        std::optional<std::vector<std::size_t>> path = treeView_->selectedPath();
+        std::optional<newui::Rect> valueRect = selectedValueRect();
+        if (!path.has_value() || !valueRect.has_value()) {
+            return;
+        }
+        PropertiesModel::Node node = model_->nodeAt(*path);
+        if (node.kind != PropertiesModel::Kind::DelegateEntry || node.delegate == nullptr) {
+            return;
+        }
+
+        delegatePickerRows_.clear();
+        const std::vector<std::string> wired = node.delegate->describedListeners(node.ownerInstance);
+        for (const std::string& descriptor : wired) {
+            delegatePickerRows_.push_back(kPickerRowMarker + PropertiesModel::handlerLabelOf(descriptor));   // "bullet name": the UI font has no check mark
+        }
+        delegatePickerRows_.push_back("+ Generate new handler...");
+
+        liveEditorIsDelegatePicker_ = true;
+        delegateEditorOwner_ = static_cast<newui::Component*>(node.ownerInstance);
+        delegateEditorName_ = node.delegate->name();
+        delegatePickerWired_ = wired.size();
+
+        const newui::Rect anchor = treeView_->localToScreen(PropertyItem::ellipsisButtonRectFor(*valueRect));
+        // Posted, never inline: this runs inside the row's mouse-down dispatch, and RootView's mouse-down
+        // tail would steal focus straight back from a popup created now (see openDialogEditorFor()).
+        std::weak_ptr<bool> alive = aliveFlag_;
+        auto show = [this, alive, anchor]() {
+            if (!alive.expired()) {
+                showDelegatePickerPopup(anchor);
+            }
+        };
+        if (newui::RunLoop::current()) {
+            newui::RunLoop::current().post(std::move(show));
+        } else {
+            show();
+        }
+    }
+
+    void PropertiesGrid::showDelegatePickerPopup(const newui::Rect& anchorScreenRect)
+    {
+        // Closed (a row selected, the editor torn down) between the click and this running.
+        newui::RootView* rootView = treeView_->rootView();
+        if (!liveEditorIsDelegatePicker_ || rootView == nullptr || rootView->windowHandle() == nullptr) {
+            return;
+        }
+
+        const float width = 232.0f;
+        const float height = kPickerTopReserve + kPickerPadding * 2.0f +
+            kPickerRowHeight * static_cast<float>(delegatePickerRows_.size());
+        const newui::Size popupSize(width, height);
+        const CalloutPlacement placement = placeCallout(anchorScreenRect, popupSize, designerWindowScreenRect(treeView_));
+
+        auto* popup = new newui::CalloutTool(rootView->windowHandle(), newui::Application::instance().instanceHandle(),
+                                             placement.bounds, "delegatePicker");
+        if (!popup->initialize()) {
+            delete popup;
+            return;
+        }
+        popup->setTailSide(placement.tailSide);
+        popup->setTailPosition(placement.tailPosition);
+
+        // Rows start below the reserved band whichever side the tail is on (the type picker's simplification).
+        const newui::Size actual = placement.bounds.size();
+        for (std::size_t i = 0; i < delegatePickerRows_.size(); ++i) {
+            std::function<void()> onChosen;
+            if (i == delegatePickerWired_) {
+                std::weak_ptr<bool> alive = aliveFlag_;
+                onChosen = [this, alive, popup, i]() {
+                    // Locals first: dismiss() may free the popup, and this closure with it.
+                    PropertiesGrid* self = this;
+                    std::weak_ptr<bool> aliveCopy = alive;
+                    const std::size_t index = i;
+                    popup->dismiss();
+                    // After the popup is gone: this runs inside the popup's own click dispatch.
+                    auto choose = [self, aliveCopy, index]() {
+                        if (!aliveCopy.expired()) {
+                            self->chooseDelegatePickerRow(index);
+                        }
+                    };
+                    if (newui::RunLoop::current()) {
+                        newui::RunLoop::current().post(std::move(choose));
+                    } else {
+                        choose();
+                    }
+                };
+            }
+            auto* row = new PickerRow(delegatePickerRows_[i], std::move(onChosen));
+            row->setBounds(newui::Rect(kPickerPadding, kPickerTopReserve + kPickerPadding + kPickerRowHeight * static_cast<float>(i),
+                                       actual.width - kPickerPadding * 2.0f, kPickerRowHeight - 2.0f));
+            popup->addChild(row);
+        }
+
+        popup->present();
+        openTypePicker_ = popup;
+        openTypePickerDismissConnection_ = popup->onDismissed.add(this, &PropertiesGrid::handleTypePickerDismissed);
+    }
+
+    void PropertiesGrid::chooseDelegatePickerRow(std::size_t index)
+    {
+        // A wired handler's row is informational for now (jumping to its source needs editor navigation).
+        if (liveEditorIsDelegatePicker_ && index == delegatePickerWired_) {
+            openDelegateNameEditor();
+        }
+    }
+
+    std::string PropertiesGrid::uniqueHandlerName(const std::string& wanted, const std::vector<std::string>& taken)
+    {
+        std::string name = wanted;
+        for (std::size_t n = 2; !name.empty() && std::find(taken.begin(), taken.end(), name) != taken.end(); ++n) {
+            name = wanted + std::to_string(n);
+        }
+        return name;
+    }
+
+    void PropertiesGrid::openDelegateNameEditor()
+    {
+        newui::Component* owner = delegateEditorOwner_;
+        const std::string delegateName = delegateEditorName_;
+        std::optional<newui::Rect> valueRect = selectedValueRect();
+        destroyLiveEditor();
+        if (!valueRect.has_value() || owner == nullptr) {
+            return;
+        }
+
+        auto* textField = new newui::TextField();
+        textField->setVisible(true);
+        // The default name, unless the event already has a handler of that name - then a field that
+        // looks exactly like the cell is no use, so suggest the next free one.
+        std::vector<std::string> taken;
+        for (std::size_t i = 0; i < delegatePickerWired_ && i < delegatePickerRows_.size(); ++i) {
+            taken.push_back(delegatePickerRows_[i].substr(kPickerRowMarker.size()));
+        }
+        const std::string suggested = uniqueHandlerName(
+            delegateDefaultName_ ? delegateDefaultName_(owner, delegateName) : std::string(), taken);
+        textField->setText(utf8ToWide(suggested));
+        textField->setBounds(*valueRect);
+        textField->onReturnPressed.add([this](newui::TextField& sender) {
+            commitDelegateName(wideToUtf8(sender.text()));
+            return newui::SyncReturn::Handled;
+        });
+        textField->onKeyDown.add(this, &PropertiesGrid::handleLiveEditorKeyDown);
+        treeView_->addChild(textField);
+        liveEditorView_ = textField;
+        liveEditorIsDelegateName_ = true;
+        delegateEditorOwner_ = owner;
+        delegateEditorName_ = delegateName;
+        focusLiveEditorView();
+        textField->controller().selectAll();
+        treeView_->style().markDirty();
+        if (delegateHint_) {
+            delegateHint_("Type a name for the " + delegateName + " handler and press Enter (Esc cancels)");
+        }
+        // Created from a posted task (the popup has just closed), not inside a mouse-down, so nothing
+        // else schedules the paint that would show it.
+        if (newui::RootView* root = treeView_->rootView()) {
+            root->repaintNow();
+        }
+    }
+
+    void PropertiesGrid::commitDelegateName(const std::string& name)
+    {
+        if (!liveEditorIsDelegateName_) {
+            return;
+        }
+        newui::Component* owner = delegateEditorOwner_;
+        const std::string delegateName = delegateEditorName_;
+        const std::size_t first = name.find_first_not_of(" \t");
+        const std::size_t last = name.find_last_not_of(" \t");
+        const std::string trimmed = first == std::string::npos ? std::string() : name.substr(first, last - first + 1);
+        destroyLiveEditor();
+        if (delegateWireHandler_ && owner != nullptr) {
+            delegateWireHandler_(owner, delegateName, trimmed);
+        }
+        if (newui::RootView* root = treeView_->rootView()) {
+            root->repaintNow();
+        }
+    }
+
     void PropertiesGrid::buildParentPickerLiveEditor(const PropertiesModel::Node& node, const newui::Rect& valueRect)
     {
         auto* view = static_cast<newui::SubView*>(node.ownerInstance);
@@ -520,6 +785,15 @@ namespace CodeToolsVsix
         }
 
         PropertiesModel::Node node = model_->nodeAt(*path);
+        if (node.kind == PropertiesModel::Kind::DelegateEntry) {
+            // The "..." button opens the handler picker; the rest of the cell is left to double-click.
+            if (std::optional<newui::Rect> valueRect = selectedValueRect()) {
+                if (PropertyItem::ellipsisButtonRectFor(*valueRect).contains(pt)) {
+                    openDelegatePicker();
+                }
+            }
+            return;
+        }
         if (node.readOnly) {
             return;
         }

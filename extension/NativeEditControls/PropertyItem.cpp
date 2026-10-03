@@ -317,7 +317,11 @@ namespace CodeToolsVsix
         }
 
         if (node.kind == PropertiesModel::Kind::DelegateEntry) {
-            paintText(ctx, valueRect, model->delegateRowText(node), rowTextColor(*this));
+            const newui::Rect buttonRect = ellipsisButtonRectFor(valueRect);
+            paintEllipsisButton(ctx, buttonRect, dimTextColor(*this));
+            const newui::Rect textRect(valueRect.left(), valueRect.top(),
+                buttonRect.left() - valueRect.left() - 4.0f, valueRect.size().height);
+            paintText(ctx, textRect, model->delegateRowText(node), rowTextColor(*this));
             return;
         }
 

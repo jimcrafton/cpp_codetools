@@ -260,6 +260,13 @@ namespace CodeToolsVsix
         // needs editor navigation, not built yet). recorded = the descriptors already on the event.
         void activateDelegate(newui::SubView& view, const std::string& delegateName,
                               const std::vector<std::string>& recorded);
+        // What the Delegates row's "+ Generate new handler..." does with the name the user typed: the
+        // same controller-create-if-needed and wiring as activateDelegate(), but with that handler name
+        // (empty = default) and even when the event already has a listener - it adds another. A name that
+        // isn't a C++ identifier is refused with a status message.
+        void wireDelegateAs(newui::SubView& view, const std::string& delegateName, const std::string& handlerName);
+        // The name wiring would use for `view`'s event by default - what the name field starts with.
+        static std::string defaultHandlerNameFor(const newui::SubView& view, const std::string& delegateName);
         // Asked, when the document has no controller yet, which class and header to create - given the
         // document and a suggestion; nullopt cancels. Unset (a bare editor, e.g. in unit tests) means
         // "take the suggestion". installDialogPrompts() sets it to the New Controller dialog.

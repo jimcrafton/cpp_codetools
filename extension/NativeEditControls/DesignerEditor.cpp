@@ -30,9 +30,11 @@
 #include <newui/keyboard_constants.h>
 
 #include <cpptools/compileflags.h>
+#include <cpptools_codegen/controllerwiring.h>
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -426,6 +428,18 @@ namespace CodeToolsVsix
                 [this](newui::Component* owner, const std::string& delegateName, const std::vector<std::string>& recorded) {
                     if (auto* view = dynamic_cast<newui::SubView*>(owner)) {
                         activateDelegate(*view, delegateName, recorded);
+                    }
+                });
+            workspace_->propertiesPane()->setDelegateHint(
+                [this](const std::string& message) { setDelegateStatusMessage(message); });
+            workspace_->propertiesPane()->setDelegateNaming(
+                [](newui::Component* owner, const std::string& delegateName) -> std::string {
+                    auto* view = dynamic_cast<newui::SubView*>(owner);
+                    return view != nullptr ? defaultHandlerNameFor(*view, delegateName) : std::string();
+                },
+                [this](newui::Component* owner, const std::string& delegateName, const std::string& handlerName) {
+                    if (auto* view = dynamic_cast<newui::SubView*>(owner)) {
+                        wireDelegateAs(*view, delegateName, handlerName);
                     }
                 });
             onBindingsVerified.add([this](DesignerEditor&) {
@@ -1751,6 +1765,26 @@ namespace CodeToolsVsix
             setDelegateStatusMessage(delegateName + " is already wired to " + PropertiesModel::handlerLabelOf(recorded.front()));
             return;
         }
+        wireDelegateAs(view, delegateName, std::string());
+    }
+
+    std::string DesignerEditor::defaultHandlerNameFor(const newui::SubView& view, const std::string& delegateName)
+    {
+        return cpptools_codegen::defaultHandlerName(view.name(), delegateName);
+    }
+
+    void DesignerEditor::wireDelegateAs(newui::SubView& view, const std::string& delegateName, const std::string& handlerName)
+    {
+        if (!handlerName.empty()) {
+            const bool identifier = !std::isdigit(static_cast<unsigned char>(handlerName[0])) &&
+                std::all_of(handlerName.begin(), handlerName.end(), [](char c) {
+                    return std::isalnum(static_cast<unsigned char>(c)) || c == '_';
+                });
+            if (!identifier) {
+                setDelegateStatusMessage("\"" + handlerName + "\" isn't a valid C++ name");
+                return;
+            }
+        }
         if (document_ == nullptr || !document_->hasFilePath() || shape_ != DocumentShape::Frame) {
             setDelegateStatusMessage("Save the document first - its controller is created next to it");
             return;
@@ -1786,7 +1820,7 @@ namespace CodeToolsVsix
         }
 
         const std::string controllerClass = controllerRef_->className;
-        wireDelegate(view, delegateName, std::string(),
+        wireDelegate(view, delegateName, handlerName,
             [this, delegateName, controllerClass](WireResult result) {
                 switch (result.status) {
                 case WireStatus::Ok:

@@ -784,3 +784,109 @@ TEST_F(PropertiesGridTest, AMenuItemPropertyEditorWritesThroughItsSetter)
     EXPECT_EQ(item.shortcutText(), "Ctrl+F");
     grid_->setSelection(nullptr);
 }
+
+// ---- Delegates row picker ("▾"): driven through its own methods, not synthetic mouse input ----
+
+namespace {
+struct WireCall { newui::Component* owner; std::string delegateName; std::string handlerName; };
+}
+
+// Selects the Delegates group's first row (expanded) as `path`. The header's index isn't fixed -
+// synthetic rows like Parent sit among the root's children - so it is found by kind.
+#define SELECT_FIRST_DELEGATE_ROW(path)                                                                  grid_->setSelection(&button_);                                                                       std::size_t headerIndex = grid_->model().childCount(std::vector<std::size_t>{});                     for (std::size_t i = 0; i < headerIndex; ++i) {                                                          if (grid_->model().nodeAt({i}).kind == PropertiesModel::Kind::DelegatesHeader) {                         headerIndex = i;                                                                                     break;                                                                                           }                                                                                                }                                                                                                    ASSERT_LT(headerIndex, grid_->model().childCount(std::vector<std::size_t>{}));                       grid_->treeView()->controller().setExpanded(std::vector<std::size_t>{headerIndex}, true);            const std::vector<std::size_t> path{headerIndex, 0};                                                 grid_->treeView()->setSelectedPath(path);
+
+TEST_F(PropertiesGridTest, TheDelegatePickerListsJustTheGenerateRowWhenNothingIsWired)
+{
+    SELECT_FIRST_DELEGATE_ROW(rowPath);
+    grid_->openDelegatePicker();
+    EXPECT_TRUE(grid_->delegatePickerOpen());
+    EXPECT_EQ(grid_->delegatePickerRows(), std::vector<std::string>{"+ Generate new handler..."});
+}
+
+TEST_F(PropertiesGridTest, ChoosingGenerateSwapsThePickerForANameFieldPrefilledWithTheDefault)
+{
+    std::string asked;
+    grid_->setDelegateNaming(
+        [&](newui::Component*, const std::string& delegateName) { asked = delegateName; return std::string("onThingHappened"); },
+        nullptr);
+    SELECT_FIRST_DELEGATE_ROW(rowPath);
+    grid_->openDelegatePicker();
+
+    grid_->chooseDelegatePickerRow(0);
+
+    EXPECT_FALSE(grid_->delegatePickerOpen());
+    EXPECT_TRUE(grid_->delegateNameEditorOpen());
+    EXPECT_FALSE(asked.empty());
+    auto* field = dynamic_cast<newui::TextField*>(grid_->treeView()->childViews().at(0));
+    ASSERT_NE(field, nullptr);
+    EXPECT_EQ(field->text(), L"onThingHappened");
+}
+
+TEST_F(PropertiesGridTest, CommittingTheNameClosesTheFieldAndWiresWithTheTrimmedName)
+{
+    std::vector<WireCall> calls;
+    grid_->setDelegateNaming(nullptr, [&](newui::Component* owner, const std::string& d, const std::string& h) {
+        calls.push_back({owner, d, h});
+    });
+    SELECT_FIRST_DELEGATE_ROW(rowPath);
+    grid_->openDelegatePicker();
+    grid_->chooseDelegatePickerRow(0);
+
+    grid_->commitDelegateName("  onMine ");
+
+    EXPECT_FALSE(grid_->delegateNameEditorOpen());
+    EXPECT_TRUE(grid_->treeView()->childViews().empty());
+    ASSERT_EQ(calls.size(), 1u);
+    EXPECT_EQ(calls[0].owner, &button_);
+    EXPECT_EQ(calls[0].handlerName, "onMine");
+    EXPECT_FALSE(calls[0].delegateName.empty());
+}
+
+TEST_F(PropertiesGridTest, CommittingWithNoNameFieldOpenDoesNothing)
+{
+    int calls = 0;
+    grid_->setDelegateNaming(nullptr, [&](newui::Component*, const std::string&, const std::string&) { ++calls; });
+    grid_->commitDelegateName("onX");
+    EXPECT_EQ(calls, 0);
+}
+
+TEST_F(PropertiesGridTest, SelectingAnotherRowDiscardsTheOpenPickerWithoutWiring)
+{
+    int calls = 0;
+    grid_->setDelegateNaming(nullptr, [&](newui::Component*, const std::string&, const std::string&) { ++calls; });
+    SELECT_FIRST_DELEGATE_ROW(rowPath);
+    grid_->openDelegatePicker();
+    grid_->chooseDelegatePickerRow(0);
+    ASSERT_TRUE(grid_->delegateNameEditorOpen());
+
+    grid_->treeView()->clearSelection();
+
+    EXPECT_FALSE(grid_->delegateNameEditorOpen());
+    EXPECT_EQ(calls, 0);
+}
+
+TEST(PropertiesGridHandlerNames, ASuggestionAlreadyWiredGetsANumberAppendedUntilFree)
+{
+    using CodeToolsVsix::PropertiesGrid;
+    EXPECT_EQ(PropertiesGrid::uniqueHandlerName("onSaveClick", {}), "onSaveClick");
+    EXPECT_EQ(PropertiesGrid::uniqueHandlerName("onSaveClick", {"onOther"}), "onSaveClick");
+    EXPECT_EQ(PropertiesGrid::uniqueHandlerName("onSaveClick", {"onSaveClick"}), "onSaveClick2");
+    EXPECT_EQ(PropertiesGrid::uniqueHandlerName("onSaveClick", {"onSaveClick", "onSaveClick2"}), "onSaveClick3");
+    EXPECT_EQ(PropertiesGrid::uniqueHandlerName("", {"x"}), "") << "no default to vary";
+}
+
+TEST_F(PropertiesGridTest, TheNameFieldStartsOnTheDefaultAndTellsTheUserWhatToDo)
+{
+    std::string hint;
+    grid_->setDelegateHint([&](const std::string& message) { hint = message; });
+    grid_->setDelegateNaming([](newui::Component*, const std::string&) { return std::string("onMine"); }, nullptr);
+    SELECT_FIRST_DELEGATE_ROW(rowPath);
+    grid_->openDelegatePicker();
+
+    grid_->chooseDelegatePickerRow(0);
+
+    auto* field = dynamic_cast<newui::TextField*>(grid_->treeView()->childViews().at(0));
+    ASSERT_NE(field, nullptr);
+    EXPECT_EQ(field->text(), L"onMine");
+    EXPECT_NE(hint.find("press Enter"), std::string::npos) << hint;
+}
