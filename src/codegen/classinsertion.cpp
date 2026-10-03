@@ -4,6 +4,8 @@
 #include <clang/ASTMatchers/ASTMatchers.h>
 #include <clang/Tooling/Tooling.h>
 
+#include "quiettool.h"
+
 using namespace clang;
 using namespace clang::ast_matchers;
 
@@ -46,7 +48,7 @@ std::optional<BraceRange> classInsertionPoint(const std::string& content, const 
     MatchFinder finder;
     finder.addMatcher(cxxRecordDecl(hasName(className)).bind("target"), &callback);
 
-    tooling::runToolOnCode(tooling::newFrontendActionFactory(&finder)->create(), content);
+    runToolOnCodeQuietly(tooling::newFrontendActionFactory(&finder)->create(), content);
 
     return result;
 }

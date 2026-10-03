@@ -3,6 +3,8 @@
 #include <string>
 #include <vector>
 
+#include "cpptools/diagnostic.h"
+
 namespace cpptools {
 
 // One `<view>_-><event>.add(<target>, &Class::method)` call found in a controller's internal_init().
@@ -50,9 +52,11 @@ struct BindingCheck {
 };
 
 // Checks each recorded binding against the controller source; result[i] is for bindings[i].
-// Same compileArgs advice as findDelegateWirings().
+// Same compileArgs advice as findDelegateWirings(). If diagnostics is given it receives the parse's
+// own diagnostics (locations name `content`, not a file on disk) - the same parse, so no extra cost.
 std::vector<BindingCheck> verifyDelegateBindings(const std::string& content, const std::string& controllerClass,
                                                  const std::vector<RecordedBinding>& bindings,
-                                                 const std::vector<std::string>& compileArgs);
+                                                 const std::vector<std::string>& compileArgs,
+                                                 std::vector<Diagnostic>* diagnostics = nullptr);
 
 } // namespace cpptools

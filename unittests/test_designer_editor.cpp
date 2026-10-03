@@ -1757,6 +1757,68 @@ TEST_F(DesignerEditorFileFixture, ADeletedHandlerIsFoundWhenTheBindingsAreRechec
     ::DeleteFileA(header.c_str());
 }
 
+TEST_F(DesignerEditorFileFixture, AnErrorInTheControllersHeaderShowsInTheStatusBarWithoutTouchingTheBindings)
+{
+    const std::string header = dir_ + "\\SaveDialogController.h";
+    { std::ofstream(header, std::ios::binary) << "#include <bojangle>\n" << kBindingHeader; }
+    writeFile(kBoundDocument);
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+    std::wstring path = filePath();
+    ASSERT_TRUE(editor.load(path.c_str(), path.size()));
+
+    ASSERT_FALSE(editor.controllerIssues().empty());
+    EXPECT_NE(editor.controllerIssues()[0].message.find("bojangle"), std::string::npos)
+        << editor.controllerIssues()[0].message;
+    EXPECT_EQ(editor.controllerIssues()[0].location.line, 1u);
+
+    newui::Label* label = editor.workspace()->issuesLabel();
+    ASSERT_NE(label, nullptr);
+    EXPECT_TRUE(label->isVisible());
+    EXPECT_EQ(label->text(), std::to_string(editor.controllerIssues().size()) +
+                                 (editor.controllerIssues().size() == 1 ? " problem" : " problems"));
+    ::DeleteFileA(header.c_str());
+}
+
+TEST_F(DesignerEditorFileFixture, TheProblemsItemSitsInsideTheStatusBarAtItsRightEndOnceItAppears)
+{
+    const std::string header = dir_ + "\\SaveDialogController.h";
+    { std::ofstream(header, std::ios::binary) << "#include <bojangle>\n" << kBindingHeader; }
+    writeFile(kBoundDocument);
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+    view.setBounds(newui::Rect(0, 0, 1000, 700));
+    std::wstring path = filePath();
+    ASSERT_TRUE(editor.load(path.c_str(), path.size()));
+    ASSERT_FALSE(editor.controllerIssues().empty());
+
+    const newui::Rect bar = editor.workspace()->statusBar()->bounds();
+    const newui::Rect item = editor.workspace()->issuesLabel()->bounds();
+    EXPECT_GT(item.width(), 0.0f);
+    EXPECT_GT(item.height(), 0.0f);
+    EXPECT_LE(item.right(), bar.width()) << "item " << item.left() << ".." << item.right() << " bar " << bar.width();
+    EXPECT_GT(item.left(), bar.width() * 0.5f) << "should be at the right end, not the left";
+    ::DeleteFileA(header.c_str());
+}
+
+TEST_F(DesignerEditorFileFixture, FixingTheHeaderClearsTheStatusBarItem)
+{
+    const std::string header = dir_ + "\\SaveDialogController.h";
+    { std::ofstream(header, std::ios::binary) << "#include <bojangle>\n" << kBindingHeader; }
+    writeFile(kBoundDocument);
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+    std::wstring path = filePath();
+    ASSERT_TRUE(editor.load(path.c_str(), path.size()));
+    ASSERT_FALSE(editor.controllerIssues().empty());
+
+    { std::ofstream(header, std::ios::binary | std::ios::trunc) << kBindingHeader; }
+    editor.verifyControllerBindings();
+    EXPECT_TRUE(editor.controllerIssues().empty());
+    EXPECT_FALSE(editor.workspace()->issuesLabel()->isVisible());
+    ::DeleteFileA(header.c_str());
+}
+
 TEST_F(DesignerEditorFileFixture, AControllerWhoseHeaderIsMissingCannotBeVerified)
 {
     writeFile(kBoundDocument);   // no SaveDialogController.h beside it

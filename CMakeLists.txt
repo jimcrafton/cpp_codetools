@@ -404,6 +404,9 @@ add_library(NativeEditControls SHARED
     extension/NativeEditControls/PropertyItem.cpp
     extension/NativeEditControls/PropertiesGrid.h
     extension/NativeEditControls/PropertiesGrid.cpp
+    extension/NativeEditControls/PickerRow.h
+    extension/NativeEditControls/IssuesPopup.h
+    extension/NativeEditControls/IssuesPopup.cpp
     extension/NativeEditControls/PropertiesPanel.h
     extension/NativeEditControls/PropertiesPanel.cpp
     extension/NativeEditControls/DocumentOutline.h
@@ -490,6 +493,7 @@ add_executable(testharness
     extension/NativeEditControls/PropertiesModel.cpp
     extension/NativeEditControls/PropertyItem.cpp
     extension/NativeEditControls/PropertiesGrid.cpp
+    extension/NativeEditControls/IssuesPopup.cpp
     extension/NativeEditControls/PropertiesPanel.cpp
     extension/NativeEditControls/DocumentOutline.cpp
     extension/NativeEditControls/SelectionOverlay.cpp

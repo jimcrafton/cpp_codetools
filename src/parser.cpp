@@ -1,5 +1,6 @@
 #include "cpptools/parser.h"
 #include "cpptools/log.h"
+#include "clangutil.h"
 
 #include <clang-c/Index.h>
 
@@ -19,27 +20,9 @@ namespace {
 
 using UniqueTranslationUnit = std::unique_ptr<CXTranslationUnitImpl, TranslationUnitDeleter>;
 
-std::string toStdString(CXString clangString) {
-    const char* text = clang_getCString(clangString);
-    std::string result = text ? text : "";
-    clang_disposeString(clangString);
-    return result;
-}
-
-SourceLocation toSourceLocation(CXSourceLocation location) {
-    CXFile file = nullptr;
-    unsigned line = 0;
-    unsigned column = 0;
-    unsigned offset = 0;
-    clang_getSpellingLocation(location, &file, &line, &column, &offset);
-
-    SourceLocation result;
-    result.file = file ? toStdString(clang_getFileName(file)) : std::string();
-    result.line = line;
-    result.column = column;
-    result.offset = offset;
-    return result;
-}
+using detail::collectDiagnostics;
+using detail::toSourceLocation;
+using detail::toStdString;
 
 // Kinds worth surfacing in a symbol outline - a filter over libclang's own cursor kinds, not a
 // reclassification of them (mirrors CppNativeEditorVsix's CppParser::IsOutlineWorthy).
@@ -147,16 +130,6 @@ CXChildVisitResult visitForOccurrences(CXCursor cursor, CXCursor /*parent*/, CXC
     return CXChildVisit_Recurse;
 }
 
-Severity toSeverity(CXDiagnosticSeverity severity) {
-    switch (severity) {
-        case CXDiagnostic_Note: return Severity::Note;
-        case CXDiagnostic_Warning: return Severity::Warning;
-        case CXDiagnostic_Error: return Severity::Error;
-        case CXDiagnostic_Fatal: return Severity::Fatal;
-        default: return Severity::Note;
-    }
-}
-
 struct VisitContext {
     std::vector<Symbol>* symbols;
 };
@@ -193,31 +166,6 @@ CXChildVisitResult visitCursor(CXCursor cursor, CXCursor /*parent*/, CXClientDat
 
     context->symbols->push_back(std::move(symbol));
     return CXChildVisit_Continue;
-}
-
-std::vector<Diagnostic> collectDiagnostics(CXTranslationUnit tu) {
-    std::vector<Diagnostic> diagnostics;
-    unsigned count = clang_getNumDiagnostics(tu);
-    diagnostics.reserve(count);
-
-    for (unsigned i = 0; i < count; ++i) {
-        CXDiagnostic diagnostic = clang_getDiagnostic(tu, i);
-
-        Diagnostic entry;
-        entry.severity = toSeverity(clang_getDiagnosticSeverity(diagnostic));
-        entry.message = toStdString(clang_getDiagnosticSpelling(diagnostic));
-        entry.location = toSourceLocation(clang_getDiagnosticLocation(diagnostic));
-        entry.category = toStdString(clang_getDiagnosticCategoryText(diagnostic));
-        entry.fromMainFile = clang_Location_isFromMainFile(clang_getDiagnosticLocation(diagnostic)) != 0;
-        if (clang_getDiagnosticNumRanges(diagnostic) > 0) {
-            entry.rangeEndOffset = toSourceLocation(clang_getRangeEnd(clang_getDiagnosticRange(diagnostic, 0))).offset;
-        }
-        diagnostics.push_back(std::move(entry));
-
-        clang_disposeDiagnostic(diagnostic);
-    }
-
-    return diagnostics;
 }
 
 std::vector<const char*> toCStrings(const std::vector<std::string>& args) {

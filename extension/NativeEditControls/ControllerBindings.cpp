@@ -67,7 +67,8 @@ namespace CodeToolsVsix
     std::vector<VerifiedBinding> verifyBindings(const std::vector<DesignerBinding>& bindings,
                                                 const std::string& controllerClass,
                                                 const std::string& headerText,
-                                                const std::vector<std::string>& compileArgs)
+                                                const std::vector<std::string>& compileArgs,
+                                                std::vector<cpptools::Diagnostic>* diagnostics)
     {
         std::vector<cpptools::RecordedBinding> recorded;
         recorded.reserve(bindings.size());
@@ -76,7 +77,7 @@ namespace CodeToolsVsix
             recorded.push_back(binding.binding);
         }
         const std::vector<cpptools::BindingCheck> checks =
-            cpptools::verifyDelegateBindings(headerText, controllerClass, recorded, compileArgs);
+            cpptools::verifyDelegateBindings(headerText, controllerClass, recorded, compileArgs, diagnostics);
 
         std::vector<VerifiedBinding> results;
         results.reserve(bindings.size());

@@ -2,6 +2,7 @@
 #include "ComponentEditor.h"
 #include "DesignerClipboard.h"
 #include "NewControllerDialog.h"
+#include "IssuesPopup.h"
 #include "Logging.h"
 #include "TextEncoding.h"
 
@@ -446,6 +447,11 @@ namespace CodeToolsVsix
                 refreshDelegateRows();
                 return newui::SyncReturn::Handled;
             });
+            workspace_->issuesLabel()->onMouseDown.add(
+                [this](newui::View&, const newui::Point&, std::uint32_t, std::uint32_t) {
+                    showControllerIssues();
+                    return newui::SyncReturn::Handled;
+                });
         }
 
         workspace_->modeControl()->onSelectionChanged.add(this, &DesignerEditor::handleModeChanged);
@@ -1855,13 +1861,85 @@ namespace CodeToolsVsix
         verifyControllerBindingsFor(document_ != nullptr && document_->hasFilePath() ? document_->filePath() : std::string());
     }
 
-    void DesignerEditor::finishBindingVerification(std::vector<VerifiedBinding> results, unsigned generation)
+    void DesignerEditor::finishBindingVerification(std::vector<VerifiedBinding> results,
+                                                   std::vector<cpptools::Diagnostic> diagnostics, unsigned generation)
     {
         if (verifyState_ == nullptr || generation != verifyState_->generation) {
             return;   // superseded by a newer check
         }
         bindingChecks_ = std::move(results);
+
+        // What's worth showing: warnings and errors written in the header itself - not notes, and not
+        // whatever the headers it includes complain about.
+        controllerIssues_.clear();
+        for (cpptools::Diagnostic& diagnostic : diagnostics) {
+            if (diagnostic.fromMainFile && diagnostic.severity != cpptools::Severity::Note) {
+                controllerIssues_.push_back(std::move(diagnostic));
+            }
+        }
+        refreshIssuesIndicator();
         onBindingsVerified(*this);
+    }
+
+    std::string DesignerEditor::describeIssue(const cpptools::Diagnostic& issue)
+    {
+        const char* severity = issue.severity == cpptools::Severity::Warning ? "warning" : "error";
+        return std::string(severity) + " " + std::to_string(issue.location.line) + ":" +
+               std::to_string(issue.location.column) + "  " + issue.message;
+    }
+
+    void DesignerEditor::refreshIssuesIndicator()
+    {
+        if (workspace_ == nullptr || workspace_->issuesLabel() == nullptr) {
+            return;
+        }
+        newui::Label* label = workspace_->issuesLabel();
+        const std::size_t count = controllerIssues_.size();
+        label->setVisible(count > 0);
+        if (count > 0) {
+            label->setText(std::to_string(count) + (count == 1 ? " problem" : " problems"));
+        }
+        workspace_->statusBar()->style().markDirty();
+        getRootView()->markDirty();
+    }
+
+    void DesignerEditor::showControllerIssues()
+    {
+        newui::Label* label = workspace_ != nullptr ? workspace_->issuesLabel() : nullptr;
+        if (label == nullptr || controllerIssues_.empty() || !controllerRef_) {
+            return;
+        }
+        std::vector<std::string> rows;
+        rows.reserve(controllerIssues_.size());
+        for (const cpptools::Diagnostic& issue : controllerIssues_) {
+            rows.push_back(describeIssue(issue));
+        }
+        const std::string header = controllerRef_->header;
+        const newui::Rect anchor = label->localToScreen(label->getClientBounds());
+
+        // Posted, never inline: this runs inside the label's mouse-down dispatch, and RootView's
+        // mouse-down tail would steal focus straight back from a popup created now (see
+        // PropertiesGrid::openDelegatePicker()).
+        std::weak_ptr<bool> alive = aliveFlag_;
+        auto show = [this, alive, label, anchor, rows = std::move(rows), header]() {
+            if (alive.expired()) {
+                return;
+            }
+            IssuesPopup::show(*label, anchor, rows, [this, alive, header](std::size_t index) {
+                if (alive.expired() || index >= controllerIssues_.size()) {
+                    return;
+                }
+                // No host call yet to open a file at a line, so say where it is.
+                const cpptools::Diagnostic& issue = controllerIssues_[index];
+                setDelegateStatusMessage(header + ":" + std::to_string(issue.location.line) + ":" +
+                                         std::to_string(issue.location.column) + "  " + issue.message);
+            });
+        };
+        if (newui::RunLoop::current()) {
+            newui::RunLoop::current().post(std::move(show));
+        } else {
+            show();
+        }
     }
 
     void DesignerEditor::verifyControllerBindingsFor(const std::string& documentPath)
@@ -1876,7 +1954,7 @@ namespace CodeToolsVsix
 
         std::vector<DesignerBinding> bindings = collectRecordedBindings(*workspace_->rootViewProxy());
         if (!controllerRef_ || bindings.empty() || documentPath.empty()) {
-            finishBindingVerification({}, generation);   // nothing to check: clears the last result
+            finishBindingVerification({}, {}, generation);   // nothing to check: clears the last result
             return;
         }
 
@@ -1900,23 +1978,33 @@ namespace CodeToolsVsix
                     finishBindingVerification(
                         unverifiableBindings(bindings, "the controller's header can't be read (status " +
                                                       std::to_string(static_cast<int>(status)) + "): " + headerPath.u8string()),
-                        generation);
+                        {}, generation);
                     return;
                 }
 
+                struct Verified
+                {
+                    std::vector<VerifiedBinding> results;
+                    std::vector<cpptools::Diagnostic> diagnostics;
+                };
                 auto verify = [bindings, className, headerPath, text = wideToUtf8(snapshot.text)]() {
-                    return verifyBindings(bindings, className, text, cpptools::compileFlagsFor(headerPath.u8string()).args);
+                    Verified verified;
+                    verified.results = verifyBindings(bindings, className, text,
+                                                      cpptools::compileFlagsFor(headerPath.u8string()).args,
+                                                      &verified.diagnostics);
+                    return verified;
                 };
                 if (runLoop == nullptr) {
-                    finishBindingVerification(verify(), generation);
+                    Verified verified = verify();
+                    finishBindingVerification(std::move(verified.results), std::move(verified.diagnostics), generation);
                     return;
                 }
                 // libclang on real headers takes seconds: off this thread, result back onto it.
                 std::thread([this, state, generation, runLoop, verify]() {
-                    std::vector<VerifiedBinding> results = verify();
-                    runLoop->post([this, state, generation, results = std::move(results)]() mutable {
+                    Verified verified = verify();
+                    runLoop->post([this, state, generation, verified = std::move(verified)]() mutable {
                         if (state->alive && generation == state->generation) {
-                            finishBindingVerification(std::move(results), generation);
+                            finishBindingVerification(std::move(verified.results), std::move(verified.diagnostics), generation);
                         }
                     });
                 }).detach();

@@ -33,11 +33,13 @@ namespace CodeToolsVsix
 
     // Checks each against the controller's source (headerText, UTF-8) with libclang - a second or two
     // on real headers, so not on the UI thread. compileArgs: what cpptools::compileFlagsFor() gives the
-    // header. result[i] is for bindings[i].
+    // header. result[i] is for bindings[i]. diagnostics, if given, receives that same parse's own
+    // diagnostics (locations name headerText, not a file).
     std::vector<VerifiedBinding> verifyBindings(const std::vector<DesignerBinding>& bindings,
                                                 const std::string& controllerClass,
                                                 const std::string& headerText,
-                                                const std::vector<std::string>& compileArgs);
+                                                const std::vector<std::string>& compileArgs,
+                                                std::vector<cpptools::Diagnostic>* diagnostics = nullptr);
 
     // The same result when the header couldn't be read at all.
     std::vector<VerifiedBinding> unverifiableBindings(const std::vector<DesignerBinding>& bindings,

@@ -147,6 +147,7 @@ add_executable(nativeeditcontrols_tests
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/PropertiesModel.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/PropertyItem.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/PropertiesGrid.cpp"
+    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/IssuesPopup.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/PropertiesPanel.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/DocumentOutline.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/SelectionOverlay.cpp"

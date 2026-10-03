@@ -234,6 +234,11 @@ namespace CodeToolsVsix
         // Fired, on the UI thread, each time bindingChecks() is replaced.
         newui::Delegate<DesignerEditor> onBindingsVerified;
 
+        // The warnings and errors that same check's parse found in the controller's own header (not in
+        // what it includes), with the project's real compile flags - what the status bar's
+        // "N problems" item counts. Locations are in the header's text.
+        const std::vector<cpptools::Diagnostic>& controllerIssues() const { return controllerIssues_; }
+
         // Re-checks the recorded bindings against the controller's header (next to the document; its
         // live text if that is open in an editor). With a run loop (a real host) the libclang parse runs
         // on a worker thread and the result arrives later; with none (unit tests) it runs inline. A
@@ -637,7 +642,12 @@ namespace CodeToolsVsix
         struct VerifyState;                            // shared with the worker thread
         std::shared_ptr<VerifyState> verifyState_;
         void verifyControllerBindingsFor(const std::string& documentPath);
-        void finishBindingVerification(std::vector<VerifiedBinding> results, unsigned generation);
+        void finishBindingVerification(std::vector<VerifiedBinding> results,
+                                       std::vector<cpptools::Diagnostic> diagnostics, unsigned generation);
+        std::vector<cpptools::Diagnostic> controllerIssues_;
+        static std::string describeIssue(const cpptools::Diagnostic& issue);
+        void refreshIssuesIndicator();   // the status bar's "N problems" item
+        void showControllerIssues();     // its click: a list of them
 
         // text with controllerRef_ set as its top-level `controller` key (unchanged if it is already
         // that, there is none, or this isn't a Frame document).

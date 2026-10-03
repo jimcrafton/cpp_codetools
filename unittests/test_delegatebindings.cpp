@@ -134,6 +134,28 @@ TEST(VerifyDelegateBindings, AGeneratedWiringIsOk) {
     EXPECT_EQ(check.status, BindingStatus::Ok) << check.detail;
 }
 
+TEST(VerifyDelegateBindings, WithRealIncludePathsTheHeaderItselfHasNoDiagnostics) {
+    std::vector<Diagnostic> diagnostics;
+    verifyDelegateBindings(generatedController(), "SaveDialogController", {saveClick()}, newuiCompileArgs(), &diagnostics);
+    // newui's own headers warn about themselves (fromMainFile false) - not the controller's problem.
+    for (const Diagnostic& d : diagnostics) {
+        EXPECT_FALSE(d.fromMainFile) << d.location.line << ":" << d.location.column << " " << d.message;
+    }
+}
+
+TEST(VerifyDelegateBindings, AnIncludeThatCantBeFoundIsReportedAtItsLine) {
+    // No include paths: <newui/rootcontroller.h> can't be found - a real problem for this parse.
+    std::vector<Diagnostic> diagnostics;
+    verifyDelegateBindings(generatedController(), "SaveDialogController", {saveClick()}, {"-std=c++17", "-xc++"}, &diagnostics);
+    const auto missing = std::find_if(diagnostics.begin(), diagnostics.end(), [](const Diagnostic& d) {
+        return d.message.find("rootcontroller.h") != std::string::npos;
+    });
+    ASSERT_NE(missing, diagnostics.end());
+    EXPECT_TRUE(missing->fromMainFile);
+    EXPECT_GE(missing->severity, Severity::Error);
+    EXPECT_GT(missing->location.line, 0u);
+}
+
 TEST(VerifyDelegateBindings, AMissingControllerClassIsReportedForEveryBinding) {
     const auto checks = verifyDelegateBindings(generatedController(), "Nope", {saveClick(), saveClick()}, newuiCompileArgs());
     ASSERT_EQ(checks.size(), 2u);

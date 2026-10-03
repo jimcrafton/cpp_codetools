@@ -43,6 +43,7 @@ namespace CodeToolsVsix
     public:
         static constexpr float kTopBarHeight = 32.0f;
         static constexpr float kStatusBarHeight = 22.0f;
+        static constexpr float kIssuesLabelWidth = 140.0f;
 
         // Fixed-dock sizes - matching bluesky/designer-surface/Main.dc.html's
         // own real CSS proportions (".toolbox { width: 220px }",
@@ -118,6 +119,10 @@ namespace CodeToolsVsix
         // Main.dc.html's own three-section status bar (bounds/filename)
         // isn't built yet - a separate, deferred piece.
         newui::Label* undoRedoStatusLabel() const { return undoRedoStatusLabel_; }
+
+        // Right-aligned in statusBar_: "N problems" for the controller's header, hidden when there
+        // are none. DesignerEditor owns its text and what a click on it does.
+        newui::Label* issuesLabel() const { return issuesLabel_; }
         newui::FrameProxy* frameProxy() const { return frameProxy_; }
 
         // Sets frameProxy_'s total size, mock title bar included (so rootViewProxy()'s client
@@ -207,6 +212,7 @@ namespace CodeToolsVsix
         newui::SegmentedControl* modeControl_ = nullptr;
         newui::Label* zoomLabel_ = nullptr;
         newui::Label* undoRedoStatusLabel_ = nullptr;
+        newui::Label* issuesLabel_ = nullptr;
         newui::UndoStack* undoStack_ = nullptr;
         newui::SubView* designerViews_ = nullptr;
         SourceView* sourceView_ = nullptr;

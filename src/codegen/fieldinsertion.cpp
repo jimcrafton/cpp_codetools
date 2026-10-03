@@ -5,6 +5,7 @@
 #include <clang/Tooling/Tooling.h>
 
 #include "cpptools_codegen/classinsertion.h"
+#include "quiettool.h"
 
 using namespace clang;
 using namespace clang::ast_matchers;
@@ -31,7 +32,7 @@ bool classHasMember(const std::string& content, const std::string& className, co
     MatchFinder finder;
     finder.addMatcher(namedDecl(hasName(memberName), hasParent(cxxRecordDecl(hasName(className)))).bind("member"),
                       &callback);
-    tooling::runToolOnCode(tooling::newFrontendActionFactory(&finder)->create(), content);
+    runToolOnCodeQuietly(tooling::newFrontendActionFactory(&finder)->create(), content);
     return found;
 }
 

@@ -83,7 +83,7 @@ namespace CodeToolsVsix
     public:
         static constexpr float kDefaultKeyColumnFraction = PropertiesTreeController::kDefaultKeyColumnFraction;
         static constexpr float kRowPadding = 8.0f;
-        static constexpr float kEllipsisButtonSize = 18.0f;
+        static constexpr float kEllipsisButtonSize = 16.2f;   // 90% of the original 18
 
         void paint(BLContext& ctx, const newui::Rect& rect, const std::vector<std::size_t>& path,
             newui::TreeController& controller) override;

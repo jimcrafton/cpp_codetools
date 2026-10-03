@@ -2,6 +2,7 @@
 #include "LayoutEditingPolicy.h"
 #include "CalloutPlacement.h"
 #include "PaintUtils.h"
+#include "PickerRow.h"
 #include "TextEncoding.h"
 
 #include <newui/application.h>
@@ -482,65 +483,6 @@ namespace CodeToolsVsix
     {
         // Prefix of a wired handler's row: a bullet (the UI font has no check mark).
         const std::string kPickerRowMarker = "\xE2\x80\xA2 ";
-        constexpr float kPickerRowHeight = 26.0f;
-        constexpr float kPickerPadding = 8.0f;
-        constexpr float kPickerTopReserve = 20.0f;   // clears CalloutTool's own top tail + margin
-
-        // One line in the delegate picker popup. A wired handler's row is informational (no action);
-        // the Generate row calls onChosen.
-        class PickerRow : public newui::SubView
-        {
-        public:
-            PickerRow(const std::string& text, std::function<void()> onChosen)
-                : onChosen_(std::move(onChosen))
-            {
-                setVisible(true);
-                onMouseDown.add(this, &PickerRow::handleMouseDown);
-                auto* label = new newui::Label();
-                label->setText(text);
-                label_ = label;
-                // A click lands on the deepest view under the cursor and doesn't bubble, so the label
-                // (which covers most of the row) has to run the row's action itself.
-                label->onMouseDown.add(this, &PickerRow::handleMouseDown);
-                addChild(label);
-            }
-
-            void setBounds(const newui::Rect& bounds) override
-            {
-                newui::SubView::setBounds(bounds);
-                const newui::Rect local = getClientBounds();
-                label_->setBounds(newui::Rect(8.0f, 0.0f, local.width() - 16.0f, local.height()));
-            }
-
-            void paint(BLContext& ctx) override
-            {
-                const newui::Rect bounds = getClientBounds();
-                if (bounds.width() <= 0.0f || bounds.height() <= 0.0f) {
-                    return;
-                }
-                ctx.save();
-                ctx.set_fill_style(newui::UIColorManager::colorFor(newui::UIColorRole::ControlBackground).toBLRgba32());
-                ctx.fill_round_rect(BLRect(bounds), 4.0);
-                if (onChosen_) {
-                    ctx.set_stroke_style(newui::UIColorManager::colorFor(newui::UIColorRole::ControlBorder).toBLRgba32());
-                    ctx.set_stroke_width(1.0);
-                    ctx.stroke_round_rect(BLRect(bounds), 4.0);
-                }
-                ctx.restore();
-            }
-
-        private:
-            newui::SyncReturn handleMouseDown(newui::View&, const newui::Point&, std::uint32_t, std::uint32_t)
-            {
-                if (onChosen_) {
-                    onChosen_();
-                }
-                return newui::SyncReturn::Handled;
-            }
-
-            std::function<void()> onChosen_;
-            newui::Label* label_ = nullptr;
-        };
     }
 
     void PropertiesGrid::openDelegatePicker()
@@ -593,8 +535,8 @@ namespace CodeToolsVsix
         }
 
         const float width = 232.0f;
-        const float height = kPickerTopReserve + kPickerPadding * 2.0f +
-            kPickerRowHeight * static_cast<float>(delegatePickerRows_.size());
+        const float height = PickerRow::kTopReserve + PickerRow::kPadding * 2.0f +
+            PickerRow::kRowHeight * static_cast<float>(delegatePickerRows_.size());
         const newui::Size popupSize(width, height);
         const CalloutPlacement placement = placeCallout(anchorScreenRect, popupSize, designerWindowScreenRect(treeView_));
 
@@ -633,8 +575,8 @@ namespace CodeToolsVsix
                 };
             }
             auto* row = new PickerRow(delegatePickerRows_[i], std::move(onChosen));
-            row->setBounds(newui::Rect(kPickerPadding, kPickerTopReserve + kPickerPadding + kPickerRowHeight * static_cast<float>(i),
-                                       actual.width - kPickerPadding * 2.0f, kPickerRowHeight - 2.0f));
+            row->setBounds(newui::Rect(PickerRow::kPadding, PickerRow::kTopReserve + PickerRow::kPadding + PickerRow::kRowHeight * static_cast<float>(i),
+                                       actual.width - PickerRow::kPadding * 2.0f, PickerRow::kRowHeight - 2.0f));
             popup->addChild(row);
         }
 

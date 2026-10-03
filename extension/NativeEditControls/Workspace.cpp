@@ -452,7 +452,25 @@ namespace CodeToolsVsix
             });
         undoRedoStatusLabel_ = undoRedoStatusLabelBuilder.build();
 
-        statusBuilder.layout<newui::AnchorLayout>().child(undoRedoStatusLabel_);
+        // Right end: "N problems" in the controller's header, clickable (DesignerEditor lists them).
+        // Hidden until there are some.
+        newui::ViewBuilder<newui::Label> issuesLabelBuilder;
+        issuesLabelBuilder.name("workspaceIssuesLabel")
+            .layoutParams<newui::AnchorLayoutParams>([](newui::AnchorLayoutParams& p) {
+                p.setAnchors(newui::Anchor::Right | newui::Anchor::CenterY);
+                p.setRightMargin(8.0f);
+                p.setWidth(Workspace::kIssuesLabelWidth);
+                p.setHeight(Workspace::kStatusBarHeight);
+            })
+            .configure([](newui::Label& label) {
+                label.setTextColor(newui::UIColorManager::colorFor(newui::UIColorRole::HighlightText).toBLRgba32());
+                label.setTextAlignment(newui::TextAlignment::Right);
+                label.setCursor(newui::Cursor(newui::CursorKind::Hand));
+                label.setVisible(false);
+            });
+        issuesLabel_ = issuesLabelBuilder.build();
+
+        statusBuilder.layout<newui::AnchorLayout>().child(undoRedoStatusLabel_).child(issuesLabel_);
         statusBar_ = statusBuilder.build();
 
         self.child(topBar_).child(middle).child(statusBar_);

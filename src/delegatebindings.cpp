@@ -2,6 +2,8 @@
 
 #include <clang-c/Index.h>
 
+#include "clangutil.h"
+
 #include <algorithm>
 #include <functional>
 #include <memory>
@@ -395,6 +397,7 @@ struct Analysis {
     bool controllerFound = false;
     std::vector<DelegateWiringCall> wirings;
     std::vector<BindingCheck> checks;
+    std::vector<Diagnostic> diagnostics;   // the parse's own, in the order clang reported them
 };
 
 Analysis analyze(const std::string& content, const std::string& controllerClass,
@@ -420,6 +423,9 @@ Analysis analyze(const std::string& content, const std::string& controllerClass,
                                                           static_cast<int>(args.size()), &unsaved, 1,
                                                           CXTranslationUnit_KeepGoing, &raw);
     UniqueTu tu(error == CXError_Success ? raw : nullptr);
+    if (tu) {
+        result.diagnostics = detail::collectDiagnostics(tu.get());
+    }
 
     CXCursor controller;
     if (tu && findClass(tu.get(), controllerClass, controller)) {
@@ -445,8 +451,13 @@ std::vector<DelegateWiringCall> findDelegateWirings(const std::string& content, 
 
 std::vector<BindingCheck> verifyDelegateBindings(const std::string& content, const std::string& controllerClass,
                                                  const std::vector<RecordedBinding>& bindings,
-                                                 const std::vector<std::string>& compileArgs) {
-    return analyze(content, controllerClass, bindings, compileArgs).checks;
+                                                 const std::vector<std::string>& compileArgs,
+                                                 std::vector<Diagnostic>* diagnostics) {
+    Analysis analysis = analyze(content, controllerClass, bindings, compileArgs);
+    if (diagnostics != nullptr) {
+        *diagnostics = std::move(analysis.diagnostics);
+    }
+    return std::move(analysis.checks);
 }
 
 } // namespace cpptools

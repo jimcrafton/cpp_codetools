@@ -5,6 +5,8 @@
 #include <clang/ASTMatchers/ASTMatchers.h>
 #include <clang/Tooling/Tooling.h>
 
+#include "quiettool.h"
+
 using namespace clang;
 using namespace clang::ast_matchers;
 
@@ -53,7 +55,7 @@ std::optional<std::size_t> functionBodyInsertionPoint(const std::string& content
         cxxMethodDecl(hasName(methodName), ofClass(hasName(className))).bind("target"),
         &callback);
 
-    tooling::runToolOnCode(tooling::newFrontendActionFactory(&finder)->create(), content);
+    runToolOnCodeQuietly(tooling::newFrontendActionFactory(&finder)->create(), content);
 
     return result;
 }
