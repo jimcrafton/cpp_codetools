@@ -167,9 +167,14 @@ namespace CodeToolsVsix
                 return range.start == from && range.length == (length != 0 ? length : 1);
             });
             if (same == ranges.end()) {
+                const std::size_t before = ranges.size();
                 addProblemRange(ranges, wide.size(), from, length, style);
+                if (ranges.size() > before) {
+                    ranges.back().annotation = chosen[i]->message;   // shown after the line, like an error lens
+                }
             } else if (std::string(style) == kProblemStyleName) {
                 same->style = style;   // an error and a warning on one spot: the error shows
+                same->annotation = chosen[i]->message;   // ... and so does its message
             }
         }
         return ranges;

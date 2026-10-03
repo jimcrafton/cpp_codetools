@@ -2,6 +2,7 @@
 #include <Windows.h>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <unordered_map>
@@ -238,6 +239,16 @@ namespace CodeToolsVsix
         // what it includes), with the project's real compile flags - what the status bar's
         // "N problems" item counts. Locations are in the header's text.
         const std::vector<cpptools::Diagnostic>& controllerIssues() const { return controllerIssues_; }
+
+        // How a problem's location gets shown: the host opens the file in an editor at that line
+        // (testharness: a new tab; VS: its own editor) and returns true, or false if it couldn't. With
+        // none set, openIssue() just reports where the problem is in the status bar.
+        using OpenLocationHandler = std::function<bool(const std::wstring& path, std::size_t line, std::size_t column)>;
+        void setOpenLocationHandler(OpenLocationHandler handler) { openLocationHandler_ = std::move(handler); }
+
+        // Opens the Nth of controllerIssues() through that handler - what the problems popup's Open in
+        // editor button does.
+        void openIssue(std::size_t index);
 
         // Re-checks the recorded bindings against the controller's header (next to the document; its
         // live text if that is open in an editor). With a run loop (a real host) the libclang parse runs
@@ -643,9 +654,11 @@ namespace CodeToolsVsix
         std::shared_ptr<VerifyState> verifyState_;
         void verifyControllerBindingsFor(const std::string& documentPath);
         void finishBindingVerification(std::vector<VerifiedBinding> results,
-                                       std::vector<cpptools::Diagnostic> diagnostics, unsigned generation);
+                                       std::vector<cpptools::Diagnostic> diagnostics, std::string headerText,
+                                       unsigned generation);
         std::vector<cpptools::Diagnostic> controllerIssues_;
-        static std::string describeIssue(const cpptools::Diagnostic& issue);
+        std::string controllerHeaderText_;   // what controllerIssues_' positions refer to
+        OpenLocationHandler openLocationHandler_;
         void refreshIssuesIndicator();   // the status bar's "N problems" item
         void showControllerIssues();     // its click: a list of them
 

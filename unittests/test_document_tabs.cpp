@@ -19,8 +19,16 @@ public:
 
     bool load(const wchar_t*, std::size_t) override { return loads_; }
     bool save(const wchar_t*, std::size_t) override { return true; }
-    bool execCommand(EditorCommand, std::uint32_t, const EditorCommandArgs*) override { return false; }
+    bool execCommand(EditorCommand command, std::uint32_t, const EditorCommandArgs* args) override {
+        if (command == EditorCommand::GotoLine && args != nullptr && args->text1 != nullptr) {
+            wentTo = std::wstring(args->text1, args->text1Length);
+            return true;
+        }
+        return false;
+    }
     void edit() { markDirty(); }
+
+    std::wstring wentTo;   // the "line:column" of the last GotoLine
 
 private:
     int& alive_;
@@ -91,6 +99,43 @@ TEST(DocumentTabs, OpeningTheSameFileAgainSelectsItsTabWhateverTheCaseOrSpelling
     EXPECT_EQ(h.tabs->count(), 2u);
     EXPECT_EQ(h.tabs->activeEditor(), first);
     EXPECT_EQ(h.alive, 2) << "no second editor was made";
+}
+
+TEST(DocumentTabs, OpeningAtAPositionOpensTheTabAndMovesTheCaretThere) {
+    Harness h;
+    auto* editor = static_cast<FakeEditor*>(h.tabs->openAt(L"C:\\proj\\S1Controller.h", DocumentType::CppSource, 6, 10));
+
+    ASSERT_NE(editor, nullptr);
+    EXPECT_EQ(editor->wentTo, L"6:10");
+    EXPECT_EQ(h.tabs->count(), 1u);
+    EXPECT_EQ(h.tabs->activeEditor(), editor);
+}
+
+TEST(DocumentTabs, OpeningAtAPositionInAnOpenFileJustSelectsItAndMoves) {
+    Harness h;
+    auto* first = static_cast<FakeEditor*>(h.tabs->open(L"C:\\proj\\a.h", DocumentType::CppSource));
+    h.tabs->open(L"C:\\proj\\b.h", DocumentType::CppSource);
+    ASSERT_NE(h.tabs->activeEditor(), first);
+
+    auto* again = static_cast<FakeEditor*>(h.tabs->openAt(L"C:\\proj\\a.h", DocumentType::CppSource, 47, 23));
+    EXPECT_EQ(again, first);
+    EXPECT_EQ(first->wentTo, L"47:23");
+    EXPECT_EQ(h.tabs->count(), 2u);
+    EXPECT_EQ(h.tabs->activeEditor(), first);
+}
+
+TEST(DocumentTabs, AColumnOfZeroMeansTheStartOfTheLine) {
+    Harness h;
+    auto* editor = static_cast<FakeEditor*>(h.tabs->openAt(L"C:\\proj\\a.h", DocumentType::CppSource, 3, 0));
+    ASSERT_NE(editor, nullptr);
+    EXPECT_EQ(editor->wentTo, L"3:1");
+}
+
+TEST(DocumentTabs, OpeningAtAPositionInAFileThatCantBeLoadedGivesNothing) {
+    Harness h;
+    h.loads = false;
+    EXPECT_EQ(h.tabs->openAt(L"C:\\proj\\bad.h", DocumentType::CppSource, 1, 1), nullptr);
+    EXPECT_EQ(h.tabs->count(), 0u);
 }
 
 TEST(DocumentTabs, AFileThatCantBeLoadedLeavesNoTabAndNoEditor) {

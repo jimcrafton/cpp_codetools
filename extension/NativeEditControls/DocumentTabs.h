@@ -38,6 +38,12 @@ namespace CodeToolsVsix
         // created or the file couldn't be loaded (no tab is left behind then).
         NativeEditor* open(const std::wstring& path, DocumentType type);
 
+        // open(), then puts the caret at line:column (1-based) - what a jump to a problem does. A
+        // file that is already open is just selected and moved. The editor is still returned if it
+        // couldn't place the caret (a position past the end of the text, an editor with no such
+        // command); null only when the file couldn't be opened at all.
+        NativeEditor* openAt(const std::wstring& path, DocumentType type, std::size_t line, std::size_t column);
+
         std::size_t count() const { return tabs_.size(); }
         // The selected tab's editor/type/path - null / nullopt / empty when no tab is open.
         NativeEditor* activeEditor() const;

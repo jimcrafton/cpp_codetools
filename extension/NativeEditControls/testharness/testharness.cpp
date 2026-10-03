@@ -152,7 +152,17 @@ int main()
     auto* directoryTree = new DirectoryTree();
     directoryTree->setName("testharnessDirectoryTree");
 
-    tabs = new DocumentTabs(&makeEditor);
+    tabs = new DocumentTabs([&tabs](DocumentType type, HWND parent) {
+        std::unique_ptr<NativeEditor> editor = makeEditor(type, parent);
+        // A problem in the Designer's controller header opens that header in a tab of its own, at the line.
+        if (auto* designer = dynamic_cast<DesignerEditor*>(editor.get()))
+        {
+            designer->setOpenLocationHandler([&tabs](const std::wstring& path, std::size_t line, std::size_t column) {
+                return tabs->openAt(path, DocumentType::CppSource, line, column) != nullptr;
+            });
+        }
+        return editor;
+    });
     tabs->setName("testharnessDocumentTabs");
     tabs->style().setBackgroundColor(newui::UIColorManager::colorFor(newui::UIColorRole::WindowBackground));
 

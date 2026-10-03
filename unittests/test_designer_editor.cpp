@@ -1801,6 +1801,58 @@ TEST_F(DesignerEditorFileFixture, TheProblemsItemSitsInsideTheStatusBarAtItsRigh
     ::DeleteFileA(header.c_str());
 }
 
+TEST_F(DesignerEditorFileFixture, OpeningAProblemHandsTheHeadersPathAndPositionToTheHost)
+{
+    const std::string header = dir_ + "\\SaveDialogController.h";
+    { std::ofstream(header, std::ios::binary) << "#include <bojangle>\n" << kBindingHeader; }
+    writeFile(kBoundDocument);
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+    std::wstring path = filePath();
+    ASSERT_TRUE(editor.load(path.c_str(), path.size()));
+    ASSERT_FALSE(editor.controllerIssues().empty());
+
+    std::wstring openedPath;
+    std::size_t openedLine = 0;
+    std::size_t openedColumn = 0;
+    editor.setOpenLocationHandler([&](const std::wstring& p, std::size_t line, std::size_t column) {
+        openedPath = p;
+        openedLine = line;
+        openedColumn = column;
+        return true;
+    });
+    editor.openIssue(0);
+
+    EXPECT_EQ(std::filesystem::path(openedPath).filename().wstring(), L"SaveDialogController.h");
+    EXPECT_EQ(std::filesystem::path(openedPath).parent_path(), std::filesystem::path(path).parent_path());
+    EXPECT_EQ(openedLine, 1u);
+    EXPECT_EQ(openedColumn, 10u);   // the '<' of <bojangle>
+    ::DeleteFileA(header.c_str());
+}
+
+TEST_F(DesignerEditorFileFixture, WithNoHostToOpenItOpeningAProblemSaysWhereItIs)
+{
+    const std::string header = dir_ + "\\SaveDialogController.h";
+    { std::ofstream(header, std::ios::binary) << "#include <bojangle>\n" << kBindingHeader; }
+    writeFile(kBoundDocument);
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+    std::wstring path = filePath();
+    ASSERT_TRUE(editor.load(path.c_str(), path.size()));
+    ASSERT_FALSE(editor.controllerIssues().empty());
+
+    editor.openIssue(0);
+    EXPECT_NE(editor.delegateStatusMessage().find("SaveDialogController.h:1:10"), std::string::npos)
+        << editor.delegateStatusMessage();
+
+    editor.setOpenLocationHandler([](const std::wstring&, std::size_t, std::size_t) { return false; });
+    editor.openIssue(0);   // a host that can't open it falls back the same way
+    EXPECT_NE(editor.delegateStatusMessage().find("SaveDialogController.h:1:10"), std::string::npos);
+
+    editor.openIssue(99);  // out of range changes nothing
+    ::DeleteFileA(header.c_str());
+}
+
 TEST_F(DesignerEditorFileFixture, FixingTheHeaderClearsTheStatusBarItem)
 {
     const std::string header = dir_ + "\\SaveDialogController.h";

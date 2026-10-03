@@ -290,6 +290,7 @@ namespace CodeToolsVsix
         textControl->setVisible(true);
         textControl->setModel(std::make_unique<newui::text::HistoryTextModel>());
         textControl->setHighlightsCurrentLine(true);
+        textControl->setWordWrap(false);   // code: one row per line, scrolling sideways when it's long
         scrollView->addChild(textControl);
 
         auto* outlineScroll = new newui::ScrollView();
@@ -704,6 +705,11 @@ namespace CodeToolsVsix
                 }
                 return true;
             case EditorCommand::GotoLine:
+                // text1 "line:column" (the problems popup's jump), else number (the line alone).
+                if (hasText1)
+                {
+                    return find_->goToLine(std::wstring(args->text1, args->text1Length));
+                }
                 if (args != nullptr && args->number > 0)
                 {
                     return find_->goToLine(std::to_wstring(args->number));

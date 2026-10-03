@@ -10,6 +10,7 @@
 #include <chrono>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -144,6 +145,9 @@ namespace CodeToolsVsix
         // Shared with the workers' completion tasks, so they can tell the controller is gone.
         struct State
         {
+            // Held while a worker posts its result and while the destructor clears `alive`, so a worker
+            // never posts to a run loop whose controller (and so, in practice, loop) is already gone.
+            std::mutex mutex;
             bool alive = true;
             std::size_t generation = 0;   // bumped on every text change
             PassState passes[kPasses];

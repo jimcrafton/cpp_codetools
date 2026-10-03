@@ -55,9 +55,14 @@ namespace CodeToolsVsix
             style->setUnderline((look.font & lex::FontFlag_Underline) != 0);
             sheet->addStyle(style);
         }
+        // The squiggle's own color, translucent, behind the whole line - where the problems are.
+        constexpr float kProblemLineTint = 0.16f;
         auto* problem = new newui::TextStyle(kProblemStyleName);
         problem->setDecoration(newui::text::TextDecorationKind::Squiggle);
         problem->setDecorationColor(colorFromArgb(theme.problemUnderline));
+        newui::Color problemTint = colorFromArgb(theme.problemUnderline);
+        problemTint.a = kProblemLineTint;
+        problem->setLineBackgroundColor(problemTint);
         sheet->addStyle(problem);
 
         // Green, a shade that reads on the theme's background.
@@ -66,6 +71,9 @@ namespace CodeToolsVsix
         auto* warning = new newui::TextStyle(kWarningStyleName);
         warning->setDecoration(newui::text::TextDecorationKind::Squiggle);
         warning->setDecorationColor(colorFromArgb(brightness < 128 ? 0xFF6CC070u : 0xFF2E8B2Eu));
+        newui::Color warningTint = colorFromArgb(brightness < 128 ? 0xFF6CC070u : 0xFF2E8B2Eu);
+        warningTint.a = kProblemLineTint;
+        warning->setLineBackgroundColor(warningTint);
         sheet->addStyle(warning);
 
         // A translucent tint (white on a dark theme, black on a light one) - the text's own colors show
@@ -165,7 +173,10 @@ namespace CodeToolsVsix
 
     HighlightController::~HighlightController()
     {
-        state_->alive = false;
+        {
+            std::lock_guard<std::mutex> lock(state_->mutex);   // see postIfAlive() in startPass()
+            state_->alive = false;
+        }
         for (newui::RunLoop::TimerHandle& timer : timers_) {
             if (timer != newui::RunLoop::kInvalidTimerHandle) {
                 loop_->cancelDelayed(timer);
@@ -246,17 +257,27 @@ namespace CodeToolsVsix
             }
         };
 
+        // A worker can outlast the controller - an editor closed (or a test finished) while libclang is
+        // still parsing - and then its run loop may be gone too, so the post is guarded by the same
+        // lock the destructor takes to clear `alive`: it posts only while the controller still exists.
+        auto postIfAlive = [state = state_, loop = &loop](std::function<void()> task) {
+            std::lock_guard<std::mutex> lock(state->mutex);
+            if (state->alive) {
+                loop->post(std::move(task));
+            }
+        };
+
         if (pass == kColorPass) {
-            std::thread([this, finish, loop = &loop, analyzer = analyzer_, snapshot, generation]() {
+            std::thread([this, finish, postIfAlive, analyzer = analyzer_, snapshot, generation]() {
                 auto result = std::make_shared<HighlightResult>(analyzer(snapshot.str()));
-                loop->post([this, finish, result, snapshot, generation]() {
+                postIfAlive([this, finish, result, snapshot, generation]() {
                     finish([&]() { applyColors(std::move(*result), snapshot, generation); });
                 });
             }).detach();
         } else {
-            std::thread([this, finish, loop = &loop, analyzer = overlayAnalyzer_, snapshot, generation]() {
+            std::thread([this, finish, postIfAlive, analyzer = overlayAnalyzer_, snapshot, generation]() {
                 auto result = std::make_shared<HighlightOverlay>(analyzer(snapshot.str()));
-                loop->post([this, finish, result, snapshot, generation]() {
+                postIfAlive([this, finish, result, snapshot, generation]() {
                     finish([&]() { applyOverlay(std::move(*result), snapshot, generation); });
                 });
             }).detach();

@@ -262,6 +262,27 @@ TEST(CppEditor, HostsTheSourceInAScrollViewAndTheOutlineInAnother)
     EXPECT_TRUE(editor.textControl()->canUndo());
 }
 
+TEST(CppEditor, TheSourceDoesNotWrapAndAVeryLongLineMakesItScrollSideways)
+{
+    auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 900, 700), "cppTestRoot");
+    CodeToolsVsix::CppEditor editor(root);
+    ASSERT_NE(editor.textControl(), nullptr);
+    ASSERT_NE(editor.scrollView(), nullptr);
+    EXPECT_FALSE(editor.textControl()->wordWrap());
+
+    // Short lines fit: nothing to scroll sideways.
+    editor.textControl()->setText(L"int x = 1;\nint y = 2;\n");
+    editor.scrollView()->updateLayout();
+    EXPECT_FALSE(editor.scrollView()->hBar()->isVisible());
+    const float oneRow = editor.textControl()->contentSize().height;
+
+    // A line far wider than the pane: still one row, and now there is a horizontal scrollbar.
+    editor.textControl()->setText(L"int x = " + std::wstring(600, L'1') + L";\nint y = 2;\n");
+    editor.scrollView()->updateLayout();
+    EXPECT_TRUE(editor.scrollView()->hBar()->isVisible());
+    EXPECT_FLOAT_EQ(editor.textControl()->contentSize().height, oneRow) << "wrapping would have made it taller";
+}
+
 TEST(CppEditor, LoadingAFileShowsItHighlightedAndFoldableWithAnOutline)
 {
     CppFile file(kSample);
@@ -493,6 +514,41 @@ TEST(CppDiagnostics, ASquigglePointsAtTheTokenOrTheTokenBeforeAGap)
 
     // Two diagnostics on the same spot are one squiggle.
     EXPECT_EQ(diagnosticRanges(open, CodeToolsVsix::wideToUtf8(open), { diagnostic("a", "Parse Issue", 11), diagnostic("b", "Parse Issue", 11) }).size(), 1u);
+}
+
+TEST(CppDiagnostics, ADiagnosticsMessageRidesOnItsRangeToBeShownAfterTheLine)
+{
+    using CodeToolsVsix::diagnosticRanges;
+    const std::wstring text = L"int x = ;\n";
+    const auto ranges = diagnosticRanges(text, CodeToolsVsix::wideToUtf8(text), { diagnostic("expected expression", "Parse Issue", 8) });
+
+    ASSERT_EQ(ranges.size(), 1u);
+    EXPECT_EQ(ranges[0].annotation, "expected expression");
+}
+
+TEST(CppDiagnostics, WhenAnErrorAndAWarningShareASpotTheErrorsMessageIsTheOneShown)
+{
+    using CodeToolsVsix::diagnosticRanges;
+    const std::wstring text = L"int x = ;\n";
+    const std::string utf8 = CodeToolsVsix::wideToUtf8(text);
+    const auto ranges = diagnosticRanges(text, utf8, {
+        diagnostic("a warning", "Parse Issue", 8, 0, cpptools::Severity::Warning),
+        diagnostic("an error", "Parse Issue", 8) });
+
+    ASSERT_EQ(ranges.size(), 1u);
+    EXPECT_EQ(ranges[0].style, CodeToolsVsix::kProblemStyleName);
+    EXPECT_EQ(ranges[0].annotation, "an error");
+}
+
+TEST(CppDiagnostics, TheProblemAndWarningStylesTintTheirWholeLine)
+{
+    const auto sheet = CodeToolsVsix::highlightStyleSheet(lex::Theme::light());
+    ASSERT_NE(sheet->style(CodeToolsVsix::kProblemStyleName), nullptr);
+    ASSERT_NE(sheet->style(CodeToolsVsix::kWarningStyleName), nullptr);
+    EXPECT_FALSE(sheet->style(CodeToolsVsix::kProblemStyleName)->lineBackgroundColor().isNull());
+    EXPECT_FALSE(sheet->style(CodeToolsVsix::kWarningStyleName)->lineBackgroundColor().isNull());
+    // Translucent, so the text and the current-line highlight still read through it.
+    EXPECT_LT(sheet->style(CodeToolsVsix::kProblemStyleName)->lineBackgroundColor().a, 0.5f);
 }
 
 TEST(CppDiagnostics, OnlySyntaxLevelErrorsInTheMainFileAreShownByDefault)

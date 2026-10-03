@@ -157,6 +157,20 @@ namespace CodeToolsVsix
         return raw;
     }
 
+    NativeEditor* DocumentTabs::openAt(const std::wstring& path, DocumentType type, std::size_t line, std::size_t column)
+    {
+        NativeEditor* editor = open(path, type);
+        if (editor == nullptr) {
+            return nullptr;
+        }
+        const std::wstring position = std::to_wstring(line) + L":" + std::to_wstring(column > 0 ? column : 1);
+        EditorCommandArgs args{};
+        args.text1 = position.c_str();
+        args.text1Length = position.size();
+        editor->execCommand(EditorCommand::GotoLine, 0, &args);
+        return editor;
+    }
+
     NativeEditor* DocumentTabs::activeEditor() const
     {
         return editorAt(tabControl_->selectedIndex());

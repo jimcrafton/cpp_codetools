@@ -1862,12 +1862,14 @@ namespace CodeToolsVsix
     }
 
     void DesignerEditor::finishBindingVerification(std::vector<VerifiedBinding> results,
-                                                   std::vector<cpptools::Diagnostic> diagnostics, unsigned generation)
+                                                   std::vector<cpptools::Diagnostic> diagnostics,
+                                                   std::string headerText, unsigned generation)
     {
         if (verifyState_ == nullptr || generation != verifyState_->generation) {
             return;   // superseded by a newer check
         }
         bindingChecks_ = std::move(results);
+        controllerHeaderText_ = std::move(headerText);
 
         // What's worth showing: warnings and errors written in the header itself - not notes, and not
         // whatever the headers it includes complain about.
@@ -1879,13 +1881,6 @@ namespace CodeToolsVsix
         }
         refreshIssuesIndicator();
         onBindingsVerified(*this);
-    }
-
-    std::string DesignerEditor::describeIssue(const cpptools::Diagnostic& issue)
-    {
-        const char* severity = issue.severity == cpptools::Severity::Warning ? "warning" : "error";
-        return std::string(severity) + " " + std::to_string(issue.location.line) + ":" +
-               std::to_string(issue.location.column) + "  " + issue.message;
     }
 
     void DesignerEditor::refreshIssuesIndicator()
@@ -1909,30 +1904,22 @@ namespace CodeToolsVsix
         if (label == nullptr || controllerIssues_.empty() || !controllerRef_) {
             return;
         }
-        std::vector<std::string> rows;
-        rows.reserve(controllerIssues_.size());
-        for (const cpptools::Diagnostic& issue : controllerIssues_) {
-            rows.push_back(describeIssue(issue));
-        }
-        const std::string header = controllerRef_->header;
+        std::vector<IssuePeek> peeks = buildIssuePeeks(controllerIssues_, controllerHeaderText_);
+        const std::string title = std::filesystem::u8path(controllerRef_->header).filename().u8string();
         const newui::Rect anchor = label->localToScreen(label->getClientBounds());
 
         // Posted, never inline: this runs inside the label's mouse-down dispatch, and RootView's
         // mouse-down tail would steal focus straight back from a popup created now (see
         // PropertiesGrid::openDelegatePicker()).
         std::weak_ptr<bool> alive = aliveFlag_;
-        auto show = [this, alive, label, anchor, rows = std::move(rows), header]() {
+        auto show = [this, alive, label, anchor, title, peeks = std::move(peeks)]() mutable {
             if (alive.expired()) {
                 return;
             }
-            IssuesPopup::show(*label, anchor, rows, [this, alive, header](std::size_t index) {
-                if (alive.expired() || index >= controllerIssues_.size()) {
-                    return;
+            IssuesPopup::show(*label, anchor, title, std::move(peeks), [this, alive](std::size_t index) {
+                if (!alive.expired()) {
+                    openIssue(index);
                 }
-                // No host call yet to open a file at a line, so say where it is.
-                const cpptools::Diagnostic& issue = controllerIssues_[index];
-                setDelegateStatusMessage(header + ":" + std::to_string(issue.location.line) + ":" +
-                                         std::to_string(issue.location.column) + "  " + issue.message);
             });
         };
         if (newui::RunLoop::current()) {
@@ -1940,6 +1927,22 @@ namespace CodeToolsVsix
         } else {
             show();
         }
+    }
+
+    void DesignerEditor::openIssue(std::size_t index)
+    {
+        if (index >= controllerIssues_.size() || !controllerRef_ || document_ == nullptr || !document_->hasFilePath()) {
+            return;
+        }
+        const cpptools::Diagnostic& issue = controllerIssues_[index];
+        const std::filesystem::path headerPath =
+            std::filesystem::path(utf8ToWide(document_->filePath())).parent_path() / std::filesystem::u8path(controllerRef_->header);
+        if (openLocationHandler_ && openLocationHandler_(headerPath.wstring(), issue.location.line, issue.location.column)) {
+            return;
+        }
+        // Nothing here can open a file at a line: say where it is.
+        setDelegateStatusMessage(controllerRef_->header + ":" + std::to_string(issue.location.line) + ":" +
+                                 std::to_string(issue.location.column) + "  " + issue.message);
     }
 
     void DesignerEditor::verifyControllerBindingsFor(const std::string& documentPath)
@@ -1954,7 +1957,7 @@ namespace CodeToolsVsix
 
         std::vector<DesignerBinding> bindings = collectRecordedBindings(*workspace_->rootViewProxy());
         if (!controllerRef_ || bindings.empty() || documentPath.empty()) {
-            finishBindingVerification({}, {}, generation);   // nothing to check: clears the last result
+            finishBindingVerification({}, {}, std::string(), generation);   // nothing to check: clears the last result
             return;
         }
 
@@ -1978,7 +1981,7 @@ namespace CodeToolsVsix
                     finishBindingVerification(
                         unverifiableBindings(bindings, "the controller's header can't be read (status " +
                                                       std::to_string(static_cast<int>(status)) + "): " + headerPath.u8string()),
-                        {}, generation);
+                        {}, std::string(), generation);
                     return;
                 }
 
@@ -1986,17 +1989,20 @@ namespace CodeToolsVsix
                 {
                     std::vector<VerifiedBinding> results;
                     std::vector<cpptools::Diagnostic> diagnostics;
+                    std::string headerText;
                 };
                 auto verify = [bindings, className, headerPath, text = wideToUtf8(snapshot.text)]() {
                     Verified verified;
                     verified.results = verifyBindings(bindings, className, text,
                                                       cpptools::compileFlagsFor(headerPath.u8string()).args,
                                                       &verified.diagnostics);
+                    verified.headerText = text;
                     return verified;
                 };
                 if (runLoop == nullptr) {
                     Verified verified = verify();
-                    finishBindingVerification(std::move(verified.results), std::move(verified.diagnostics), generation);
+                    finishBindingVerification(std::move(verified.results), std::move(verified.diagnostics),
+                                              std::move(verified.headerText), generation);
                     return;
                 }
                 // libclang on real headers takes seconds: off this thread, result back onto it.
@@ -2004,7 +2010,8 @@ namespace CodeToolsVsix
                     Verified verified = verify();
                     runLoop->post([this, state, generation, verified = std::move(verified)]() mutable {
                         if (state->alive && generation == state->generation) {
-                            finishBindingVerification(std::move(verified.results), std::move(verified.diagnostics), generation);
+                            finishBindingVerification(std::move(verified.results), std::move(verified.diagnostics),
+                                                      std::move(verified.headerText), generation);
                         }
                     });
                 }).detach();
