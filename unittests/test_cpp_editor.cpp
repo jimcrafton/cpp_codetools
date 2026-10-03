@@ -311,6 +311,102 @@ TEST(CppEditor, EditsMarkItDirtyUndoAndRedoWorkAndSaveWritesTheText)
     EXPECT_EQ(file.read(), "// header\n" + std::string(kSample));
 }
 
+TEST(CppEditor, AnOpenEditorIsTheLiveTextForDocumentEditServiceNotTheDiskCopy)
+{
+    using namespace CodeToolsVsix;
+    CppFile file(kSample);
+    auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 900, 700), "cppTestRoot");
+    CppEditor editor(root);
+    ASSERT_TRUE(editor.load(file.wide().c_str(), file.wide().size()));
+
+    editor.textControl()->model().insert(0, L"// unsaved\n");  // not on disk
+
+    DocumentSnapshot snap;
+    documentEditService().getText(file.path, [&](EditStatus, DocumentSnapshot s) { snap = std::move(s); });
+    EXPECT_EQ(snap.text, L"// unsaved\n" + utf8ToWide(kSample));
+    EXPECT_EQ(file.read(), std::string(kSample));
+
+    EditStatus status = EditStatus::Rejected;
+    documentEditService().applyEdits(file.path, snap.version, { { 0, 0, L"// planned\n" } },
+        [&](EditStatus s) { status = s; });
+    EXPECT_EQ(status, EditStatus::Ok);
+    EXPECT_EQ(editor.textControl()->text(), L"// planned\n// unsaved\n" + utf8ToWide(kSample));
+    EXPECT_EQ(file.read(), std::string(kSample)) << "the disk copy is never touched";
+}
+
+TEST(CppEditor, EditsFromTheServiceAreOneUndoStepAndBumpTheVersion)
+{
+    using namespace CodeToolsVsix;
+    CppFile file("abc\ndef\n");
+    auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 900, 700), "cppTestRoot");
+    CppEditor editor(root);
+    ASSERT_TRUE(editor.load(file.wide().c_str(), file.wide().size()));
+
+    const DocumentSnapshot before = editor.snapshot();
+    ASSERT_EQ(editor.applyEdits(before.version, { { 0, 0, L"1" }, { 4, 0, L"2" }, { 8, 0, L"3" } }), EditStatus::Ok);
+    EXPECT_EQ(editor.textControl()->text(), L"1abc\n2def\n3");
+    EXPECT_NE(editor.snapshot().version, before.version);
+
+    EXPECT_TRUE(editor.execCommand(EditorCommand::Undo, 0, nullptr));
+    EXPECT_EQ(editor.textControl()->text(), L"abc\ndef\n") << "all three edits undo together";
+    EXPECT_FALSE(editor.execCommand(EditorCommand::Undo, 0, nullptr));
+}
+
+TEST(CppEditor, ServiceEditOffsetsAreUtf16UnitsSoAnEmojiCountsAsTwo)
+{
+    using namespace CodeToolsVsix;
+    // "é" is one unit, the emoji a surrogate pair (two).
+    CppFile file("// \xC3\xA9 \xF0\x9F\x98\x80 end\n");
+    auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 900, 700), "cppTestRoot");
+    CppEditor editor(root);
+    ASSERT_TRUE(editor.load(file.wide().c_str(), file.wide().size()));
+
+    const DocumentSnapshot snap = editor.snapshot();
+    const std::size_t end = snap.text.find(L"end");
+    ASSERT_EQ(end, 8u);
+    ASSERT_EQ(editor.applyEdits(snap.version, { { end, 3, L"END" } }), EditStatus::Ok);
+    EXPECT_EQ(editor.textControl()->text(), L"// \u00E9 \U0001F600 END\n");
+
+    // An offset between the two halves of the emoji is refused and changes nothing.
+    const std::wstring current = editor.textControl()->text();
+    EXPECT_EQ(editor.applyEdits(editor.snapshot().version, { { 6, 0, L"x" } }), EditStatus::InvalidEdit);
+    EXPECT_EQ(editor.textControl()->text(), current);
+}
+
+TEST(CppEditor, AStaleVersionAfterTypingIsRefusedAndChangesNothing)
+{
+    using namespace CodeToolsVsix;
+    CppFile file("abc");
+    auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 900, 700), "cppTestRoot");
+    CppEditor editor(root);
+    ASSERT_TRUE(editor.load(file.wide().c_str(), file.wide().size()));
+
+    const std::uint64_t planned = editor.snapshot().version;
+    editor.textControl()->model().insert(0, L"typed ");  // the user types after the plan was made
+    EXPECT_EQ(editor.applyEdits(planned, { { 0, 0, L"X" } }), EditStatus::VersionMismatch);
+    EXPECT_EQ(editor.textControl()->text(), L"typed abc");
+}
+
+TEST(CppEditor, ItStopsBeingReachableThroughTheServiceOnceDestroyed)
+{
+    using namespace CodeToolsVsix;
+    CppFile file("on disk");
+    {
+        auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 900, 700), "cppTestRoot");
+        CppEditor editor(root);
+        ASSERT_TRUE(editor.load(file.wide().c_str(), file.wide().size()));
+        editor.textControl()->model().insert(0, L"edited ");
+
+        DocumentSnapshot open;
+        documentEditService().getText(file.path, [&](EditStatus, DocumentSnapshot s) { open = std::move(s); });
+        EXPECT_EQ(open.text, L"edited on disk");
+    }
+
+    DocumentSnapshot afterClose;
+    documentEditService().getText(file.path, [&](EditStatus, DocumentSnapshot s) { afterClose = std::move(s); });
+    EXPECT_EQ(afterClose.text, L"on disk");
+}
+
 TEST(CppEditor, CopyCutAndPasteActOnTheSourceText)
 {
     auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 900, 700), "cppTestRoot");

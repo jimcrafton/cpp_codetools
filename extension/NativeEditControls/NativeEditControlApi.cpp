@@ -13,6 +13,19 @@
 
 using namespace CodeToolsVsix;
 
+namespace
+{
+    // The bridge lives for the process; replies hop onto the edit thread through its run loop.
+    HostEditorBridge& hostBridge()
+    {
+        static HostEditorBridge bridge([](std::function<void()> task) {
+            NativeEditManager::startRunLoop();
+            NativeEditManager::runLoop()->post(std::move(task));
+        });
+        return bridge;
+    }
+}
+
 
 
 
@@ -90,4 +103,26 @@ void __stdcall NativeEditControl_SetLogSink(LogSinkCallback sink)
     CodeToolsVsix::log(cpptools::Severity::Note,
         std::string("NativeEditControls.dll version ") + CPPTOOLS_VERSION_STRING
         + " (newui " + NEWUI_VERSION_STRING + ")");
+}
+
+void __stdcall NativeEditControl_SetHostEditor(HostGetTextCallback getText, HostApplyEditsCallback applyEdits)
+{
+    NativeEditManager::startRunLoop();
+    NativeEditManager::runLoop()->post([getText, applyEdits]() {
+        hostBridge().setCallbacks(getText, applyEdits);
+        documentEditService().setHost(hostBridge().connected() ? &hostBridge() : nullptr);
+    });
+}
+
+void __stdcall NativeEditControl_HostGetTextReply(
+    uint64_t requestId, int32_t status, const wchar_t* text, size_t textLength, uint64_t version)
+{
+    // Copies before returning - text is only valid for this call.
+    hostBridge().replyGetText(requestId, static_cast<EditStatus>(status),
+                              text != nullptr ? std::wstring(text, textLength) : std::wstring(), version);
+}
+
+void __stdcall NativeEditControl_HostApplyEditsReply(uint64_t requestId, int32_t status)
+{
+    hostBridge().replyApply(requestId, static_cast<EditStatus>(status));
 }

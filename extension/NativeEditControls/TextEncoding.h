@@ -12,4 +12,8 @@ namespace CodeToolsVsix
     std::wstring utf8ToWide(const std::string& utf8);
     std::string wideToUtf8(const wchar_t* wide, std::size_t length);
     std::string wideToUtf8(const std::wstring& wstr );
+
+    // The UTF-16 index of the character starting at byteOffset in utf8. False if byteOffset is
+    // past the end or falls inside a multi-byte character (byteOffset == utf8.size() is valid).
+    bool utf8OffsetToUtf16(const std::string& utf8, std::size_t byteOffset, std::size_t& utf16Offset);
 }

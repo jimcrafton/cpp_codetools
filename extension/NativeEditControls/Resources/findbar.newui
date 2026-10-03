@@ -1,512 +1,3548 @@
 {
   meta: {
     author: "",
-    date: "2026-09-26",
+    date: "2026-09-29",
     copyright: "",
-    version: "0.1.0.900"
+    version: "0.1.0.1865"
   },
   type: "SubView",
+  bounds: {
+    type: "Rect",
+    pos: {
+      type: "Point",
+      x: 0,
+      y: 0
+    },
+    size: {
+      type: "Size",
+      width: 420,
+      height: 118
+    }
+  },
   visible: true,
+  layoutIgnored: false,
   name: "findbar",
   layout: {
     type: "FlexLayout",
     orientation: "Vertical",
+    mainAxisAlignment: "Start",
+    crossAxisAlignment: "Stretch",
     spacing: 4,
     padding: 6,
-    crossAxisAlignment: "Stretch"
+    wrap: false,
+    lineSpacing: 0,
+    alignContent: "Start"
   },
   style: {
     type: "ViewStyle",
     backgroundFill: {
       type: "Fill",
       kind: "Color",
-      color: "ControlBackground"
+      color: "#ffffffff",
+      gradient: {
+        type: "Gradient",
+        kind: "Linear",
+        linearStart: {
+          type: "Point",
+          x: 0,
+          y: 0
+        },
+        linearEnd: {
+          type: "Point",
+          x: 1,
+          y: 0
+        },
+        radialCenter: {
+          type: "Point",
+          x: 0.5,
+          y: 0.5
+        },
+        radialFocalOffset: {
+          type: "Point",
+          x: 0,
+          y: 0
+        },
+        radialRadius: 0.5,
+        conicCenter: {
+          type: "Point",
+          x: 0.5,
+          y: 0.5
+        },
+        conicAngle: 0,
+        conicRepeat: 1,
+        stops: [],
+        extendMode: "Pad",
+        points: [],
+        pointBlendPower: 2,
+        pointRasterMax: 64
+      },
+      imagePath: "",
+      opacity: 1
     },
-    borderFill: "ControlBorder",
+    borderFill: "#dcdcdcff",
     borderWidth: 1,
+    highlightFill: "#00000000",
+    strokeStyle: "StrokeColor",
+    imageFillMode: "Tile",
+    imageAlignment: "Center",
     rectRadius: 10,
-    elevation: 32.0
+    opacity: 1,
+    compositingOp: "CompSrcOver",
+    font: {
+      type: "Font",
+      name: "",
+      size: 12,
+      bold: false,
+      italic: false,
+      strikeThrough: false,
+      underlined: false
+    },
+    elevation: 32
   },
+  highlighted: false,
+  focused: false,
   desiredSize: {
     type: "Size",
     width: 420,
     height: 118
   },
   desiredSizeOverride: true,
+  cursor: {
+    type: "Cursor",
+    kind: "Arrow",
+    path: ""
+  },
+  acceptsFocus: false,
+  focusScope: false,
+  wantsTabKey: false,
   childViews: [
     {
       type: "SubView",
+      bounds: {
+        type: "Rect",
+        pos: {
+          type: "Point",
+          x: 7,
+          y: 7
+        },
+        size: {
+          type: "Size",
+          width: 406,
+          height: 4
+        }
+      },
       visible: true,
+      layoutIgnored: false,
       name: "gripRow",
       layout: {
         type: "FlexLayout",
         orientation: "Horizontal",
+        mainAxisAlignment: "Center",
+        crossAxisAlignment: "Center",
         spacing: 0,
         padding: 0,
-        crossAxisAlignment: "Center",
-        mainAxisAlignment: "Center"
+        wrap: false,
+        lineSpacing: 0,
+        alignContent: "Start"
       },
+      style: {
+        type: "ViewStyle",
+        backgroundFill: {
+          type: "Fill",
+          kind: "None",
+          color: "#000000ff",
+          gradient: {
+            type: "Gradient",
+            kind: "Linear",
+            linearStart: {
+              type: "Point",
+              x: 0,
+              y: 0
+            },
+            linearEnd: {
+              type: "Point",
+              x: 1,
+              y: 0
+            },
+            radialCenter: {
+              type: "Point",
+              x: 0.5,
+              y: 0.5
+            },
+            radialFocalOffset: {
+              type: "Point",
+              x: 0,
+              y: 0
+            },
+            radialRadius: 0.5,
+            conicCenter: {
+              type: "Point",
+              x: 0.5,
+              y: 0.5
+            },
+            conicAngle: 0,
+            conicRepeat: 1,
+            stops: [],
+            extendMode: "Pad",
+            points: [],
+            pointBlendPower: 2,
+            pointRasterMax: 64
+          },
+          imagePath: "",
+          opacity: 1
+        },
+        borderFill: "#00000000",
+        borderWidth: 0,
+        highlightFill: "#00000000",
+        strokeStyle: "StrokeColor",
+        imageFillMode: "Tile",
+        imageAlignment: "Center",
+        rectRadius: 0,
+        opacity: 1,
+        compositingOp: "CompSrcOver",
+        font: {
+          type: "Font",
+          name: "",
+          size: 12,
+          bold: false,
+          italic: false,
+          strikeThrough: false,
+          underlined: false
+        },
+        elevation: 0
+      },
+      highlighted: false,
+      focused: false,
+      desiredSize: {
+        type: "Size",
+        width: 408,
+        height: 4
+      },
+      desiredSizeOverride: true,
+      cursor: {
+        type: "Cursor",
+        kind: "Arrow",
+        path: ""
+      },
+      acceptsFocus: false,
+      focusScope: false,
+      wantsTabKey: false,
       childViews: [
         {
           type: "SubView",
+          bounds: {
+            type: "Rect",
+            pos: {
+              type: "Point",
+              x: 185,
+              y: 0
+            },
+            size: {
+              type: "Size",
+              width: 36,
+              height: 4
+            }
+          },
           visible: true,
+          layoutIgnored: false,
           name: "grip",
           style: {
             type: "ViewStyle",
             backgroundFill: {
               type: "Fill",
               kind: "Color",
-              color: "ControlBorder"
+              color: "#dcdcdcff",
+              gradient: {
+                type: "Gradient",
+                kind: "Linear",
+                linearStart: {
+                  type: "Point",
+                  x: 0,
+                  y: 0
+                },
+                linearEnd: {
+                  type: "Point",
+                  x: 1,
+                  y: 0
+                },
+                radialCenter: {
+                  type: "Point",
+                  x: 0.5,
+                  y: 0.5
+                },
+                radialFocalOffset: {
+                  type: "Point",
+                  x: 0,
+                  y: 0
+                },
+                radialRadius: 0.5,
+                conicCenter: {
+                  type: "Point",
+                  x: 0.5,
+                  y: 0.5
+                },
+                conicAngle: 0,
+                conicRepeat: 1,
+                stops: [],
+                extendMode: "Pad",
+                points: [],
+                pointBlendPower: 2,
+                pointRasterMax: 64
+              },
+              imagePath: "",
+              opacity: 1
             },
-            rectRadius: 2
+            borderFill: "#00000000",
+            borderWidth: 0,
+            highlightFill: "#00000000",
+            strokeStyle: "StrokeColor",
+            imageFillMode: "Tile",
+            imageAlignment: "Center",
+            rectRadius: 2,
+            opacity: 1,
+            compositingOp: "CompSrcOver",
+            font: {
+              type: "Font",
+              name: "",
+              size: 12,
+              bold: false,
+              italic: false,
+              strikeThrough: false,
+              underlined: false
+            },
+            elevation: 0
           },
+          highlighted: false,
+          focused: false,
           desiredSize: {
             type: "Size",
             width: 36,
             height: 4
           },
-          desiredSizeOverride: true
+          desiredSizeOverride: true,
+          cursor: {
+            type: "Cursor",
+            kind: "Arrow",
+            path: ""
+          },
+          acceptsFocus: false,
+          focusScope: false,
+          wantsTabKey: false,
+          childViews: []
         }
-      ],
-      desiredSize: {
-        type: "Size",
-        width: 408,
-        height: 4
-      },
-      desiredSizeOverride: true
+      ]
     },
     {
       type: "SubView",
+      bounds: {
+        type: "Rect",
+        pos: {
+          type: "Point",
+          x: 7,
+          y: 15
+        },
+        size: {
+          type: "Size",
+          width: 406,
+          height: 24
+        }
+      },
       visible: true,
+      layoutIgnored: false,
       name: "findRow",
       layout: {
         type: "FlexLayout",
         orientation: "Horizontal",
+        mainAxisAlignment: "Start",
+        crossAxisAlignment: "Center",
         spacing: 4,
         padding: 0,
-        crossAxisAlignment: "Center"
+        wrap: false,
+        lineSpacing: 0,
+        alignContent: "Start"
       },
+      style: {
+        type: "ViewStyle",
+        backgroundFill: {
+          type: "Fill",
+          kind: "None",
+          color: "#000000ff",
+          gradient: {
+            type: "Gradient",
+            kind: "Linear",
+            linearStart: {
+              type: "Point",
+              x: 0,
+              y: 0
+            },
+            linearEnd: {
+              type: "Point",
+              x: 1,
+              y: 0
+            },
+            radialCenter: {
+              type: "Point",
+              x: 0.5,
+              y: 0.5
+            },
+            radialFocalOffset: {
+              type: "Point",
+              x: 0,
+              y: 0
+            },
+            radialRadius: 0.5,
+            conicCenter: {
+              type: "Point",
+              x: 0.5,
+              y: 0.5
+            },
+            conicAngle: 0,
+            conicRepeat: 1,
+            stops: [],
+            extendMode: "Pad",
+            points: [],
+            pointBlendPower: 2,
+            pointRasterMax: 64
+          },
+          imagePath: "",
+          opacity: 1
+        },
+        borderFill: "#00000000",
+        borderWidth: 0,
+        highlightFill: "#00000000",
+        strokeStyle: "StrokeColor",
+        imageFillMode: "Tile",
+        imageAlignment: "Center",
+        rectRadius: 0,
+        opacity: 1,
+        compositingOp: "CompSrcOver",
+        font: {
+          type: "Font",
+          name: "",
+          size: 12,
+          bold: false,
+          italic: false,
+          strikeThrough: false,
+          underlined: false
+        },
+        elevation: 0
+      },
+      highlighted: false,
+      focused: false,
+      desiredSize: {
+        type: "Size",
+        width: 408,
+        height: 24
+      },
+      desiredSizeOverride: true,
+      cursor: {
+        type: "Cursor",
+        kind: "Arrow",
+        path: ""
+      },
+      acceptsFocus: false,
+      focusScope: false,
+      wantsTabKey: false,
       childViews: [
         {
           type: "ToolbarButton",
-          name: "expandBtn",
+          text: "",
           icon: "Images/icons/find/chevron-right.svg",
+          toggleButton: false,
+          checked: false,
+          enabled: true,
+          bounds: {
+            type: "Rect",
+            pos: {
+              type: "Point",
+              x: 0,
+              y: 0
+            },
+            size: {
+              type: "Size",
+              width: 18,
+              height: 24
+            }
+          },
+          visible: true,
+          layoutIgnored: false,
+          name: "expandBtn",
+          style: {
+            type: "ThemedToolbarButtonStyle",
+            backgroundFill: {
+              type: "Fill",
+              kind: "None",
+              color: "#000000ff",
+              gradient: {
+                type: "Gradient",
+                kind: "Linear",
+                linearStart: {
+                  type: "Point",
+                  x: 0,
+                  y: 0
+                },
+                linearEnd: {
+                  type: "Point",
+                  x: 1,
+                  y: 0
+                },
+                radialCenter: {
+                  type: "Point",
+                  x: 0.5,
+                  y: 0.5
+                },
+                radialFocalOffset: {
+                  type: "Point",
+                  x: 0,
+                  y: 0
+                },
+                radialRadius: 0.5,
+                conicCenter: {
+                  type: "Point",
+                  x: 0.5,
+                  y: 0.5
+                },
+                conicAngle: 0,
+                conicRepeat: 1,
+                stops: [],
+                extendMode: "Pad",
+                points: [],
+                pointBlendPower: 2,
+                pointRasterMax: 64
+              },
+              imagePath: "",
+              opacity: 1
+            },
+            borderFill: "#00000000",
+            borderWidth: 0,
+            highlightFill: "#00000000",
+            strokeStyle: "StrokeColor",
+            imageFillMode: "Tile",
+            imageAlignment: "Center",
+            rectRadius: 0,
+            opacity: 1,
+            compositingOp: "CompSrcOver",
+            font: {
+              type: "Font",
+              name: "Segoe UI",
+              size: 12,
+              bold: false,
+              italic: false,
+              strikeThrough: false,
+              underlined: false
+            },
+            elevation: 0,
+            checked: false,
+            pressed: false,
+            enabled: true
+          },
+          highlighted: false,
+          focused: false,
           desiredSize: {
             type: "Size",
             width: 18,
             height: 24
           },
-          desiredSizeOverride: true
+          desiredSizeOverride: true,
+          cursor: {
+            type: "Cursor",
+            kind: "Arrow",
+            path: ""
+          },
+          acceptsFocus: true,
+          focusScope: false,
+          wantsTabKey: false,
+          childViews: []
         },
         {
           type: "TextField",
-          name: "findInput",
-          placeholder: "Find",
+          controller: {
+            type: "TextController",
+            model: {
+              type: "TextModel",
+              storage: {
+                type: "TextStorage",
+                text: ""
+              },
+              text: "",
+              name: ""
+            },
+            selection: {
+              type: "TextSelection",
+              ranges: [],
+              empty: true,
+              color: "#006fc4e3"
+            },
+            caret: {
+              type: "Caret",
+              position: {
+                type: "TextPosition",
+                offset: -9223372036854775808,
+                valid: false
+              },
+              color: "#000000ff",
+              visible: false,
+              active: false
+            },
+            overwriteMode: false,
+            font: {
+              type: "Font",
+              name: "Consolas",
+              size: 13,
+              bold: false,
+              italic: false,
+              strikeThrough: false,
+              underlined: false
+            },
+            textColor: "#000000ff",
+            showsWhitespace: false,
+            highlightsCurrentLine: false,
+            tabWidth: 4,
+            multiline: false,
+            scrollOffsetY: 0,
+            name: ""
+          },
+          model: {
+            type: "TextModel",
+            storage: {
+              type: "TextStorage",
+              text: ""
+            },
+            text: "",
+            name: ""
+          },
+          text: "",
           font: {
             type: "Font",
             name: "Consolas",
-            size: 13
+            size: 13,
+            bold: false,
+            italic: false,
+            strikeThrough: false,
+            underlined: false
           },
-          textColor: "ControlText",
+          textColor: "#000000ff",
+          placeholder: "Find",
+          enabled: true,
+          layoutParams: {
+            type: "FlexLayoutParams",
+            weight: 1
+          },
+          bounds: {
+            type: "Rect",
+            pos: {
+              type: "Point",
+              x: 22,
+              y: 0
+            },
+            size: {
+              type: "Size",
+              width: 184,
+              height: 24
+            }
+          },
+          visible: true,
+          layoutIgnored: false,
+          name: "findInput",
+          style: {
+            type: "ThemedEditStyle",
+            backgroundFill: {
+              type: "Fill",
+              kind: "None",
+              color: "#000000ff",
+              gradient: {
+                type: "Gradient",
+                kind: "Linear",
+                linearStart: {
+                  type: "Point",
+                  x: 0,
+                  y: 0
+                },
+                linearEnd: {
+                  type: "Point",
+                  x: 1,
+                  y: 0
+                },
+                radialCenter: {
+                  type: "Point",
+                  x: 0.5,
+                  y: 0.5
+                },
+                radialFocalOffset: {
+                  type: "Point",
+                  x: 0,
+                  y: 0
+                },
+                radialRadius: 0.5,
+                conicCenter: {
+                  type: "Point",
+                  x: 0.5,
+                  y: 0.5
+                },
+                conicAngle: 0,
+                conicRepeat: 1,
+                stops: [],
+                extendMode: "Pad",
+                points: [],
+                pointBlendPower: 2,
+                pointRasterMax: 64
+              },
+              imagePath: "",
+              opacity: 1
+            },
+            borderFill: "#00000000",
+            borderWidth: 0,
+            highlightFill: "#00000000",
+            strokeStyle: "StrokeColor",
+            imageFillMode: "Tile",
+            imageAlignment: "Center",
+            rectRadius: 0,
+            opacity: 1,
+            compositingOp: "CompSrcOver",
+            font: {
+              type: "Font",
+              name: "",
+              size: 12,
+              bold: false,
+              italic: false,
+              strikeThrough: false,
+              underlined: false
+            },
+            elevation: 0,
+            focused: false,
+            readOnly: false,
+            enabled: true
+          },
+          highlighted: false,
+          focused: false,
           desiredSize: {
             type: "Size",
             width: 186,
             height: 24
           },
           desiredSizeOverride: true,
-          layoutParams: {
-            type: "FlexLayoutParams",
-            weight: 1.0
-          }
+          cursor: {
+            type: "Cursor",
+            kind: "Arrow",
+            path: ""
+          },
+          acceptsFocus: true,
+          focusScope: false,
+          wantsTabKey: false,
+          childViews: []
         },
         {
           type: "ToolbarButton",
-          name: "caseBtn",
           text: "Aa",
+          icon: "",
           toggleButton: true,
-          desiredSize: {
-            type: "Size",
-            width: 24,
-            height: 24
+          checked: false,
+          enabled: true,
+          bounds: {
+            type: "Rect",
+            pos: {
+              type: "Point",
+              x: 210,
+              y: 0
+            },
+            size: {
+              type: "Size",
+              width: 24,
+              height: 24
+            }
           },
-          desiredSizeOverride: true
-        },
-        {
-          type: "ToolbarButton",
-          name: "wordBtn",
-          text: "ab",
-          toggleButton: true,
-          desiredSize: {
-            type: "Size",
-            width: 24,
-            height: 24
-          },
-          desiredSizeOverride: true
-        },
-        {
-          type: "Label",
-          name: "count",
-          text: "",
-          textAlignment: "Center",
+          visible: true,
+          layoutIgnored: false,
+          name: "caseBtn",
           style: {
-            type: "LabelStyle",
-            text: "",
-            textColor: "DisabledText",
+            type: "ThemedToolbarButtonStyle",
+            backgroundFill: {
+              type: "Fill",
+              kind: "None",
+              color: "#000000ff",
+              gradient: {
+                type: "Gradient",
+                kind: "Linear",
+                linearStart: {
+                  type: "Point",
+                  x: 0,
+                  y: 0
+                },
+                linearEnd: {
+                  type: "Point",
+                  x: 1,
+                  y: 0
+                },
+                radialCenter: {
+                  type: "Point",
+                  x: 0.5,
+                  y: 0.5
+                },
+                radialFocalOffset: {
+                  type: "Point",
+                  x: 0,
+                  y: 0
+                },
+                radialRadius: 0.5,
+                conicCenter: {
+                  type: "Point",
+                  x: 0.5,
+                  y: 0.5
+                },
+                conicAngle: 0,
+                conicRepeat: 1,
+                stops: [],
+                extendMode: "Pad",
+                points: [],
+                pointBlendPower: 2,
+                pointRasterMax: 64
+              },
+              imagePath: "",
+              opacity: 1
+            },
+            borderFill: "#00000000",
+            borderWidth: 0,
+            highlightFill: "#00000000",
+            strokeStyle: "StrokeColor",
+            imageFillMode: "Tile",
+            imageAlignment: "Center",
+            rectRadius: 0,
+            opacity: 1,
+            compositingOp: "CompSrcOver",
             font: {
               type: "Font",
               name: "Segoe UI",
-              size: 11.5
+              size: 12,
+              bold: false,
+              italic: false,
+              strikeThrough: false,
+              underlined: false
+            },
+            elevation: 0,
+            checked: false,
+            pressed: false,
+            enabled: true
+          },
+          highlighted: false,
+          focused: false,
+          desiredSize: {
+            type: "Size",
+            width: 24,
+            height: 24
+          },
+          desiredSizeOverride: true,
+          cursor: {
+            type: "Cursor",
+            kind: "Arrow",
+            path: ""
+          },
+          acceptsFocus: true,
+          focusScope: false,
+          wantsTabKey: false,
+          childViews: []
+        },
+        {
+          type: "ToolbarButton",
+          text: "ab",
+          icon: "",
+          toggleButton: true,
+          checked: false,
+          enabled: true,
+          bounds: {
+            type: "Rect",
+            pos: {
+              type: "Point",
+              x: 238,
+              y: 0
+            },
+            size: {
+              type: "Size",
+              width: 24,
+              height: 24
             }
           },
+          visible: true,
+          layoutIgnored: false,
+          name: "wordBtn",
+          style: {
+            type: "ThemedToolbarButtonStyle",
+            backgroundFill: {
+              type: "Fill",
+              kind: "None",
+              color: "#000000ff",
+              gradient: {
+                type: "Gradient",
+                kind: "Linear",
+                linearStart: {
+                  type: "Point",
+                  x: 0,
+                  y: 0
+                },
+                linearEnd: {
+                  type: "Point",
+                  x: 1,
+                  y: 0
+                },
+                radialCenter: {
+                  type: "Point",
+                  x: 0.5,
+                  y: 0.5
+                },
+                radialFocalOffset: {
+                  type: "Point",
+                  x: 0,
+                  y: 0
+                },
+                radialRadius: 0.5,
+                conicCenter: {
+                  type: "Point",
+                  x: 0.5,
+                  y: 0.5
+                },
+                conicAngle: 0,
+                conicRepeat: 1,
+                stops: [],
+                extendMode: "Pad",
+                points: [],
+                pointBlendPower: 2,
+                pointRasterMax: 64
+              },
+              imagePath: "",
+              opacity: 1
+            },
+            borderFill: "#00000000",
+            borderWidth: 0,
+            highlightFill: "#00000000",
+            strokeStyle: "StrokeColor",
+            imageFillMode: "Tile",
+            imageAlignment: "Center",
+            rectRadius: 0,
+            opacity: 1,
+            compositingOp: "CompSrcOver",
+            font: {
+              type: "Font",
+              name: "Segoe UI",
+              size: 12,
+              bold: false,
+              italic: false,
+              strikeThrough: false,
+              underlined: false
+            },
+            elevation: 0,
+            checked: false,
+            pressed: false,
+            enabled: true
+          },
+          highlighted: false,
+          focused: false,
+          desiredSize: {
+            type: "Size",
+            width: 24,
+            height: 24
+          },
+          desiredSizeOverride: true,
+          cursor: {
+            type: "Cursor",
+            kind: "Arrow",
+            path: ""
+          },
+          acceptsFocus: true,
+          focusScope: false,
+          wantsTabKey: false,
+          childViews: []
+        },
+        {
+          type: "Label",
+          text: "",
+          textAlignment: "Center",
+          hotLink: false,
+          enabled: true,
+          bounds: {
+            type: "Rect",
+            pos: {
+              type: "Point",
+              x: 266,
+              y: 0
+            },
+            size: {
+              type: "Size",
+              width: 56,
+              height: 24
+            }
+          },
+          visible: true,
+          layoutIgnored: false,
+          name: "count",
+          style: {
+            type: "LabelStyle",
+            text: "",
+            textColor: "#838383ff",
+            wordWrap: false,
+            textAlignment: "Center",
+            backgroundFill: {
+              type: "Fill",
+              kind: "None",
+              color: "#000000ff",
+              gradient: {
+                type: "Gradient",
+                kind: "Linear",
+                linearStart: {
+                  type: "Point",
+                  x: 0,
+                  y: 0
+                },
+                linearEnd: {
+                  type: "Point",
+                  x: 1,
+                  y: 0
+                },
+                radialCenter: {
+                  type: "Point",
+                  x: 0.5,
+                  y: 0.5
+                },
+                radialFocalOffset: {
+                  type: "Point",
+                  x: 0,
+                  y: 0
+                },
+                radialRadius: 0.5,
+                conicCenter: {
+                  type: "Point",
+                  x: 0.5,
+                  y: 0.5
+                },
+                conicAngle: 0,
+                conicRepeat: 1,
+                stops: [],
+                extendMode: "Pad",
+                points: [],
+                pointBlendPower: 2,
+                pointRasterMax: 64
+              },
+              imagePath: "",
+              opacity: 1
+            },
+            borderFill: "#00000000",
+            borderWidth: 0,
+            highlightFill: "#00000000",
+            strokeStyle: "StrokeColor",
+            imageFillMode: "Tile",
+            imageAlignment: "Center",
+            rectRadius: 0,
+            opacity: 1,
+            compositingOp: "CompSrcOver",
+            font: {
+              type: "Font",
+              name: "Segoe UI",
+              size: 11.5,
+              bold: false,
+              italic: false,
+              strikeThrough: false,
+              underlined: false
+            },
+            elevation: 0
+          },
+          highlighted: false,
+          focused: false,
           desiredSize: {
             type: "Size",
             width: 56,
             height: 24
           },
-          desiredSizeOverride: true
+          desiredSizeOverride: true,
+          cursor: {
+            type: "Cursor",
+            kind: "Arrow",
+            path: ""
+          },
+          acceptsFocus: false,
+          focusScope: false,
+          wantsTabKey: false,
+          childViews: []
         },
         {
           type: "ToolbarButton",
-          name: "prevBtn",
+          text: "",
           icon: "Images/icons/find/chevron-up.svg",
+          toggleButton: false,
+          checked: false,
+          enabled: true,
+          bounds: {
+            type: "Rect",
+            pos: {
+              type: "Point",
+              x: 326,
+              y: 0
+            },
+            size: {
+              type: "Size",
+              width: 24,
+              height: 24
+            }
+          },
+          visible: true,
+          layoutIgnored: false,
+          name: "prevBtn",
+          style: {
+            type: "ThemedToolbarButtonStyle",
+            backgroundFill: {
+              type: "Fill",
+              kind: "None",
+              color: "#000000ff",
+              gradient: {
+                type: "Gradient",
+                kind: "Linear",
+                linearStart: {
+                  type: "Point",
+                  x: 0,
+                  y: 0
+                },
+                linearEnd: {
+                  type: "Point",
+                  x: 1,
+                  y: 0
+                },
+                radialCenter: {
+                  type: "Point",
+                  x: 0.5,
+                  y: 0.5
+                },
+                radialFocalOffset: {
+                  type: "Point",
+                  x: 0,
+                  y: 0
+                },
+                radialRadius: 0.5,
+                conicCenter: {
+                  type: "Point",
+                  x: 0.5,
+                  y: 0.5
+                },
+                conicAngle: 0,
+                conicRepeat: 1,
+                stops: [],
+                extendMode: "Pad",
+                points: [],
+                pointBlendPower: 2,
+                pointRasterMax: 64
+              },
+              imagePath: "",
+              opacity: 1
+            },
+            borderFill: "#00000000",
+            borderWidth: 0,
+            highlightFill: "#00000000",
+            strokeStyle: "StrokeColor",
+            imageFillMode: "Tile",
+            imageAlignment: "Center",
+            rectRadius: 0,
+            opacity: 1,
+            compositingOp: "CompSrcOver",
+            font: {
+              type: "Font",
+              name: "Segoe UI",
+              size: 12,
+              bold: false,
+              italic: false,
+              strikeThrough: false,
+              underlined: false
+            },
+            elevation: 0,
+            checked: false,
+            pressed: false,
+            enabled: true
+          },
+          highlighted: false,
+          focused: false,
           desiredSize: {
             type: "Size",
             width: 24,
             height: 24
           },
-          desiredSizeOverride: true
+          desiredSizeOverride: true,
+          cursor: {
+            type: "Cursor",
+            kind: "Arrow",
+            path: ""
+          },
+          acceptsFocus: true,
+          focusScope: false,
+          wantsTabKey: false,
+          childViews: []
         },
         {
           type: "ToolbarButton",
-          name: "nextBtn",
+          text: "",
           icon: "Images/icons/find/chevron-down.svg",
+          toggleButton: false,
+          checked: false,
+          enabled: true,
+          bounds: {
+            type: "Rect",
+            pos: {
+              type: "Point",
+              x: 354,
+              y: 0
+            },
+            size: {
+              type: "Size",
+              width: 24,
+              height: 24
+            }
+          },
+          visible: true,
+          layoutIgnored: false,
+          name: "nextBtn",
+          style: {
+            type: "ThemedToolbarButtonStyle",
+            backgroundFill: {
+              type: "Fill",
+              kind: "None",
+              color: "#000000ff",
+              gradient: {
+                type: "Gradient",
+                kind: "Linear",
+                linearStart: {
+                  type: "Point",
+                  x: 0,
+                  y: 0
+                },
+                linearEnd: {
+                  type: "Point",
+                  x: 1,
+                  y: 0
+                },
+                radialCenter: {
+                  type: "Point",
+                  x: 0.5,
+                  y: 0.5
+                },
+                radialFocalOffset: {
+                  type: "Point",
+                  x: 0,
+                  y: 0
+                },
+                radialRadius: 0.5,
+                conicCenter: {
+                  type: "Point",
+                  x: 0.5,
+                  y: 0.5
+                },
+                conicAngle: 0,
+                conicRepeat: 1,
+                stops: [],
+                extendMode: "Pad",
+                points: [],
+                pointBlendPower: 2,
+                pointRasterMax: 64
+              },
+              imagePath: "",
+              opacity: 1
+            },
+            borderFill: "#00000000",
+            borderWidth: 0,
+            highlightFill: "#00000000",
+            strokeStyle: "StrokeColor",
+            imageFillMode: "Tile",
+            imageAlignment: "Center",
+            rectRadius: 0,
+            opacity: 1,
+            compositingOp: "CompSrcOver",
+            font: {
+              type: "Font",
+              name: "Segoe UI",
+              size: 12,
+              bold: false,
+              italic: false,
+              strikeThrough: false,
+              underlined: false
+            },
+            elevation: 0,
+            checked: false,
+            pressed: false,
+            enabled: true
+          },
+          highlighted: false,
+          focused: false,
           desiredSize: {
             type: "Size",
             width: 24,
             height: 24
           },
-          desiredSizeOverride: true
+          desiredSizeOverride: true,
+          cursor: {
+            type: "Cursor",
+            kind: "Arrow",
+            path: ""
+          },
+          acceptsFocus: true,
+          focusScope: false,
+          wantsTabKey: false,
+          childViews: []
         },
         {
           type: "ToolbarButton",
-          name: "closeBtn",
+          text: "",
           icon: "Images/icons/find/close.svg",
+          toggleButton: false,
+          checked: false,
+          enabled: true,
+          bounds: {
+            type: "Rect",
+            pos: {
+              type: "Point",
+              x: 382,
+              y: 0
+            },
+            size: {
+              type: "Size",
+              width: 24,
+              height: 24
+            }
+          },
+          visible: true,
+          layoutIgnored: false,
+          name: "closeBtn",
+          style: {
+            type: "ThemedToolbarButtonStyle",
+            backgroundFill: {
+              type: "Fill",
+              kind: "None",
+              color: "#000000ff",
+              gradient: {
+                type: "Gradient",
+                kind: "Linear",
+                linearStart: {
+                  type: "Point",
+                  x: 0,
+                  y: 0
+                },
+                linearEnd: {
+                  type: "Point",
+                  x: 1,
+                  y: 0
+                },
+                radialCenter: {
+                  type: "Point",
+                  x: 0.5,
+                  y: 0.5
+                },
+                radialFocalOffset: {
+                  type: "Point",
+                  x: 0,
+                  y: 0
+                },
+                radialRadius: 0.5,
+                conicCenter: {
+                  type: "Point",
+                  x: 0.5,
+                  y: 0.5
+                },
+                conicAngle: 0,
+                conicRepeat: 1,
+                stops: [],
+                extendMode: "Pad",
+                points: [],
+                pointBlendPower: 2,
+                pointRasterMax: 64
+              },
+              imagePath: "",
+              opacity: 1
+            },
+            borderFill: "#00000000",
+            borderWidth: 0,
+            highlightFill: "#00000000",
+            strokeStyle: "StrokeColor",
+            imageFillMode: "Tile",
+            imageAlignment: "Center",
+            rectRadius: 0,
+            opacity: 1,
+            compositingOp: "CompSrcOver",
+            font: {
+              type: "Font",
+              name: "Segoe UI",
+              size: 12,
+              bold: false,
+              italic: false,
+              strikeThrough: false,
+              underlined: false
+            },
+            elevation: 0,
+            checked: false,
+            pressed: false,
+            enabled: true
+          },
+          highlighted: false,
+          focused: false,
           desiredSize: {
             type: "Size",
             width: 24,
             height: 24
           },
-          desiredSizeOverride: true
+          desiredSizeOverride: true,
+          cursor: {
+            type: "Cursor",
+            kind: "Arrow",
+            path: ""
+          },
+          acceptsFocus: true,
+          focusScope: false,
+          wantsTabKey: false,
+          childViews: []
         }
-      ],
+      ]
+    },
+    {
+      type: "SubView",
+      bounds: {
+        type: "Rect",
+        pos: {
+          type: "Point",
+          x: 7,
+          y: 43
+        },
+        size: {
+          type: "Size",
+          width: 406,
+          height: 24
+        }
+      },
+      visible: true,
+      layoutIgnored: false,
+      name: "replaceRow",
+      layout: {
+        type: "FlexLayout",
+        orientation: "Horizontal",
+        mainAxisAlignment: "Start",
+        crossAxisAlignment: "Center",
+        spacing: 4,
+        padding: 0,
+        wrap: false,
+        lineSpacing: 0,
+        alignContent: "Start"
+      },
+      style: {
+        type: "ViewStyle",
+        backgroundFill: {
+          type: "Fill",
+          kind: "None",
+          color: "#000000ff",
+          gradient: {
+            type: "Gradient",
+            kind: "Linear",
+            linearStart: {
+              type: "Point",
+              x: 0,
+              y: 0
+            },
+            linearEnd: {
+              type: "Point",
+              x: 1,
+              y: 0
+            },
+            radialCenter: {
+              type: "Point",
+              x: 0.5,
+              y: 0.5
+            },
+            radialFocalOffset: {
+              type: "Point",
+              x: 0,
+              y: 0
+            },
+            radialRadius: 0.5,
+            conicCenter: {
+              type: "Point",
+              x: 0.5,
+              y: 0.5
+            },
+            conicAngle: 0,
+            conicRepeat: 1,
+            stops: [],
+            extendMode: "Pad",
+            points: [],
+            pointBlendPower: 2,
+            pointRasterMax: 64
+          },
+          imagePath: "",
+          opacity: 1
+        },
+        borderFill: "#00000000",
+        borderWidth: 0,
+        highlightFill: "#00000000",
+        strokeStyle: "StrokeColor",
+        imageFillMode: "Tile",
+        imageAlignment: "Center",
+        rectRadius: 0,
+        opacity: 1,
+        compositingOp: "CompSrcOver",
+        font: {
+          type: "Font",
+          name: "",
+          size: 12,
+          bold: false,
+          italic: false,
+          strikeThrough: false,
+          underlined: false
+        },
+        elevation: 0
+      },
+      highlighted: false,
+      focused: false,
       desiredSize: {
         type: "Size",
         width: 408,
         height: 24
       },
-      desiredSizeOverride: true
-    },
-    {
-      type: "SubView",
-      visible: true,
-      name: "replaceRow",
-      layout: {
-        type: "FlexLayout",
-        orientation: "Horizontal",
-        spacing: 4,
-        padding: 0,
-        crossAxisAlignment: "Center"
+      desiredSizeOverride: true,
+      cursor: {
+        type: "Cursor",
+        kind: "Arrow",
+        path: ""
       },
+      acceptsFocus: false,
+      focusScope: false,
+      wantsTabKey: false,
       childViews: [
         {
           type: "SubView",
+          bounds: {
+            type: "Rect",
+            pos: {
+              type: "Point",
+              x: 0,
+              y: 0
+            },
+            size: {
+              type: "Size",
+              width: 18,
+              height: 24
+            }
+          },
           visible: true,
+          layoutIgnored: false,
+          name: "subView6",
+          style: {
+            type: "ViewStyle",
+            backgroundFill: {
+              type: "Fill",
+              kind: "None",
+              color: "#000000ff",
+              gradient: {
+                type: "Gradient",
+                kind: "Linear",
+                linearStart: {
+                  type: "Point",
+                  x: 0,
+                  y: 0
+                },
+                linearEnd: {
+                  type: "Point",
+                  x: 1,
+                  y: 0
+                },
+                radialCenter: {
+                  type: "Point",
+                  x: 0.5,
+                  y: 0.5
+                },
+                radialFocalOffset: {
+                  type: "Point",
+                  x: 0,
+                  y: 0
+                },
+                radialRadius: 0.5,
+                conicCenter: {
+                  type: "Point",
+                  x: 0.5,
+                  y: 0.5
+                },
+                conicAngle: 0,
+                conicRepeat: 1,
+                stops: [],
+                extendMode: "Pad",
+                points: [],
+                pointBlendPower: 2,
+                pointRasterMax: 64
+              },
+              imagePath: "",
+              opacity: 1
+            },
+            borderFill: "#00000000",
+            borderWidth: 0,
+            highlightFill: "#00000000",
+            strokeStyle: "StrokeColor",
+            imageFillMode: "Tile",
+            imageAlignment: "Center",
+            rectRadius: 0,
+            opacity: 1,
+            compositingOp: "CompSrcOver",
+            font: {
+              type: "Font",
+              name: "",
+              size: 12,
+              bold: false,
+              italic: false,
+              strikeThrough: false,
+              underlined: false
+            },
+            elevation: 0
+          },
+          highlighted: false,
+          focused: false,
           desiredSize: {
             type: "Size",
             width: 18,
             height: 24
           },
-          desiredSizeOverride: true
+          desiredSizeOverride: true,
+          cursor: {
+            type: "Cursor",
+            kind: "Arrow",
+            path: ""
+          },
+          acceptsFocus: false,
+          focusScope: false,
+          wantsTabKey: false,
+          childViews: []
         },
         {
           type: "TextField",
-          name: "replaceInput",
-          placeholder: "Replace",
+          controller: {
+            type: "TextController",
+            model: {
+              type: "TextModel",
+              storage: {
+                type: "TextStorage",
+                text: ""
+              },
+              text: "",
+              name: ""
+            },
+            selection: {
+              type: "TextSelection",
+              ranges: [],
+              empty: true,
+              color: "#006fc4e3"
+            },
+            caret: {
+              type: "Caret",
+              position: {
+                type: "TextPosition",
+                offset: -9223372036854775808,
+                valid: false
+              },
+              color: "#000000ff",
+              visible: false,
+              active: false
+            },
+            overwriteMode: false,
+            font: {
+              type: "Font",
+              name: "Consolas",
+              size: 13,
+              bold: false,
+              italic: false,
+              strikeThrough: false,
+              underlined: false
+            },
+            textColor: "#000000ff",
+            showsWhitespace: false,
+            highlightsCurrentLine: false,
+            tabWidth: 4,
+            multiline: false,
+            scrollOffsetY: 0,
+            name: ""
+          },
+          model: {
+            type: "TextModel",
+            storage: {
+              type: "TextStorage",
+              text: ""
+            },
+            text: "",
+            name: ""
+          },
+          text: "",
           font: {
             type: "Font",
             name: "Consolas",
-            size: 13
+            size: 13,
+            bold: false,
+            italic: false,
+            strikeThrough: false,
+            underlined: false
           },
-          textColor: "ControlText",
+          textColor: "#000000ff",
+          placeholder: "Replace",
+          enabled: true,
+          layoutParams: {
+            type: "FlexLayoutParams",
+            weight: 1
+          },
+          bounds: {
+            type: "Rect",
+            pos: {
+              type: "Point",
+              x: 22,
+              y: 0
+            },
+            size: {
+              type: "Size",
+              width: 174,
+              height: 24
+            }
+          },
+          visible: true,
+          layoutIgnored: false,
+          name: "replaceInput",
+          style: {
+            type: "ThemedEditStyle",
+            backgroundFill: {
+              type: "Fill",
+              kind: "None",
+              color: "#000000ff",
+              gradient: {
+                type: "Gradient",
+                kind: "Linear",
+                linearStart: {
+                  type: "Point",
+                  x: 0,
+                  y: 0
+                },
+                linearEnd: {
+                  type: "Point",
+                  x: 1,
+                  y: 0
+                },
+                radialCenter: {
+                  type: "Point",
+                  x: 0.5,
+                  y: 0.5
+                },
+                radialFocalOffset: {
+                  type: "Point",
+                  x: 0,
+                  y: 0
+                },
+                radialRadius: 0.5,
+                conicCenter: {
+                  type: "Point",
+                  x: 0.5,
+                  y: 0.5
+                },
+                conicAngle: 0,
+                conicRepeat: 1,
+                stops: [],
+                extendMode: "Pad",
+                points: [],
+                pointBlendPower: 2,
+                pointRasterMax: 64
+              },
+              imagePath: "",
+              opacity: 1
+            },
+            borderFill: "#00000000",
+            borderWidth: 0,
+            highlightFill: "#00000000",
+            strokeStyle: "StrokeColor",
+            imageFillMode: "Tile",
+            imageAlignment: "Center",
+            rectRadius: 0,
+            opacity: 1,
+            compositingOp: "CompSrcOver",
+            font: {
+              type: "Font",
+              name: "",
+              size: 12,
+              bold: false,
+              italic: false,
+              strikeThrough: false,
+              underlined: false
+            },
+            elevation: 0,
+            focused: false,
+            readOnly: false,
+            enabled: true
+          },
+          highlighted: false,
+          focused: false,
           desiredSize: {
             type: "Size",
             width: 176,
             height: 24
           },
           desiredSizeOverride: true,
-          layoutParams: {
-            type: "FlexLayoutParams",
-            weight: 1.0
-          }
+          cursor: {
+            type: "Cursor",
+            kind: "Arrow",
+            path: ""
+          },
+          acceptsFocus: true,
+          focusScope: false,
+          wantsTabKey: false,
+          childViews: []
         },
         {
           type: "Button",
-          name: "replaceBtn",
           text: "Replace",
+          toggleButton: false,
+          checked: false,
+          enabled: true,
+          bounds: {
+            type: "Rect",
+            pos: {
+              type: "Point",
+              x: 200,
+              y: 0
+            },
+            size: {
+              type: "Size",
+              width: 64,
+              height: 24
+            }
+          },
+          visible: true,
+          layoutIgnored: false,
+          name: "replaceBtn",
+          style: {
+            type: "ThemedButtonStyle",
+            backgroundFill: {
+              type: "Fill",
+              kind: "None",
+              color: "#000000ff",
+              gradient: {
+                type: "Gradient",
+                kind: "Linear",
+                linearStart: {
+                  type: "Point",
+                  x: 0,
+                  y: 0
+                },
+                linearEnd: {
+                  type: "Point",
+                  x: 1,
+                  y: 0
+                },
+                radialCenter: {
+                  type: "Point",
+                  x: 0.5,
+                  y: 0.5
+                },
+                radialFocalOffset: {
+                  type: "Point",
+                  x: 0,
+                  y: 0
+                },
+                radialRadius: 0.5,
+                conicCenter: {
+                  type: "Point",
+                  x: 0.5,
+                  y: 0.5
+                },
+                conicAngle: 0,
+                conicRepeat: 1,
+                stops: [],
+                extendMode: "Pad",
+                points: [],
+                pointBlendPower: 2,
+                pointRasterMax: 64
+              },
+              imagePath: "",
+              opacity: 1
+            },
+            borderFill: "#00000000",
+            borderWidth: 0,
+            highlightFill: "#00000000",
+            strokeStyle: "StrokeColor",
+            imageFillMode: "Tile",
+            imageAlignment: "Center",
+            rectRadius: 0,
+            opacity: 1,
+            compositingOp: "CompSrcOver",
+            font: {
+              type: "Font",
+              name: "Segoe UI",
+              size: 12,
+              bold: false,
+              italic: false,
+              strikeThrough: false,
+              underlined: false
+            },
+            elevation: 0,
+            pressed: false,
+            enabled: true
+          },
+          highlighted: false,
+          focused: false,
           desiredSize: {
             type: "Size",
             width: 64,
             height: 24
           },
-          desiredSizeOverride: true
+          desiredSizeOverride: true,
+          cursor: {
+            type: "Cursor",
+            kind: "Arrow",
+            path: ""
+          },
+          acceptsFocus: true,
+          focusScope: false,
+          wantsTabKey: false,
+          childViews: []
         },
         {
           type: "Button",
-          name: "renameBtn",
           text: "Rename",
+          toggleButton: false,
+          checked: false,
+          enabled: true,
+          bounds: {
+            type: "Rect",
+            pos: {
+              type: "Point",
+              x: 268,
+              y: 0
+            },
+            size: {
+              type: "Size",
+              width: 58,
+              height: 24
+            }
+          },
+          visible: true,
+          layoutIgnored: false,
+          name: "renameBtn",
+          style: {
+            type: "ThemedButtonStyle",
+            backgroundFill: {
+              type: "Fill",
+              kind: "None",
+              color: "#000000ff",
+              gradient: {
+                type: "Gradient",
+                kind: "Linear",
+                linearStart: {
+                  type: "Point",
+                  x: 0,
+                  y: 0
+                },
+                linearEnd: {
+                  type: "Point",
+                  x: 1,
+                  y: 0
+                },
+                radialCenter: {
+                  type: "Point",
+                  x: 0.5,
+                  y: 0.5
+                },
+                radialFocalOffset: {
+                  type: "Point",
+                  x: 0,
+                  y: 0
+                },
+                radialRadius: 0.5,
+                conicCenter: {
+                  type: "Point",
+                  x: 0.5,
+                  y: 0.5
+                },
+                conicAngle: 0,
+                conicRepeat: 1,
+                stops: [],
+                extendMode: "Pad",
+                points: [],
+                pointBlendPower: 2,
+                pointRasterMax: 64
+              },
+              imagePath: "",
+              opacity: 1
+            },
+            borderFill: "#00000000",
+            borderWidth: 0,
+            highlightFill: "#00000000",
+            strokeStyle: "StrokeColor",
+            imageFillMode: "Tile",
+            imageAlignment: "Center",
+            rectRadius: 0,
+            opacity: 1,
+            compositingOp: "CompSrcOver",
+            font: {
+              type: "Font",
+              name: "Segoe UI",
+              size: 12,
+              bold: false,
+              italic: false,
+              strikeThrough: false,
+              underlined: false
+            },
+            elevation: 0,
+            pressed: false,
+            enabled: true
+          },
+          highlighted: false,
+          focused: false,
           desiredSize: {
             type: "Size",
             width: 58,
             height: 24
           },
-          desiredSizeOverride: true
+          desiredSizeOverride: true,
+          cursor: {
+            type: "Cursor",
+            kind: "Arrow",
+            path: ""
+          },
+          acceptsFocus: true,
+          focusScope: false,
+          wantsTabKey: false,
+          childViews: []
         },
         {
           type: "Button",
-          name: "replaceAllBtn",
           text: "Replace all",
+          toggleButton: false,
+          checked: false,
+          enabled: true,
+          bounds: {
+            type: "Rect",
+            pos: {
+              type: "Point",
+              x: 330,
+              y: 0
+            },
+            size: {
+              type: "Size",
+              width: 76,
+              height: 24
+            }
+          },
+          visible: true,
+          layoutIgnored: false,
+          name: "replaceAllBtn",
+          style: {
+            type: "ThemedButtonStyle",
+            backgroundFill: {
+              type: "Fill",
+              kind: "None",
+              color: "#000000ff",
+              gradient: {
+                type: "Gradient",
+                kind: "Linear",
+                linearStart: {
+                  type: "Point",
+                  x: 0,
+                  y: 0
+                },
+                linearEnd: {
+                  type: "Point",
+                  x: 1,
+                  y: 0
+                },
+                radialCenter: {
+                  type: "Point",
+                  x: 0.5,
+                  y: 0.5
+                },
+                radialFocalOffset: {
+                  type: "Point",
+                  x: 0,
+                  y: 0
+                },
+                radialRadius: 0.5,
+                conicCenter: {
+                  type: "Point",
+                  x: 0.5,
+                  y: 0.5
+                },
+                conicAngle: 0,
+                conicRepeat: 1,
+                stops: [],
+                extendMode: "Pad",
+                points: [],
+                pointBlendPower: 2,
+                pointRasterMax: 64
+              },
+              imagePath: "",
+              opacity: 1
+            },
+            borderFill: "#00000000",
+            borderWidth: 0,
+            highlightFill: "#00000000",
+            strokeStyle: "StrokeColor",
+            imageFillMode: "Tile",
+            imageAlignment: "Center",
+            rectRadius: 0,
+            opacity: 1,
+            compositingOp: "CompSrcOver",
+            font: {
+              type: "Font",
+              name: "Segoe UI",
+              size: 12,
+              bold: false,
+              italic: false,
+              strikeThrough: false,
+              underlined: false
+            },
+            elevation: 0,
+            pressed: false,
+            enabled: true
+          },
+          highlighted: false,
+          focused: false,
           desiredSize: {
             type: "Size",
             width: 76,
             height: 24
           },
-          desiredSizeOverride: true
+          desiredSizeOverride: true,
+          cursor: {
+            type: "Cursor",
+            kind: "Arrow",
+            path: ""
+          },
+          acceptsFocus: true,
+          focusScope: false,
+          wantsTabKey: false,
+          childViews: []
         }
-      ],
+      ]
+    },
+    {
+      type: "SubView",
+      bounds: {
+        type: "Rect",
+        pos: {
+          type: "Point",
+          x: 7,
+          y: 71
+        },
+        size: {
+          type: "Size",
+          width: 406,
+          height: 24
+        }
+      },
+      visible: true,
+      layoutIgnored: false,
+      name: "scopeRow",
+      layout: {
+        type: "FlexLayout",
+        orientation: "Horizontal",
+        mainAxisAlignment: "Start",
+        crossAxisAlignment: "Center",
+        spacing: 8,
+        padding: 0,
+        wrap: false,
+        lineSpacing: 0,
+        alignContent: "Start"
+      },
+      style: {
+        type: "ViewStyle",
+        backgroundFill: {
+          type: "Fill",
+          kind: "None",
+          color: "#000000ff",
+          gradient: {
+            type: "Gradient",
+            kind: "Linear",
+            linearStart: {
+              type: "Point",
+              x: 0,
+              y: 0
+            },
+            linearEnd: {
+              type: "Point",
+              x: 1,
+              y: 0
+            },
+            radialCenter: {
+              type: "Point",
+              x: 0.5,
+              y: 0.5
+            },
+            radialFocalOffset: {
+              type: "Point",
+              x: 0,
+              y: 0
+            },
+            radialRadius: 0.5,
+            conicCenter: {
+              type: "Point",
+              x: 0.5,
+              y: 0.5
+            },
+            conicAngle: 0,
+            conicRepeat: 1,
+            stops: [],
+            extendMode: "Pad",
+            points: [],
+            pointBlendPower: 2,
+            pointRasterMax: 64
+          },
+          imagePath: "",
+          opacity: 1
+        },
+        borderFill: "#00000000",
+        borderWidth: 0,
+        highlightFill: "#00000000",
+        strokeStyle: "StrokeColor",
+        imageFillMode: "Tile",
+        imageAlignment: "Center",
+        rectRadius: 0,
+        opacity: 1,
+        compositingOp: "CompSrcOver",
+        font: {
+          type: "Font",
+          name: "",
+          size: 12,
+          bold: false,
+          italic: false,
+          strikeThrough: false,
+          underlined: false
+        },
+        elevation: 0
+      },
+      highlighted: false,
+      focused: false,
       desiredSize: {
         type: "Size",
         width: 408,
         height: 24
       },
-      desiredSizeOverride: true
-    },
-    {
-      type: "SubView",
-      visible: true,
-      name: "scopeRow",
-      layout: {
-        type: "FlexLayout",
-        orientation: "Horizontal",
-        spacing: 8,
-        padding: 0,
-        crossAxisAlignment: "Center"
+      desiredSizeOverride: true,
+      cursor: {
+        type: "Cursor",
+        kind: "Arrow",
+        path: ""
       },
+      acceptsFocus: false,
+      focusScope: false,
+      wantsTabKey: false,
       childViews: [
         {
           type: "SubView",
+          bounds: {
+            type: "Rect",
+            pos: {
+              type: "Point",
+              x: 0,
+              y: 2
+            },
+            size: {
+              type: "Size",
+              width: 12,
+              height: 20
+            }
+          },
           visible: true,
+          layoutIgnored: false,
+          name: "subView7",
+          style: {
+            type: "ViewStyle",
+            backgroundFill: {
+              type: "Fill",
+              kind: "None",
+              color: "#000000ff",
+              gradient: {
+                type: "Gradient",
+                kind: "Linear",
+                linearStart: {
+                  type: "Point",
+                  x: 0,
+                  y: 0
+                },
+                linearEnd: {
+                  type: "Point",
+                  x: 1,
+                  y: 0
+                },
+                radialCenter: {
+                  type: "Point",
+                  x: 0.5,
+                  y: 0.5
+                },
+                radialFocalOffset: {
+                  type: "Point",
+                  x: 0,
+                  y: 0
+                },
+                radialRadius: 0.5,
+                conicCenter: {
+                  type: "Point",
+                  x: 0.5,
+                  y: 0.5
+                },
+                conicAngle: 0,
+                conicRepeat: 1,
+                stops: [],
+                extendMode: "Pad",
+                points: [],
+                pointBlendPower: 2,
+                pointRasterMax: 64
+              },
+              imagePath: "",
+              opacity: 1
+            },
+            borderFill: "#00000000",
+            borderWidth: 0,
+            highlightFill: "#00000000",
+            strokeStyle: "StrokeColor",
+            imageFillMode: "Tile",
+            imageAlignment: "Center",
+            rectRadius: 0,
+            opacity: 1,
+            compositingOp: "CompSrcOver",
+            font: {
+              type: "Font",
+              name: "",
+              size: 12,
+              bold: false,
+              italic: false,
+              strikeThrough: false,
+              underlined: false
+            },
+            elevation: 0
+          },
+          highlighted: false,
+          focused: false,
           desiredSize: {
             type: "Size",
             width: 12,
             height: 20
           },
-          desiredSizeOverride: true
+          desiredSizeOverride: true,
+          cursor: {
+            type: "Cursor",
+            kind: "Arrow",
+            path: ""
+          },
+          acceptsFocus: false,
+          focusScope: false,
+          wantsTabKey: false,
+          childViews: []
         },
         {
           type: "SubView",
+          bounds: {
+            type: "Rect",
+            pos: {
+              type: "Point",
+              x: 20,
+              y: 0
+            },
+            size: {
+              type: "Size",
+              width: 194,
+              height: 24
+            }
+          },
           visible: true,
+          layoutIgnored: false,
           name: "kindSeg",
           layout: {
             type: "FlexLayout",
             orientation: "Horizontal",
+            mainAxisAlignment: "Start",
+            crossAxisAlignment: "Center",
             spacing: 2,
             padding: 2,
-            crossAxisAlignment: "Center"
+            wrap: false,
+            lineSpacing: 0,
+            alignContent: "Start"
           },
           style: {
             type: "ViewStyle",
             backgroundFill: {
               type: "Fill",
               kind: "Color",
-              color: "WindowBackground"
+              color: "#ffffffff",
+              gradient: {
+                type: "Gradient",
+                kind: "Linear",
+                linearStart: {
+                  type: "Point",
+                  x: 0,
+                  y: 0
+                },
+                linearEnd: {
+                  type: "Point",
+                  x: 1,
+                  y: 0
+                },
+                radialCenter: {
+                  type: "Point",
+                  x: 0.5,
+                  y: 0.5
+                },
+                radialFocalOffset: {
+                  type: "Point",
+                  x: 0,
+                  y: 0
+                },
+                radialRadius: 0.5,
+                conicCenter: {
+                  type: "Point",
+                  x: 0.5,
+                  y: 0.5
+                },
+                conicAngle: 0,
+                conicRepeat: 1,
+                stops: [],
+                extendMode: "Pad",
+                points: [],
+                pointBlendPower: 2,
+                pointRasterMax: 64
+              },
+              imagePath: "",
+              opacity: 1
             },
-            rectRadius: 7
+            borderFill: "#00000000",
+            borderWidth: 0,
+            highlightFill: "#00000000",
+            strokeStyle: "StrokeColor",
+            imageFillMode: "Tile",
+            imageAlignment: "Center",
+            rectRadius: 7,
+            opacity: 1,
+            compositingOp: "CompSrcOver",
+            font: {
+              type: "Font",
+              name: "",
+              size: 12,
+              bold: false,
+              italic: false,
+              strikeThrough: false,
+              underlined: false
+            },
+            elevation: 0
           },
-          childViews: [
-            {
-              type: "ToolbarButton",
-              name: "kindAll",
-              text: "All",
-              toggleButton: true,
-              checked: true,
-              desiredSize: {
-                type: "Size",
-                width: 32,
-                height: 20
-              },
-              desiredSizeOverride: true
-            },
-            {
-              type: "ToolbarButton",
-              name: "kindCode",
-              text: "Code",
-              toggleButton: true,
-              desiredSize: {
-                type: "Size",
-                width: 40,
-                height: 20
-              },
-              desiredSizeOverride: true
-            },
-            {
-              type: "ToolbarButton",
-              name: "kindComment",
-              text: "Comments",
-              toggleButton: true,
-              desiredSize: {
-                type: "Size",
-                width: 62,
-                height: 20
-              },
-              desiredSizeOverride: true
-            },
-            {
-              type: "ToolbarButton",
-              name: "kindString",
-              text: "Strings",
-              toggleButton: true,
-              desiredSize: {
-                type: "Size",
-                width: 50,
-                height: 20
-              },
-              desiredSizeOverride: true
-            }
-          ],
+          highlighted: false,
+          focused: false,
           desiredSize: {
             type: "Size",
             width: 194,
             height: 24
           },
-          desiredSizeOverride: true
+          desiredSizeOverride: true,
+          cursor: {
+            type: "Cursor",
+            kind: "Arrow",
+            path: ""
+          },
+          acceptsFocus: false,
+          focusScope: false,
+          wantsTabKey: false,
+          childViews: [
+            {
+              type: "ToolbarButton",
+              text: "All",
+              icon: "",
+              toggleButton: true,
+              checked: true,
+              enabled: true,
+              bounds: {
+                type: "Rect",
+                pos: {
+                  type: "Point",
+                  x: 2,
+                  y: 2
+                },
+                size: {
+                  type: "Size",
+                  width: 32,
+                  height: 20
+                }
+              },
+              visible: true,
+              layoutIgnored: false,
+              name: "kindAll",
+              style: {
+                type: "ThemedToolbarButtonStyle",
+                backgroundFill: {
+                  type: "Fill",
+                  kind: "None",
+                  color: "#000000ff",
+                  gradient: {
+                    type: "Gradient",
+                    kind: "Linear",
+                    linearStart: {
+                      type: "Point",
+                      x: 0,
+                      y: 0
+                    },
+                    linearEnd: {
+                      type: "Point",
+                      x: 1,
+                      y: 0
+                    },
+                    radialCenter: {
+                      type: "Point",
+                      x: 0.5,
+                      y: 0.5
+                    },
+                    radialFocalOffset: {
+                      type: "Point",
+                      x: 0,
+                      y: 0
+                    },
+                    radialRadius: 0.5,
+                    conicCenter: {
+                      type: "Point",
+                      x: 0.5,
+                      y: 0.5
+                    },
+                    conicAngle: 0,
+                    conicRepeat: 1,
+                    stops: [],
+                    extendMode: "Pad",
+                    points: [],
+                    pointBlendPower: 2,
+                    pointRasterMax: 64
+                  },
+                  imagePath: "",
+                  opacity: 1
+                },
+                borderFill: "#00000000",
+                borderWidth: 0,
+                highlightFill: "#00000000",
+                strokeStyle: "StrokeColor",
+                imageFillMode: "Tile",
+                imageAlignment: "Center",
+                rectRadius: 0,
+                opacity: 1,
+                compositingOp: "CompSrcOver",
+                font: {
+                  type: "Font",
+                  name: "Segoe UI",
+                  size: 12,
+                  bold: false,
+                  italic: false,
+                  strikeThrough: false,
+                  underlined: false
+                },
+                elevation: 0,
+                checked: true,
+                pressed: false,
+                enabled: true
+              },
+              highlighted: false,
+              focused: false,
+              desiredSize: {
+                type: "Size",
+                width: 32,
+                height: 20
+              },
+              desiredSizeOverride: true,
+              cursor: {
+                type: "Cursor",
+                kind: "Arrow",
+                path: ""
+              },
+              acceptsFocus: true,
+              focusScope: false,
+              wantsTabKey: false,
+              childViews: []
+            },
+            {
+              type: "ToolbarButton",
+              text: "Code",
+              icon: "",
+              toggleButton: true,
+              checked: false,
+              enabled: true,
+              bounds: {
+                type: "Rect",
+                pos: {
+                  type: "Point",
+                  x: 36,
+                  y: 2
+                },
+                size: {
+                  type: "Size",
+                  width: 40,
+                  height: 20
+                }
+              },
+              visible: true,
+              layoutIgnored: false,
+              name: "kindCode",
+              style: {
+                type: "ThemedToolbarButtonStyle",
+                backgroundFill: {
+                  type: "Fill",
+                  kind: "None",
+                  color: "#000000ff",
+                  gradient: {
+                    type: "Gradient",
+                    kind: "Linear",
+                    linearStart: {
+                      type: "Point",
+                      x: 0,
+                      y: 0
+                    },
+                    linearEnd: {
+                      type: "Point",
+                      x: 1,
+                      y: 0
+                    },
+                    radialCenter: {
+                      type: "Point",
+                      x: 0.5,
+                      y: 0.5
+                    },
+                    radialFocalOffset: {
+                      type: "Point",
+                      x: 0,
+                      y: 0
+                    },
+                    radialRadius: 0.5,
+                    conicCenter: {
+                      type: "Point",
+                      x: 0.5,
+                      y: 0.5
+                    },
+                    conicAngle: 0,
+                    conicRepeat: 1,
+                    stops: [],
+                    extendMode: "Pad",
+                    points: [],
+                    pointBlendPower: 2,
+                    pointRasterMax: 64
+                  },
+                  imagePath: "",
+                  opacity: 1
+                },
+                borderFill: "#00000000",
+                borderWidth: 0,
+                highlightFill: "#00000000",
+                strokeStyle: "StrokeColor",
+                imageFillMode: "Tile",
+                imageAlignment: "Center",
+                rectRadius: 0,
+                opacity: 1,
+                compositingOp: "CompSrcOver",
+                font: {
+                  type: "Font",
+                  name: "Segoe UI",
+                  size: 12,
+                  bold: false,
+                  italic: false,
+                  strikeThrough: false,
+                  underlined: false
+                },
+                elevation: 0,
+                checked: false,
+                pressed: false,
+                enabled: true
+              },
+              highlighted: false,
+              focused: false,
+              desiredSize: {
+                type: "Size",
+                width: 40,
+                height: 20
+              },
+              desiredSizeOverride: true,
+              cursor: {
+                type: "Cursor",
+                kind: "Arrow",
+                path: ""
+              },
+              acceptsFocus: true,
+              focusScope: false,
+              wantsTabKey: false,
+              childViews: []
+            },
+            {
+              type: "ToolbarButton",
+              text: "Comments",
+              icon: "",
+              toggleButton: true,
+              checked: false,
+              enabled: true,
+              bounds: {
+                type: "Rect",
+                pos: {
+                  type: "Point",
+                  x: 78,
+                  y: 2
+                },
+                size: {
+                  type: "Size",
+                  width: 62,
+                  height: 20
+                }
+              },
+              visible: true,
+              layoutIgnored: false,
+              name: "kindComment",
+              style: {
+                type: "ThemedToolbarButtonStyle",
+                backgroundFill: {
+                  type: "Fill",
+                  kind: "None",
+                  color: "#000000ff",
+                  gradient: {
+                    type: "Gradient",
+                    kind: "Linear",
+                    linearStart: {
+                      type: "Point",
+                      x: 0,
+                      y: 0
+                    },
+                    linearEnd: {
+                      type: "Point",
+                      x: 1,
+                      y: 0
+                    },
+                    radialCenter: {
+                      type: "Point",
+                      x: 0.5,
+                      y: 0.5
+                    },
+                    radialFocalOffset: {
+                      type: "Point",
+                      x: 0,
+                      y: 0
+                    },
+                    radialRadius: 0.5,
+                    conicCenter: {
+                      type: "Point",
+                      x: 0.5,
+                      y: 0.5
+                    },
+                    conicAngle: 0,
+                    conicRepeat: 1,
+                    stops: [],
+                    extendMode: "Pad",
+                    points: [],
+                    pointBlendPower: 2,
+                    pointRasterMax: 64
+                  },
+                  imagePath: "",
+                  opacity: 1
+                },
+                borderFill: "#00000000",
+                borderWidth: 0,
+                highlightFill: "#00000000",
+                strokeStyle: "StrokeColor",
+                imageFillMode: "Tile",
+                imageAlignment: "Center",
+                rectRadius: 0,
+                opacity: 1,
+                compositingOp: "CompSrcOver",
+                font: {
+                  type: "Font",
+                  name: "Segoe UI",
+                  size: 12,
+                  bold: false,
+                  italic: false,
+                  strikeThrough: false,
+                  underlined: false
+                },
+                elevation: 0,
+                checked: false,
+                pressed: false,
+                enabled: true
+              },
+              highlighted: false,
+              focused: false,
+              desiredSize: {
+                type: "Size",
+                width: 62,
+                height: 20
+              },
+              desiredSizeOverride: true,
+              cursor: {
+                type: "Cursor",
+                kind: "Arrow",
+                path: ""
+              },
+              acceptsFocus: true,
+              focusScope: false,
+              wantsTabKey: false,
+              childViews: []
+            },
+            {
+              type: "ToolbarButton",
+              text: "Strings",
+              icon: "",
+              toggleButton: true,
+              checked: false,
+              enabled: true,
+              bounds: {
+                type: "Rect",
+                pos: {
+                  type: "Point",
+                  x: 142,
+                  y: 2
+                },
+                size: {
+                  type: "Size",
+                  width: 50,
+                  height: 20
+                }
+              },
+              visible: true,
+              layoutIgnored: false,
+              name: "kindString",
+              style: {
+                type: "ThemedToolbarButtonStyle",
+                backgroundFill: {
+                  type: "Fill",
+                  kind: "None",
+                  color: "#000000ff",
+                  gradient: {
+                    type: "Gradient",
+                    kind: "Linear",
+                    linearStart: {
+                      type: "Point",
+                      x: 0,
+                      y: 0
+                    },
+                    linearEnd: {
+                      type: "Point",
+                      x: 1,
+                      y: 0
+                    },
+                    radialCenter: {
+                      type: "Point",
+                      x: 0.5,
+                      y: 0.5
+                    },
+                    radialFocalOffset: {
+                      type: "Point",
+                      x: 0,
+                      y: 0
+                    },
+                    radialRadius: 0.5,
+                    conicCenter: {
+                      type: "Point",
+                      x: 0.5,
+                      y: 0.5
+                    },
+                    conicAngle: 0,
+                    conicRepeat: 1,
+                    stops: [],
+                    extendMode: "Pad",
+                    points: [],
+                    pointBlendPower: 2,
+                    pointRasterMax: 64
+                  },
+                  imagePath: "",
+                  opacity: 1
+                },
+                borderFill: "#00000000",
+                borderWidth: 0,
+                highlightFill: "#00000000",
+                strokeStyle: "StrokeColor",
+                imageFillMode: "Tile",
+                imageAlignment: "Center",
+                rectRadius: 0,
+                opacity: 1,
+                compositingOp: "CompSrcOver",
+                font: {
+                  type: "Font",
+                  name: "Segoe UI",
+                  size: 12,
+                  bold: false,
+                  italic: false,
+                  strikeThrough: false,
+                  underlined: false
+                },
+                elevation: 0,
+                checked: false,
+                pressed: false,
+                enabled: true
+              },
+              highlighted: false,
+              focused: false,
+              desiredSize: {
+                type: "Size",
+                width: 50,
+                height: 20
+              },
+              desiredSizeOverride: true,
+              cursor: {
+                type: "Cursor",
+                kind: "Arrow",
+                path: ""
+              },
+              acceptsFocus: true,
+              focusScope: false,
+              wantsTabKey: false,
+              childViews: []
+            }
+          ]
         },
         {
           type: "SubView",
+          bounds: {
+            type: "Rect",
+            pos: {
+              type: "Point",
+              x: 222,
+              y: 0
+            },
+            size: {
+              type: "Size",
+              width: 144,
+              height: 24
+            }
+          },
           visible: true,
+          layoutIgnored: false,
           name: "regionSeg",
           layout: {
             type: "FlexLayout",
             orientation: "Horizontal",
+            mainAxisAlignment: "Start",
+            crossAxisAlignment: "Center",
             spacing: 2,
             padding: 2,
-            crossAxisAlignment: "Center"
+            wrap: false,
+            lineSpacing: 0,
+            alignContent: "Start"
           },
           style: {
             type: "ViewStyle",
             backgroundFill: {
               type: "Fill",
               kind: "Color",
-              color: "WindowBackground"
+              color: "#ffffffff",
+              gradient: {
+                type: "Gradient",
+                kind: "Linear",
+                linearStart: {
+                  type: "Point",
+                  x: 0,
+                  y: 0
+                },
+                linearEnd: {
+                  type: "Point",
+                  x: 1,
+                  y: 0
+                },
+                radialCenter: {
+                  type: "Point",
+                  x: 0.5,
+                  y: 0.5
+                },
+                radialFocalOffset: {
+                  type: "Point",
+                  x: 0,
+                  y: 0
+                },
+                radialRadius: 0.5,
+                conicCenter: {
+                  type: "Point",
+                  x: 0.5,
+                  y: 0.5
+                },
+                conicAngle: 0,
+                conicRepeat: 1,
+                stops: [],
+                extendMode: "Pad",
+                points: [],
+                pointBlendPower: 2,
+                pointRasterMax: 64
+              },
+              imagePath: "",
+              opacity: 1
             },
-            rectRadius: 7
+            borderFill: "#00000000",
+            borderWidth: 0,
+            highlightFill: "#00000000",
+            strokeStyle: "StrokeColor",
+            imageFillMode: "Tile",
+            imageAlignment: "Center",
+            rectRadius: 7,
+            opacity: 1,
+            compositingOp: "CompSrcOver",
+            font: {
+              type: "Font",
+              name: "",
+              size: 12,
+              bold: false,
+              italic: false,
+              strikeThrough: false,
+              underlined: false
+            },
+            elevation: 0
           },
-          childViews: [
-            {
-              type: "ToolbarButton",
-              name: "regionFile",
-              text: "File",
-              toggleButton: true,
-              checked: true,
-              desiredSize: {
-                type: "Size",
-                width: 32,
-                height: 20
-              },
-              desiredSizeOverride: true
-            },
-            {
-              type: "ToolbarButton",
-              name: "regionFn",
-              text: "Function",
-              toggleButton: true,
-              desiredSize: {
-                type: "Size",
-                width: 106,
-                height: 20
-              },
-              desiredSizeOverride: true
-            }
-          ],
+          highlighted: false,
+          focused: false,
           desiredSize: {
             type: "Size",
             width: 144,
             height: 24
           },
-          desiredSizeOverride: true
+          desiredSizeOverride: true,
+          cursor: {
+            type: "Cursor",
+            kind: "Arrow",
+            path: ""
+          },
+          acceptsFocus: false,
+          focusScope: false,
+          wantsTabKey: false,
+          childViews: [
+            {
+              type: "ToolbarButton",
+              text: "File",
+              icon: "",
+              toggleButton: true,
+              checked: true,
+              enabled: true,
+              bounds: {
+                type: "Rect",
+                pos: {
+                  type: "Point",
+                  x: 2,
+                  y: 2
+                },
+                size: {
+                  type: "Size",
+                  width: 32,
+                  height: 20
+                }
+              },
+              visible: true,
+              layoutIgnored: false,
+              name: "regionFile",
+              style: {
+                type: "ThemedToolbarButtonStyle",
+                backgroundFill: {
+                  type: "Fill",
+                  kind: "None",
+                  color: "#000000ff",
+                  gradient: {
+                    type: "Gradient",
+                    kind: "Linear",
+                    linearStart: {
+                      type: "Point",
+                      x: 0,
+                      y: 0
+                    },
+                    linearEnd: {
+                      type: "Point",
+                      x: 1,
+                      y: 0
+                    },
+                    radialCenter: {
+                      type: "Point",
+                      x: 0.5,
+                      y: 0.5
+                    },
+                    radialFocalOffset: {
+                      type: "Point",
+                      x: 0,
+                      y: 0
+                    },
+                    radialRadius: 0.5,
+                    conicCenter: {
+                      type: "Point",
+                      x: 0.5,
+                      y: 0.5
+                    },
+                    conicAngle: 0,
+                    conicRepeat: 1,
+                    stops: [],
+                    extendMode: "Pad",
+                    points: [],
+                    pointBlendPower: 2,
+                    pointRasterMax: 64
+                  },
+                  imagePath: "",
+                  opacity: 1
+                },
+                borderFill: "#00000000",
+                borderWidth: 0,
+                highlightFill: "#00000000",
+                strokeStyle: "StrokeColor",
+                imageFillMode: "Tile",
+                imageAlignment: "Center",
+                rectRadius: 0,
+                opacity: 1,
+                compositingOp: "CompSrcOver",
+                font: {
+                  type: "Font",
+                  name: "Segoe UI",
+                  size: 12,
+                  bold: false,
+                  italic: false,
+                  strikeThrough: false,
+                  underlined: false
+                },
+                elevation: 0,
+                checked: true,
+                pressed: false,
+                enabled: true
+              },
+              highlighted: false,
+              focused: false,
+              desiredSize: {
+                type: "Size",
+                width: 32,
+                height: 20
+              },
+              desiredSizeOverride: true,
+              cursor: {
+                type: "Cursor",
+                kind: "Arrow",
+                path: ""
+              },
+              acceptsFocus: true,
+              focusScope: false,
+              wantsTabKey: false,
+              childViews: []
+            },
+            {
+              type: "ToolbarButton",
+              text: "Function",
+              icon: "",
+              toggleButton: true,
+              checked: false,
+              enabled: true,
+              bounds: {
+                type: "Rect",
+                pos: {
+                  type: "Point",
+                  x: 36,
+                  y: 2
+                },
+                size: {
+                  type: "Size",
+                  width: 106,
+                  height: 20
+                }
+              },
+              visible: true,
+              layoutIgnored: false,
+              name: "regionFn",
+              style: {
+                type: "ThemedToolbarButtonStyle",
+                backgroundFill: {
+                  type: "Fill",
+                  kind: "None",
+                  color: "#000000ff",
+                  gradient: {
+                    type: "Gradient",
+                    kind: "Linear",
+                    linearStart: {
+                      type: "Point",
+                      x: 0,
+                      y: 0
+                    },
+                    linearEnd: {
+                      type: "Point",
+                      x: 1,
+                      y: 0
+                    },
+                    radialCenter: {
+                      type: "Point",
+                      x: 0.5,
+                      y: 0.5
+                    },
+                    radialFocalOffset: {
+                      type: "Point",
+                      x: 0,
+                      y: 0
+                    },
+                    radialRadius: 0.5,
+                    conicCenter: {
+                      type: "Point",
+                      x: 0.5,
+                      y: 0.5
+                    },
+                    conicAngle: 0,
+                    conicRepeat: 1,
+                    stops: [],
+                    extendMode: "Pad",
+                    points: [],
+                    pointBlendPower: 2,
+                    pointRasterMax: 64
+                  },
+                  imagePath: "",
+                  opacity: 1
+                },
+                borderFill: "#00000000",
+                borderWidth: 0,
+                highlightFill: "#00000000",
+                strokeStyle: "StrokeColor",
+                imageFillMode: "Tile",
+                imageAlignment: "Center",
+                rectRadius: 0,
+                opacity: 1,
+                compositingOp: "CompSrcOver",
+                font: {
+                  type: "Font",
+                  name: "Segoe UI",
+                  size: 12,
+                  bold: false,
+                  italic: false,
+                  strikeThrough: false,
+                  underlined: false
+                },
+                elevation: 0,
+                checked: false,
+                pressed: false,
+                enabled: true
+              },
+              highlighted: false,
+              focused: false,
+              desiredSize: {
+                type: "Size",
+                width: 106,
+                height: 20
+              },
+              desiredSizeOverride: true,
+              cursor: {
+                type: "Cursor",
+                kind: "Arrow",
+                path: ""
+              },
+              acceptsFocus: true,
+              focusScope: false,
+              wantsTabKey: false,
+              childViews: []
+            }
+          ]
         }
-      ],
-      desiredSize: {
-        type: "Size",
-        width: 408,
-        height: 24
-      },
-      desiredSizeOverride: true
+      ]
     },
     {
       type: "SubView",
+      bounds: {
+        type: "Rect",
+        pos: {
+          type: "Point",
+          x: 7,
+          y: 99
+        },
+        size: {
+          type: "Size",
+          width: 406,
+          height: 14
+        }
+      },
       visible: true,
+      layoutIgnored: false,
       name: "breakdownRow",
       layout: {
         type: "FlexLayout",
         orientation: "Horizontal",
+        mainAxisAlignment: "Start",
+        crossAxisAlignment: "Center",
         spacing: 0,
         padding: 0,
-        crossAxisAlignment: "Center"
+        wrap: false,
+        lineSpacing: 0,
+        alignContent: "Start"
       },
+      style: {
+        type: "ViewStyle",
+        backgroundFill: {
+          type: "Fill",
+          kind: "None",
+          color: "#000000ff",
+          gradient: {
+            type: "Gradient",
+            kind: "Linear",
+            linearStart: {
+              type: "Point",
+              x: 0,
+              y: 0
+            },
+            linearEnd: {
+              type: "Point",
+              x: 1,
+              y: 0
+            },
+            radialCenter: {
+              type: "Point",
+              x: 0.5,
+              y: 0.5
+            },
+            radialFocalOffset: {
+              type: "Point",
+              x: 0,
+              y: 0
+            },
+            radialRadius: 0.5,
+            conicCenter: {
+              type: "Point",
+              x: 0.5,
+              y: 0.5
+            },
+            conicAngle: 0,
+            conicRepeat: 1,
+            stops: [],
+            extendMode: "Pad",
+            points: [],
+            pointBlendPower: 2,
+            pointRasterMax: 64
+          },
+          imagePath: "",
+          opacity: 1
+        },
+        borderFill: "#00000000",
+        borderWidth: 0,
+        highlightFill: "#00000000",
+        strokeStyle: "StrokeColor",
+        imageFillMode: "Tile",
+        imageAlignment: "Center",
+        rectRadius: 0,
+        opacity: 1,
+        compositingOp: "CompSrcOver",
+        font: {
+          type: "Font",
+          name: "",
+          size: 12,
+          bold: false,
+          italic: false,
+          strikeThrough: false,
+          underlined: false
+        },
+        elevation: 0
+      },
+      highlighted: false,
+      focused: false,
+      desiredSize: {
+        type: "Size",
+        width: 408,
+        height: 14
+      },
+      desiredSizeOverride: true,
+      cursor: {
+        type: "Cursor",
+        kind: "Arrow",
+        path: ""
+      },
+      acceptsFocus: false,
+      focusScope: false,
+      wantsTabKey: false,
       childViews: [
         {
           type: "SubView",
+          bounds: {
+            type: "Rect",
+            pos: {
+              type: "Point",
+              x: 0,
+              y: 0
+            },
+            size: {
+              type: "Size",
+              width: 18,
+              height: 14
+            }
+          },
           visible: true,
+          layoutIgnored: false,
+          name: "subView8",
+          style: {
+            type: "ViewStyle",
+            backgroundFill: {
+              type: "Fill",
+              kind: "None",
+              color: "#000000ff",
+              gradient: {
+                type: "Gradient",
+                kind: "Linear",
+                linearStart: {
+                  type: "Point",
+                  x: 0,
+                  y: 0
+                },
+                linearEnd: {
+                  type: "Point",
+                  x: 1,
+                  y: 0
+                },
+                radialCenter: {
+                  type: "Point",
+                  x: 0.5,
+                  y: 0.5
+                },
+                radialFocalOffset: {
+                  type: "Point",
+                  x: 0,
+                  y: 0
+                },
+                radialRadius: 0.5,
+                conicCenter: {
+                  type: "Point",
+                  x: 0.5,
+                  y: 0.5
+                },
+                conicAngle: 0,
+                conicRepeat: 1,
+                stops: [],
+                extendMode: "Pad",
+                points: [],
+                pointBlendPower: 2,
+                pointRasterMax: 64
+              },
+              imagePath: "",
+              opacity: 1
+            },
+            borderFill: "#00000000",
+            borderWidth: 0,
+            highlightFill: "#00000000",
+            strokeStyle: "StrokeColor",
+            imageFillMode: "Tile",
+            imageAlignment: "Center",
+            rectRadius: 0,
+            opacity: 1,
+            compositingOp: "CompSrcOver",
+            font: {
+              type: "Font",
+              name: "",
+              size: 12,
+              bold: false,
+              italic: false,
+              strikeThrough: false,
+              underlined: false
+            },
+            elevation: 0
+          },
+          highlighted: false,
+          focused: false,
           desiredSize: {
             type: "Size",
             width: 18,
             height: 14
           },
-          desiredSizeOverride: true
+          desiredSizeOverride: true,
+          cursor: {
+            type: "Cursor",
+            kind: "Arrow",
+            path: ""
+          },
+          acceptsFocus: false,
+          focusScope: false,
+          wantsTabKey: false,
+          childViews: []
         },
         {
           type: "Label",
-          name: "breakdown",
           text: "",
           textAlignment: "Left",
+          hotLink: false,
+          enabled: true,
+          layoutParams: {
+            type: "FlexLayoutParams",
+            weight: 1
+          },
+          bounds: {
+            type: "Rect",
+            pos: {
+              type: "Point",
+              x: 18,
+              y: 0
+            },
+            size: {
+              type: "Size",
+              width: 388,
+              height: 14
+            }
+          },
+          visible: true,
+          layoutIgnored: false,
+          name: "breakdown",
           style: {
             type: "LabelStyle",
             text: "",
-            textColor: "DisabledText",
+            textColor: "#838383ff",
+            wordWrap: false,
+            textAlignment: "Left",
+            backgroundFill: {
+              type: "Fill",
+              kind: "None",
+              color: "#000000ff",
+              gradient: {
+                type: "Gradient",
+                kind: "Linear",
+                linearStart: {
+                  type: "Point",
+                  x: 0,
+                  y: 0
+                },
+                linearEnd: {
+                  type: "Point",
+                  x: 1,
+                  y: 0
+                },
+                radialCenter: {
+                  type: "Point",
+                  x: 0.5,
+                  y: 0.5
+                },
+                radialFocalOffset: {
+                  type: "Point",
+                  x: 0,
+                  y: 0
+                },
+                radialRadius: 0.5,
+                conicCenter: {
+                  type: "Point",
+                  x: 0.5,
+                  y: 0.5
+                },
+                conicAngle: 0,
+                conicRepeat: 1,
+                stops: [],
+                extendMode: "Pad",
+                points: [],
+                pointBlendPower: 2,
+                pointRasterMax: 64
+              },
+              imagePath: "",
+              opacity: 1
+            },
+            borderFill: "#00000000",
+            borderWidth: 0,
+            highlightFill: "#00000000",
+            strokeStyle: "StrokeColor",
+            imageFillMode: "Tile",
+            imageAlignment: "Center",
+            rectRadius: 0,
+            opacity: 1,
+            compositingOp: "CompSrcOver",
             font: {
               type: "Font",
               name: "Segoe UI",
-              size: 11
-            }
+              size: 11,
+              bold: false,
+              italic: false,
+              strikeThrough: false,
+              underlined: false
+            },
+            elevation: 0
           },
+          highlighted: false,
+          focused: false,
           desiredSize: {
             type: "Size",
             width: 390,
             height: 14
           },
           desiredSizeOverride: true,
-          layoutParams: {
-            type: "FlexLayoutParams",
-            weight: 1.0
-          }
+          cursor: {
+            type: "Cursor",
+            kind: "Arrow",
+            path: ""
+          },
+          acceptsFocus: false,
+          focusScope: false,
+          wantsTabKey: false,
+          childViews: []
         }
-      ],
-      desiredSize: {
-        type: "Size",
-        width: 408,
-        height: 14
-      },
-      desiredSizeOverride: true
+      ]
     }
   ]
 }

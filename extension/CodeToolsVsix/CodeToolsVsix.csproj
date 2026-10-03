@@ -43,7 +43,7 @@
          at the default location - same property name/default as this repo's root CMakeLists.txt
          (CPPCODETOOLS_LLVM_ROOT), kept in sync via -D below so an override actually reaches the
          native build, not just the deployment-file lookup. -->
-    <LLVMInstallDir Condition="'$(LLVMInstallDir)'==''">C:\Program Files\LLVM</LLVMInstallDir>
+    <LLVMInstallDir Condition="'$(LLVMInstallDir)'==''">D:\code\LLVM-23.1.2</LLVMInstallDir>
 
     <!-- cpp_codetools' own repo root and CMake build directory (extension/CodeToolsVsix -> up
          two levels). NativeEditControls.dll is a CMake target (root CMakeLists.txt), built by
@@ -90,6 +90,16 @@
     <CMakeExe Condition="'$(CMakeExe)'==''">$(DevEnvDir)CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe</CMakeExe>
 	  <EnableUnmanagedDebugging>true</EnableUnmanagedDebugging>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Remove="CodeToolsSettings.registration.json" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="CodeToolsSettings.registration.json">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
 
   <ItemGroup>
     <!-- Meta-package pulling in the VS shell / editor / OLE interop assemblies.
@@ -182,9 +192,7 @@
       <_NativeResourceFile Include="$(RepoBuildDir)\$(Configuration)\Resources\**\*.*" />
     </ItemGroup>
 
-    <Copy SourceFiles="@(_NativeResourceFile)"
-          DestinationFiles="@(_NativeResourceFile -> '$(OutDir)Resources\%(RecursiveDir)%(Filename)%(Extension)')"
-          SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(_NativeResourceFile)" DestinationFiles="@(_NativeResourceFile -> '$(OutDir)Resources\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
 
     <ItemGroup>
       <Content Include="@(_NativeDeploymentFile)">

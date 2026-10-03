@@ -33,8 +33,9 @@ namespace CodeToolsVsix
     /// type. Values are explicit on both sides, same discipline as EditorCommand below.</summary>
     internal enum DocumentType : int
     {
-        CppSource = 0,
-        Designer = 1,
+        UnrecognizedType = 0,
+        CppSource = 1,
+        Designer = 2
     }
 
     /// <summary>Mirrors NativeEditor.h's EditorCommand. Values are explicit on both sides
@@ -90,7 +91,11 @@ namespace CodeToolsVsix
 
         [DllImport("NativeEditControls.dll", EntryPoint = "NativeEditControl_SetServiceProvider", CallingConvention = CallingConvention.Cdecl, SetLastError = true)]
         public static extern bool NativeEditControl_SetServiceProvider([MarshalAs(UnmanagedType.IUnknown)] object servicerProviderPtr);
-        
+
+
+        [DllImport("NativeEditControls.dll", CallingConvention = CallingConvention.StdCall, CharSet = CharSet.Unicode)]
+        public static extern void NativeEditControl_SettingChanged(string settingName, string value);
+
 
         /// <summary>Destroys the control behind hwnd - must be used instead of
         /// <see cref="DestroyWindow"/> (see <see cref="NativeEditControl_Create"/>'s own comment
@@ -134,6 +139,22 @@ namespace CodeToolsVsix
         /// OutputWindowLogger.SinkDelegate's own comment on why.</summary>
         [DllImport("NativeEditControls.dll", EntryPoint = "NativeEditControl_SetLogSink", CallingConvention = CallingConvention.StdCall)]
         public static extern void NativeEditControl_SetLogSink(LogSinkCallback sink);
+
+        /// <summary>Connects (or, with nulls, disconnects) the callbacks native uses to read and edit
+        /// a file open in VS's own text editor - see HostDocumentEditor. Both delegates must stay
+        /// alive for as long as they are registered.</summary>
+        [DllImport("NativeEditControls.dll", EntryPoint = "NativeEditControl_SetHostEditor", CallingConvention = CallingConvention.StdCall)]
+        public static extern void NativeEditControl_SetHostEditor(HostGetTextCallback getText, HostApplyEditsCallback applyEdits);
+
+        /// <summary>Answers a HostGetTextCallback request (from any thread). textLength (in chars) is
+        /// explicit; text may be null when status is not Ok.</summary>
+        [DllImport("NativeEditControls.dll", EntryPoint = "NativeEditControl_HostGetTextReply", CallingConvention = CallingConvention.StdCall)]
+        public static extern void NativeEditControl_HostGetTextReply(ulong requestId, int status,
+            [MarshalAs(UnmanagedType.LPWStr)] string text, UIntPtr textLength, ulong version);
+
+        /// <summary>Answers a HostApplyEditsCallback request (from any thread).</summary>
+        [DllImport("NativeEditControls.dll", EntryPoint = "NativeEditControl_HostApplyEditsReply", CallingConvention = CallingConvention.StdCall)]
+        public static extern void NativeEditControl_HostApplyEditsReply(ulong requestId, int status);
 
         [DllImport("user32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]

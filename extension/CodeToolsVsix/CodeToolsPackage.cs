@@ -5,6 +5,7 @@ using Microsoft.VisualStudio;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
 using Task = System.Threading.Tasks.Task;
+using Microsoft.VisualStudio.Settings;
 
 namespace CodeToolsVsix
 {
@@ -35,14 +36,26 @@ namespace CodeToolsVsix
     // DocumentType.Designer end to end (see CodeToolsEditorPane.DocumentTypeFromPath), routing to
     // DesignerEditor instead of CppEditor.
     [ProvideEditorExtension(typeof(CodeToolsEditorFactory), ".newui", 100)]
+    [ProvideSettingsManifest(PackageRelativeManifestFile = "CodeToolsSettings.registration.json")]
     public sealed class CodeToolsPackage : AsyncPackage
     {
+        public static OptionsStorage Options { get; private set; }
+
         protected override async Task InitializeAsync(CancellationToken cancellationToken, IProgress<ServiceProgressData> progress)
         {
             await base.InitializeAsync(cancellationToken, progress);
             await JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
             
             RegisterEditorFactory(new CodeToolsEditorFactory(this));
+
+            // 1. Fetch the Visual Studio Settings Manager service
+            ISettingsManager settingsManager = await GetServiceAsync(typeof(SVsSettingsManager)) as ISettingsManager;
+
+            if (settingsManager != null)
+            {
+                // 2. Instantiate your storage wrapper
+                Options = new OptionsStorage(settingsManager);
+            }
         }
     }
 }

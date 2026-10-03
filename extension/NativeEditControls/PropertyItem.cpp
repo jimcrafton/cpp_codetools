@@ -317,15 +317,7 @@ namespace CodeToolsVsix
         }
 
         if (node.kind == PropertiesModel::Kind::DelegateEntry) {
-            std::vector<std::string> listeners = node.delegate->describedListeners(node.ownerInstance);
-            std::string joined;
-            for (std::size_t i = 0; i < listeners.size(); ++i) {
-                if (i > 0) {
-                    joined += ", ";
-                }
-                joined += listeners[i];
-            }
-            paintText(ctx, valueRect, joined.empty() ? "(no listeners)" : joined, rowTextColor(*this));
+            paintText(ctx, valueRect, model->delegateRowText(node), rowTextColor(*this));
             return;
         }
 

@@ -1,4 +1,6 @@
+#include "../extension/NativeEditControls/ControllerRef.h"
 #include "../extension/NativeEditControls/DesignerClipboard.h"
+#include "../extension/NativeEditControls/TextEncoding.h"
 #include "../extension/NativeEditControls/DesignerEditor.h"
 
 #include <newui/bundle.h>
@@ -1498,6 +1500,597 @@ TEST_F(DesignerEditorFileFixture, SavePreservesTitleAndBoundsWhileReplacingRootV
     EXPECT_EQ(reloaded.getBounds(), newui::Rect(1, 2, 300, 200));
     ASSERT_EQ(reloaded.rootView().childViews().size(), 1u);
     EXPECT_EQ(reloaded.rootView().childViews()[0]->name(), "editedChild");
+}
+
+TEST_F(DesignerEditorFileFixture, SaveKeepsTheTopLevelControllerKey)
+{
+    writeFile(R"({
+        title: "Original Title",
+        controller: { class: "SaveDialogController", header: "SaveDialogController.h" },
+        rootView: { type: "RootView" },
+    })");
+
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+    newui::SubView* child = new newui::SubView();
+    child->setName("edited");
+    editor.workspace()->rootViewProxy()->addChild(child);
+
+    std::wstring path = filePath();
+    ASSERT_TRUE(editor.save(path.c_str(), path.size()));
+
+    std::ifstream in(path_, std::ios::binary);
+    const std::string saved((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    CodeToolsVsix::ControllerRef ref;
+    ASSERT_TRUE(CodeToolsVsix::readControllerRef(CodeToolsVsix::utf8ToWide(saved), ref)) << saved;
+    EXPECT_EQ(ref.className, "SaveDialogController");
+    EXPECT_EQ(ref.header, "SaveDialogController.h");
+}
+
+// The controller reference (the file's top-level `controller` key) lives in the editor across
+// load / save / Source, so a Save As or an unsaved change never depends on the file on disk.
+namespace {
+    std::string readAll(const std::string& path)
+    {
+        std::ifstream in(path, std::ios::binary);
+        return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    }
+
+    bool controllerOnDisk(const std::string& path, CodeToolsVsix::ControllerRef& out)
+    {
+        return CodeToolsVsix::readControllerRef(CodeToolsVsix::utf8ToWide(readAll(path)), out);
+    }
+
+    const CodeToolsVsix::ControllerRef kSaveController{"SaveDialogController", "SaveDialogController.h"};
+}
+
+TEST_F(DesignerEditorFileFixture, LoadReadsTheControllerReferenceFromTheFile)
+{
+    writeFile(R"({ title: "T", controller: { class: "SaveDialogController", header: "SaveDialogController.h" }, rootView: { type: "RootView" } })");
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+    EXPECT_EQ(editor.controllerRef(), nullptr) << "a blank document has none";
+
+    std::wstring path = filePath();
+    ASSERT_TRUE(editor.load(path.c_str(), path.size()));
+    ASSERT_NE(editor.controllerRef(), nullptr);
+    EXPECT_EQ(*editor.controllerRef(), kSaveController);
+}
+
+TEST_F(DesignerEditorFileFixture, LoadingAFileWithoutOneClearsTheReferenceFromThePreviousDocument)
+{
+    writeFile(R"({ controller: { class: "A", header: "A.h" }, rootView: { type: "RootView" } })");
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+    std::wstring path = filePath();
+    ASSERT_TRUE(editor.load(path.c_str(), path.size()));
+    ASSERT_NE(editor.controllerRef(), nullptr);
+
+    writeFile(R"({ title: "Other", rootView: { type: "RootView" } })");
+    ASSERT_TRUE(editor.load(path.c_str(), path.size()));
+    EXPECT_EQ(editor.controllerRef(), nullptr);
+}
+
+TEST_F(DesignerEditorFileFixture, SetControllerRefMarksTheDocumentModifiedAndSaveWritesTheKey)
+{
+    writeFile(R"({ title: "Keep Me", rootView: { type: "RootView" } })");
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+    std::wstring path = filePath();
+    ASSERT_TRUE(editor.load(path.c_str(), path.size()));
+    ASSERT_FALSE(editor.document().isModified());
+
+    editor.setControllerRef(kSaveController);
+    EXPECT_TRUE(editor.document().isModified());
+    // Nothing is written behind the open document's back.
+    CodeToolsVsix::ControllerRef onDisk;
+    EXPECT_FALSE(controllerOnDisk(path_, onDisk));
+
+    ASSERT_TRUE(editor.save(path.c_str(), path.size()));
+    ASSERT_TRUE(controllerOnDisk(path_, onDisk));
+    EXPECT_EQ(onDisk, kSaveController);
+    EXPECT_NE(readAll(path_).find("Keep Me"), std::string::npos) << "the rest of the file is kept";
+}
+
+TEST_F(DesignerEditorFileFixture, SaveAsToANewPathStillWritesTheKey)
+{
+    writeFile(R"({ controller: { class: "SaveDialogController", header: "SaveDialogController.h" }, rootView: { type: "RootView" } })");
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+    std::wstring path = filePath();
+    ASSERT_TRUE(editor.load(path.c_str(), path.size()));
+
+    const std::string other = dir_ + "\\DesignerEditorProbeCopy.newui";
+    const std::wstring otherWide(other.begin(), other.end());
+    ASSERT_TRUE(editor.save(otherWide.c_str(), otherWide.size()));   // no key in that file to inherit
+    CodeToolsVsix::ControllerRef onDisk;
+    ASSERT_TRUE(controllerOnDisk(other, onDisk));
+    EXPECT_EQ(onDisk, kSaveController);
+    ::DeleteFileA(other.c_str());
+    ::DeleteFileA((other + ".bak").c_str());
+}
+
+TEST_F(DesignerEditorFileFixture, ChangingTheReferenceReplacesTheKeyInTheSavedFile)
+{
+    writeFile(R"({ controller: { class: "Old", header: "Old.h" }, rootView: { type: "RootView" } })");
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+    std::wstring path = filePath();
+    ASSERT_TRUE(editor.load(path.c_str(), path.size()));
+
+    editor.setControllerRef(kSaveController);
+    ASSERT_TRUE(editor.save(path.c_str(), path.size()));
+
+    CodeToolsVsix::ControllerRef onDisk;
+    ASSERT_TRUE(controllerOnDisk(path_, onDisk));
+    EXPECT_EQ(onDisk, kSaveController);
+    EXPECT_EQ(readAll(path_).find("Old"), std::string::npos);
+}
+
+TEST_F(DesignerEditorFileFixture, ClearingTheReferenceWithAnEmptyClassNameLeavesNoneInTheEditor)
+{
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+    editor.setControllerRef(kSaveController);
+    ASSERT_NE(editor.controllerRef(), nullptr);
+    editor.setControllerRef(CodeToolsVsix::ControllerRef{});
+    EXPECT_EQ(editor.controllerRef(), nullptr);
+}
+
+TEST_F(DesignerEditorFileFixture, TheSourceViewsTextIncludesAReferenceThatIsNotSavedYet)
+{
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+    EXPECT_EQ(editor.documentText().find("controller:"), std::string::npos);
+
+    editor.setControllerRef(kSaveController);
+    const std::string text = editor.documentText();
+    CodeToolsVsix::ControllerRef inText;
+    ASSERT_TRUE(CodeToolsVsix::readControllerRef(CodeToolsVsix::utf8ToWide(text), inText)) << text;
+    EXPECT_EQ(inText, kSaveController);
+}
+
+TEST_F(DesignerEditorFileFixture, EditingTheKeyInSourceUpdatesOrClearsTheReference)
+{
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+    editor.setControllerRef(kSaveController);
+
+    // A Source edit that names a different controller...
+    std::string text = editor.documentText();
+    const std::size_t at = text.find("SaveDialogController.h");
+    ASSERT_NE(at, std::string::npos);
+    text.replace(at, std::string("SaveDialogController.h").size(), "Renamed.h");
+    std::string error;
+    ASSERT_TRUE(editor.applyDocumentText(text, &error)) << error;
+    ASSERT_NE(editor.controllerRef(), nullptr);
+    EXPECT_EQ(editor.controllerRef()->header, "Renamed.h");
+
+    // ...and one that deletes the key altogether.
+    ASSERT_TRUE(editor.applyDocumentText(R"({ rootView: { type: "RootView" } })", &error)) << error;
+    EXPECT_EQ(editor.controllerRef(), nullptr);
+}
+
+// Recorded delegate bindings (a control's "delegates" block) are checked against the controller's
+// header on every load. No run loop exists in unit tests, so the check runs inline.
+namespace {
+    // A controller that compiles on its own (a stand-in newui with the same Delegate::add shape).
+    const char* kBindingHeader =
+        "namespace newui {\n"
+        "enum class SyncReturn { Handled, Ignored };\n"
+        "template<typename S, typename... A> struct Delegate {\n"
+        "    template<typename T> void add(T* i, SyncReturn (T::*m)(S&, A...)) {}\n"
+        "};\n"
+        "struct Control { Delegate<Control> onClick; };\n"
+        "struct Button : Control {};\n"
+        "class Component { protected: virtual bool internal_init() { return true; } };\n"
+        "class RootController : public Component {};\n"
+        "}\n"
+        "class SaveDialogController : public newui::RootController {\n"
+        "protected:\n"
+        "    bool internal_init() override {\n"
+        "        if (!newui::Component::internal_init()) { return false; }\n"
+        "        saveButton_->onClick.add(this, &SaveDialogController::onSaveButtonClick);\n"
+        "        return true;\n"
+        "    }\n"
+        "private:\n"
+        "    newui::SyncReturn onSaveButtonClick(newui::Control& sender) { return newui::SyncReturn::Handled; }\n"
+        "    newui::Button* saveButton_ = nullptr;\n"
+        "};\n";
+
+    const char* kBoundDocument = R"({
+        title: "T",
+        controller: { class: "SaveDialogController", header: "SaveDialogController.h" },
+        rootView: { type: "RootView", childViews: [
+            { type: "Button", name: "saveButton",
+              delegates: { onClick: ["this@SaveDialogController.onSaveButtonClick"] } },
+        ] },
+    })";
+}
+
+TEST_F(DesignerEditorFileFixture, LoadChecksTheRecordedBindingsAgainstTheControllersHeader)
+{
+    const std::string header = dir_ + "\\SaveDialogController.h";
+    { std::ofstream(header, std::ios::binary) << kBindingHeader; }
+    writeFile(kBoundDocument);
+
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+    int fired = 0;
+    editor.onBindingsVerified.add([&fired](CodeToolsVsix::DesignerEditor&) { ++fired; return newui::SyncReturn::Handled; });
+
+    std::wstring path = filePath();
+    ASSERT_TRUE(editor.load(path.c_str(), path.size()));
+
+    ASSERT_EQ(editor.bindingChecks().size(), 1u);
+    const CodeToolsVsix::VerifiedBinding& check = editor.bindingChecks()[0];
+    EXPECT_EQ(check.viewName, "saveButton");
+    EXPECT_EQ(check.delegate, "onClick");
+    EXPECT_EQ(check.descriptor, "this@SaveDialogController.onSaveButtonClick");
+    EXPECT_EQ(check.check.status, cpptools::BindingStatus::Ok) << check.check.detail;
+    EXPECT_GE(fired, 1);
+    ::DeleteFileA(header.c_str());
+}
+
+TEST_F(DesignerEditorFileFixture, ADeletedHandlerIsFoundWhenTheBindingsAreRecheckedAgainstTheEditedHeader)
+{
+    const std::string header = dir_ + "\\SaveDialogController.h";
+    { std::ofstream(header, std::ios::binary) << kBindingHeader; }
+    writeFile(kBoundDocument);
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+    std::wstring path = filePath();
+    ASSERT_TRUE(editor.load(path.c_str(), path.size()));
+    ASSERT_EQ(editor.bindingChecks().at(0).check.status, cpptools::BindingStatus::Ok);
+
+    // The handler is renamed in code.
+    std::string edited = kBindingHeader;
+    const std::size_t at = edited.find("onSaveButtonClick(newui::Control& sender)");
+    ASSERT_NE(at, std::string::npos);
+    edited.replace(at, std::string("onSaveButtonClick").size(), "onRenamedHandler");
+    { std::ofstream(header, std::ios::binary | std::ios::trunc) << edited; }
+
+    editor.verifyControllerBindings();
+    ASSERT_EQ(editor.bindingChecks().size(), 1u);
+    EXPECT_EQ(editor.bindingChecks()[0].check.status, cpptools::BindingStatus::MethodMissing)
+        << editor.bindingChecks()[0].check.detail;   // the descriptor still names the old method
+    ::DeleteFileA(header.c_str());
+}
+
+TEST_F(DesignerEditorFileFixture, AControllerWhoseHeaderIsMissingCannotBeVerified)
+{
+    writeFile(kBoundDocument);   // no SaveDialogController.h beside it
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+    std::wstring path = filePath();
+    ASSERT_TRUE(editor.load(path.c_str(), path.size()));
+
+    ASSERT_EQ(editor.bindingChecks().size(), 1u);
+    EXPECT_EQ(editor.bindingChecks()[0].check.status, cpptools::BindingStatus::CannotVerify);
+    EXPECT_NE(editor.bindingChecks()[0].check.detail.find("SaveDialogController.h"), std::string::npos);
+}
+
+TEST_F(DesignerEditorFileFixture, WithoutAControllerThereIsNothingToCheck)
+{
+    writeFile(R"({ rootView: { type: "RootView", childViews: [
+        { type: "Button", name: "saveButton", delegates: { onClick: ["this@SaveDialogController.onSaveButtonClick"] } } ] } })");
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+    std::wstring path = filePath();
+    ASSERT_TRUE(editor.load(path.c_str(), path.size()));
+    EXPECT_TRUE(editor.bindingChecks().empty());
+}
+
+TEST_F(DesignerEditorFileFixture, ARecordedBindingSurvivesLoadAndSave)
+{
+    writeFile(kBoundDocument);
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+    std::wstring path = filePath();
+    ASSERT_TRUE(editor.load(path.c_str(), path.size()));
+    ASSERT_TRUE(editor.save(path.c_str(), path.size()));
+
+    // This is what used to be lost on every designer save: the binding, kept through load and save.
+    const std::string saved = readAll(path_);
+    EXPECT_NE(saved.find("this@SaveDialogController.onSaveButtonClick"), std::string::npos) << saved;
+    CodeToolsVsix::ControllerRef ref;
+    EXPECT_TRUE(controllerOnDisk(path_, ref));
+}
+
+namespace {
+    // Like kBindingHeader above but with nothing wired yet.
+    const char* kBindingHeaderNoWiring =
+        "namespace newui {\n"
+        "enum class SyncReturn { Handled, Ignored };\n"
+        "template<typename S, typename... A> struct Delegate {\n"
+        "    template<typename T> void add(T* i, SyncReturn (T::*m)(S&, A...)) {}\n"
+        "};\n"
+        "struct Control { Delegate<Control> onClick; };\n"
+        "struct Button : Control {};\n"
+        "class Component { protected: virtual bool internal_init() { return true; } };\n"
+        "class RootController : public Component {};\n"
+        "}\n"
+        "class SaveDialogController : public newui::RootController {\n"
+        "public:\n"
+        "    using RootController::RootController;\n"
+        "};\n";
+}
+
+// The whole "wire this event" loop through the editor: adopt/create the controller, wire, save, reload in
+// a fresh editor and have the recorded binding still verify against the (edited) header.
+TEST_F(DesignerEditorFileFixture, WiringAnEventThroughTheEditorSurvivesSaveAndReload)
+{
+    const std::string header = dir_ + "\\SaveDialogController.h";
+    { std::ofstream(header, std::ios::binary) << kBindingHeaderNoWiring; }
+    writeFile(R"({ title: "T", rootView: { type: "RootView", childViews: [ { type: "Button", name: "saveButton" } ] } })");
+
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+    std::wstring path = filePath();
+    ASSERT_TRUE(editor.load(path.c_str(), path.size()));
+    ASSERT_EQ(editor.controllerRef(), nullptr);
+
+    // Step 0: the header is already there and defines the class, so it is adopted, not rewritten.
+    ASSERT_EQ(editor.createController("SaveDialogController", "SaveDialogController.h"),
+              CodeToolsVsix::CreateControllerStatus::Adopted);
+    ASSERT_NE(editor.controllerRef(), nullptr);
+
+    newui::Button* button = nullptr;
+    for (newui::SubView* child : editor.workspace()->rootViewProxy()->childViews()) {
+        button = dynamic_cast<newui::Button*>(child);
+    }
+    ASSERT_NE(button, nullptr);
+
+    CodeToolsVsix::WireResult wired;
+    bool called = false;
+    editor.wireDelegate(*button, "onClick", "", [&](CodeToolsVsix::WireResult r) { wired = std::move(r); called = true; });
+    ASSERT_TRUE(called);
+    ASSERT_EQ(wired.status, CodeToolsVsix::WireStatus::Ok);
+    EXPECT_EQ(wired.descriptor, "this@SaveDialogController.onSaveButtonClick");
+    EXPECT_TRUE(editor.document().isModified());
+    ASSERT_EQ(editor.bindingChecks().size(), 1u);
+    EXPECT_EQ(editor.bindingChecks()[0].check.status, cpptools::BindingStatus::Ok) << editor.bindingChecks()[0].check.detail;
+
+    ASSERT_TRUE(editor.save(path.c_str(), path.size()));
+
+    // A fresh editor reads the mapping and the controller reference back, and it still verifies.
+    newui::RootView view2(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot2");
+    CodeToolsVsix::DesignerEditor reopened(&view2);
+    ASSERT_TRUE(reopened.load(path.c_str(), path.size()));
+    ASSERT_NE(reopened.controllerRef(), nullptr);
+    EXPECT_EQ(reopened.controllerRef()->className, "SaveDialogController");
+    ASSERT_EQ(reopened.bindingChecks().size(), 1u);
+    EXPECT_EQ(reopened.bindingChecks()[0].descriptor, "this@SaveDialogController.onSaveButtonClick");
+    EXPECT_EQ(reopened.bindingChecks()[0].check.status, cpptools::BindingStatus::Ok) << reopened.bindingChecks()[0].check.detail;
+    ::DeleteFileA(header.c_str());
+}
+
+TEST_F(DesignerEditorFileFixture, WiringNeedsASavedDocumentAndAControllerFirst)
+{
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+    auto* button = new newui::Button();
+    button->setName("saveButton");
+    editor.workspace()->rootViewProxy()->addChild(button);
+
+    // A blank, never-saved document has nowhere to put a controller.
+    EXPECT_EQ(editor.createController("C", "C.h"), CodeToolsVsix::CreateControllerStatus::NoDocument);
+    CodeToolsVsix::WireResult result;
+    editor.wireDelegate(*button, "onClick", "", [&](CodeToolsVsix::WireResult r) { result = std::move(r); });
+    EXPECT_EQ(result.status, CodeToolsVsix::WireStatus::NoDocument);
+
+    // A saved document without a controller must have one created first.
+    writeFile(R"({ rootView: { type: "RootView", childViews: [ { type: "Button", name: "saveButton" } ] } })");
+    std::wstring path = filePath();
+    ASSERT_TRUE(editor.load(path.c_str(), path.size()));
+    newui::Button* loaded = nullptr;
+    for (newui::SubView* child : editor.workspace()->rootViewProxy()->childViews()) {
+        loaded = dynamic_cast<newui::Button*>(child);
+    }
+    ASSERT_NE(loaded, nullptr);
+    editor.wireDelegate(*loaded, "onClick", "", [&](CodeToolsVsix::WireResult r) { result = std::move(r); });
+    EXPECT_EQ(result.status, CodeToolsVsix::WireStatus::NoController);
+}
+
+TEST_F(DesignerEditorFileFixture, CreatingAControllerWritesTheHeaderAndRecordsItAsTheDocumentsController)
+{
+    writeFile(R"({ rootView: { type: "RootView" } })");
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+    std::wstring path = filePath();
+    ASSERT_TRUE(editor.load(path.c_str(), path.size()));
+    ASSERT_FALSE(editor.document().isModified());
+
+    ASSERT_EQ(editor.createController("DialogController", "DialogController.h"), CodeToolsVsix::CreateControllerStatus::Created);
+    const std::string header = dir_ + "\\DialogController.h";
+    EXPECT_NE(readAll(header).find("class DialogController : public newui::RootController"), std::string::npos);
+    ASSERT_NE(editor.controllerRef(), nullptr);
+    EXPECT_EQ(editor.controllerRef()->header, "DialogController.h");
+    EXPECT_TRUE(editor.document().isModified()) << "the reference still has to be saved";
+    ::DeleteFileA(header.c_str());
+}
+
+// What double-clicking a Delegates row does (the action itself; the input handling is PropertiesGrid's).
+namespace {
+    newui::Button* firstButton(CodeToolsVsix::DesignerEditor& editor)
+    {
+        newui::Button* found = nullptr;
+        for (newui::SubView* child : editor.workspace()->rootViewProxy()->childViews()) {
+            if (auto* button = dynamic_cast<newui::Button*>(child)) {
+                found = button;
+            }
+        }
+        return found;
+    }
+
+    std::string delegateRowTextFor(CodeToolsVsix::DesignerEditor& editor, newui::Button& button, const char* delegateName)
+    {
+        editor.workspace()->propertiesPane()->setSelection(&button);
+        auto& model = editor.workspace()->propertiesPane()->model();
+        const std::size_t rootChildren = model.childCount(std::vector<std::size_t>{});
+        for (std::size_t i = 0; i < rootChildren; ++i) {
+            if (model.nodeAt({i}).kind != CodeToolsVsix::PropertiesModel::Kind::DelegatesHeader) {
+                continue;
+            }
+            for (std::size_t j = 0; j < model.childCount({i}); ++j) {
+                CodeToolsVsix::PropertiesModel::Node node = model.nodeAt({i, j});
+                if (node.delegate != nullptr && node.delegate->name() == delegateName) {
+                    return model.delegateRowText(node);
+                }
+            }
+        }
+        return "<no such row>";
+    }
+}
+
+TEST_F(DesignerEditorFileFixture, ActivatingAnUnwiredEventCreatesTheControllerAndWiresItAndTheRowShowsTheHandler)
+{
+    writeFile(R"({ title: "T", rootView: { type: "RootView", childViews: [ { type: "Button", name: "saveButton" } ] } })");
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+    std::wstring path = filePath();
+    ASSERT_TRUE(editor.load(path.c_str(), path.size()));
+    newui::Button* button = firstButton(editor);
+    ASSERT_NE(button, nullptr);
+    EXPECT_EQ(delegateRowTextFor(editor, *button, "onClick"), "(double-click to add a handler)");
+
+    editor.activateDelegate(*button, "onClick", {});
+
+    // The controller was created beside the document, named after it, and recorded.
+    ASSERT_NE(editor.controllerRef(), nullptr);
+    EXPECT_EQ(editor.controllerRef()->className, "DesignerEditorProbeController");
+    const std::string header = (std::filesystem::path(path_).parent_path() / "DesignerEditorProbeController.h").string();
+    const std::string text = readAll(header);
+    EXPECT_NE(text.find("onSaveButtonClick"), std::string::npos) << text;
+    EXPECT_NE(text.find("saveButton_->onClick.add(this, &DesignerEditorProbeController::onSaveButtonClick);"), std::string::npos);
+
+    EXPECT_EQ(editor.delegateStatusMessage(), "Wired onClick to DesignerEditorProbeController::onSaveButtonClick");
+    EXPECT_TRUE(editor.document().isModified());
+    EXPECT_NE(delegateRowTextFor(editor, *button, "onClick").find("onSaveButtonClick"), std::string::npos);
+    ::DeleteFileA(header.c_str());
+}
+
+TEST_F(DesignerEditorFileFixture, ActivatingAnEventThatIsAlreadyWiredJustSaysSoAndCreatesNothing)
+{
+    writeFile(R"({ rootView: { type: "RootView", childViews: [ { type: "Button", name: "saveButton" } ] } })");
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+    std::wstring path = filePath();
+    ASSERT_TRUE(editor.load(path.c_str(), path.size()));
+
+    editor.activateDelegate(*firstButton(editor), "onClick", {"this@SomeController.onSaveButtonClick"});
+
+    EXPECT_EQ(editor.delegateStatusMessage(), "onClick is already wired to onSaveButtonClick");
+    EXPECT_EQ(editor.controllerRef(), nullptr);
+    EXPECT_FALSE(std::filesystem::exists(std::filesystem::path(path_).parent_path() / "DesignerEditorProbeController.h"));
+}
+
+TEST_F(DesignerEditorFileFixture, ActivatingInAnUnsavedDocumentAsksForASaveFirstAndCreatesNothing)
+{
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+    auto* button = new newui::Button();
+    button->setName("saveButton");
+    editor.workspace()->rootViewProxy()->addChild(button);
+
+    EXPECT_EQ(delegateRowTextFor(editor, *button, "onClick"), "(no listeners)") << "no hint: nowhere to put a controller";
+    editor.activateDelegate(*button, "onClick", {});
+
+    EXPECT_NE(editor.delegateStatusMessage().find("Save the document first"), std::string::npos);
+    EXPECT_EQ(editor.controllerRef(), nullptr);
+}
+
+TEST_F(DesignerEditorFileFixture, ActivatingWontOverwriteAFileThatIsNotTheController)
+{
+    writeFile(R"({ rootView: { type: "RootView", childViews: [ { type: "Button", name: "saveButton" } ] } })");
+    const std::string header = (std::filesystem::path(path_).parent_path() / "DesignerEditorProbeController.h").string();
+    { std::ofstream(header, std::ios::binary) << "// somebody's own file\nclass Unrelated {};\n"; }
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+    std::wstring path = filePath();
+    ASSERT_TRUE(editor.load(path.c_str(), path.size()));
+
+    editor.activateDelegate(*firstButton(editor), "onClick", {});
+
+    EXPECT_NE(editor.delegateStatusMessage().find("already exists but doesn't define"), std::string::npos)
+        << editor.delegateStatusMessage();
+    EXPECT_EQ(editor.controllerRef(), nullptr);
+    EXPECT_EQ(readAll(header), "// somebody's own file\nclass Unrelated {};\n");
+    ::DeleteFileA(header.c_str());
+}
+
+// Asking which controller to create (the New Controller dialog in a real host; here a stand-in prompt).
+TEST_F(DesignerEditorFileFixture, ThePromptIsGivenTheDocumentAndASuggestionAndItsAnswerIsWhatGetsCreated)
+{
+    writeFile(R"({ rootView: { type: "RootView", childViews: [ { type: "Button", name: "saveButton" } ] } })");
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+    std::wstring path = filePath();
+    ASSERT_TRUE(editor.load(path.c_str(), path.size()));
+
+    std::filesystem::path seenDocument;
+    std::string seenClass, seenHeader;
+    editor.setNewControllerPrompt([&](const std::filesystem::path& document, const std::string& className,
+                                      const std::string& header) -> std::optional<CodeToolsVsix::ControllerRef> {
+        seenDocument = document;
+        seenClass = className;
+        seenHeader = header;
+        return CodeToolsVsix::ControllerRef{"MyOwnController", "MyOwnController.hpp"};
+    });
+
+    editor.activateDelegate(*firstButton(editor), "onClick", {});
+
+    EXPECT_EQ(seenDocument, std::filesystem::path(path_));
+    EXPECT_EQ(seenClass, "DesignerEditorProbeController");
+    EXPECT_EQ(seenHeader, "DesignerEditorProbeController.h");
+    ASSERT_NE(editor.controllerRef(), nullptr);
+    EXPECT_EQ(editor.controllerRef()->className, "MyOwnController");
+    EXPECT_EQ(editor.controllerRef()->header, "MyOwnController.hpp");
+    const std::filesystem::path header = std::filesystem::path(path_).parent_path() / "MyOwnController.hpp";
+    EXPECT_TRUE(std::filesystem::exists(header));
+    EXPECT_FALSE(std::filesystem::exists(std::filesystem::path(path_).parent_path() / "DesignerEditorProbeController.h"))
+        << "the suggestion was not used";
+    EXPECT_EQ(editor.delegateStatusMessage(), "Wired onClick to MyOwnController::onSaveButtonClick");
+    ::DeleteFileA(header.string().c_str());
+}
+
+TEST_F(DesignerEditorFileFixture, CancellingThePromptCreatesNothingAndWiresNothing)
+{
+    writeFile(R"({ rootView: { type: "RootView", childViews: [ { type: "Button", name: "saveButton" } ] } })");
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+    std::wstring path = filePath();
+    ASSERT_TRUE(editor.load(path.c_str(), path.size()));
+    editor.setNewControllerPrompt([](const std::filesystem::path&, const std::string&, const std::string&)
+                                      -> std::optional<CodeToolsVsix::ControllerRef> { return std::nullopt; });
+
+    editor.activateDelegate(*firstButton(editor), "onClick", {});
+
+    EXPECT_EQ(editor.delegateStatusMessage(), "Cancelled - no controller created");
+    EXPECT_EQ(editor.controllerRef(), nullptr);
+    EXPECT_FALSE(std::filesystem::exists(std::filesystem::path(path_).parent_path() / "DesignerEditorProbeController.h"));
+    EXPECT_FALSE(editor.document().isModified());
+}
+
+TEST_F(DesignerEditorFileFixture, ThePromptIsNotAskedWhenTheDocumentAlreadyHasAController)
+{
+    const std::string header = (std::filesystem::path(path_).parent_path() / "Existing.h").string();
+    { std::ofstream(header, std::ios::binary) << kBindingHeaderNoWiring; }
+    writeFile(R"({ controller: { class: "SaveDialogController", header: "Existing.h" },
+        rootView: { type: "RootView", childViews: [ { type: "Button", name: "saveButton" } ] } })");
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+    std::wstring path = filePath();
+    ASSERT_TRUE(editor.load(path.c_str(), path.size()));
+    int asked = 0;
+    editor.setNewControllerPrompt([&](const std::filesystem::path&, const std::string&, const std::string&)
+                                      -> std::optional<CodeToolsVsix::ControllerRef> { ++asked; return std::nullopt; });
+
+    editor.activateDelegate(*firstButton(editor), "onClick", {});
+
+    EXPECT_EQ(asked, 0);
+    EXPECT_EQ(editor.delegateStatusMessage(), "Wired onClick to SaveDialogController::onSaveButtonClick");
+    ::DeleteFileA(header.c_str());
 }
 
 // Toolbar (top of Workspace) - real newui::Toolbar/ToolbarButton/

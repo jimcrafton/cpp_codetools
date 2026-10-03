@@ -1,4 +1,7 @@
 #include "CppEditor.h"
+
+#include <algorithm>
+#include <filesystem>
 #include "CppDiagnostics.h"
 #include "CppHighlight.h"
 #include "TextEncoding.h"
@@ -320,6 +323,7 @@ namespace CodeToolsVsix
         // calls (load(), below) fire this same delegate too, but nothing should ever mark the
         // document dirty just because the outline was refreshed.
         textControl->model().onChanged.add([this](newui::Model&) {
+            ++editVersion_;
             markDirty();
             return newui::SyncReturn::Handled;
             });
@@ -421,6 +425,10 @@ namespace CodeToolsVsix
 
     CppEditor::~CppEditor()
     {
+        if (!registeredPath_.empty())
+        {
+            documentEditService().unregisterEditor(registeredPath_, this);
+        }
         // The root can outlive this editor (a host that gives it its own window): stop listening.
         if (getRootView() != nullptr)
         {
@@ -514,6 +522,7 @@ namespace CodeToolsVsix
 
         // The parse pretends the text is this file (so its own directory is searched for includes).
         document_->setPath(wideToUtf8(path.c_str(), path.size()));
+        registerForEdits(path);
 
         // A placeholder, not the real thing - a full first parse of a file with heavy includes can
         // take well over a second (CCE-17's own measurements), and this used to run it
@@ -572,7 +581,83 @@ namespace CodeToolsVsix
         }
 
         clearDirty();
+        registerForEdits(path);
         return true;
+    }
+
+    void CppEditor::registerForEdits(const std::wstring& path)
+    {
+        const std::filesystem::path newPath(path);
+        if (newPath == registeredPath_)
+        {
+            return;
+        }
+        if (!registeredPath_.empty())
+        {
+            documentEditService().unregisterEditor(registeredPath_, this);
+        }
+        registeredPath_ = newPath;
+        documentEditService().registerEditor(registeredPath_, this);
+    }
+
+    DocumentSnapshot CppEditor::snapshot() const
+    {
+        DocumentSnapshot result;
+        if (textControl_ != nullptr)
+        {
+            result.text = textControl_->text();
+        }
+        result.version = editVersion_;
+        return result;
+    }
+
+    EditStatus CppEditor::applyEdits(std::uint64_t expectedVersion, const std::vector<TextEdit>& edits)
+    {
+        if (textControl_ == nullptr)
+        {
+            return EditStatus::Rejected;
+        }
+        if (expectedVersion != editVersion_)
+        {
+            return EditStatus::VersionMismatch;
+        }
+        if (edits.empty())
+        {
+            return EditStatus::Ok;
+        }
+
+        // Validate the whole plan (range, overlap, surrogate pairs) on a copy first, so nothing
+        // changes on failure.
+        std::wstring dryRun = textControl_->text();
+        if (!applyTextEdits(dryRun, edits))
+        {
+            return EditStatus::InvalidEdit;
+        }
+
+        std::vector<const TextEdit*> ordered;
+        ordered.reserve(edits.size());
+        for (const TextEdit& edit : edits)
+        {
+            ordered.push_back(&edit);
+        }
+        std::stable_sort(ordered.begin(), ordered.end(),
+            [](const TextEdit* a, const TextEdit* b) { return a->offset < b->offset; });
+
+        auto* history = dynamic_cast<newui::text::HistoryTextModel*>(&textControl_->model());
+        if (history != nullptr)
+        {
+            history->beginGroup();
+        }
+        // Last to first, so the offsets of the ones still to do stay valid.
+        for (std::size_t i = ordered.size(); i-- > 0;)
+        {
+            textControl_->model().replace(newui::text::TextRange(ordered[i]->offset, ordered[i]->length), ordered[i]->text);
+        }
+        if (history != nullptr)
+        {
+            history->endGroup();
+        }
+        return EditStatus::Ok;
     }
 
     bool CppEditor::execCommand(EditorCommand command, std::uint32_t flags, const EditorCommandArgs* args)

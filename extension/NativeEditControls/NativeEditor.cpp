@@ -84,6 +84,7 @@ namespace CodeToolsVsix
         {
             case DocumentType::Designer:
                 editor = std::make_unique<DesignerEditor>(rootView, contentHost);
+                static_cast<DesignerEditor*>(editor.get())->installDialogPrompts();
                 break;
             case DocumentType::CppSource:
             default:
@@ -127,6 +128,7 @@ namespace CodeToolsVsix
             {
             case DocumentType::Designer:
                 editor = std::make_unique<DesignerEditor>(hwndParent, x, y, width, height);
+                static_cast<DesignerEditor*>(editor.get())->installDialogPrompts();
                 break;
             case DocumentType::CppSource:
             default:

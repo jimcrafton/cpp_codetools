@@ -100,6 +100,13 @@ namespace CodeToolsVsix
         using ParentChangeRequestedHandler = std::function<void(newui::SubView* view, newui::SubView* newParent)>;
         void setParentChangeRequestedHandler(ParentChangeRequestedHandler handler) { parentChangeRequestedHandler_ = std::move(handler); }
 
+        // Fired when a Delegates row is double-clicked: the selected control, the event's name and the
+        // handlers already recorded on it (empty when none) - what to do with that (add a handler, jump
+        // to an existing one) is the caller's (DesignerEditor::activateDelegate()). Nothing is done here.
+        using DelegateActivatedHandler = std::function<void(newui::Component* owner, const std::string& delegateName,
+                                                            const std::vector<std::string>& recordedDescriptors)>;
+        void setDelegateActivatedHandler(DelegateActivatedHandler handler) { delegateActivatedHandler_ = std::move(handler); }
+
     private:
         newui::SyncReturn handleSelectionChanged(newui::TreeView& sender);
         // Commits the typed text (rebuildLiveEditor()'s own TextField),
@@ -272,6 +279,7 @@ namespace CodeToolsVsix
 
         ParentCandidatesProvider parentCandidatesProvider_;
         ParentChangeRequestedHandler parentChangeRequestedHandler_;
+        DelegateActivatedHandler delegateActivatedHandler_;
         // Parallel to the rows of the model (same index) while liveEditorView_ is a ParentPicker's
         // own DropDownList - that model itself only ever holds plain display strings
         // (newui::ListModel's own generic contract), so this is where the real newui::SubView*

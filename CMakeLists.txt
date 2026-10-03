@@ -62,11 +62,19 @@ add_custom_target(cpptools_version ALL
 set(CPPCODETOOLS_LLVM_ROOT "D:/code/LLVM-23.1.2" CACHE PATH
     "Root of an LLVM+Clang install containing include/clang-c, lib/libclang.lib, bin/libclang.dll, and (for cpptools_codegen) lib/cmake/clang's Clang CMake package")
 
-find_path(CPPCODETOOLS_LIBCLANG_INCLUDE_DIR clang-c/Index.h
+# NO_CACHE: these must follow CPPCODETOOLS_LLVM_ROOT on every configure. Cached, they kept pointing
+# at whatever the very first configure found (an old C:/Program Files/LLVM 19.1.0) after the root
+# was moved to a newer install - the tests then ran a libclang too old for the current MSVC STL
+# ("STL1000: expected Clang 20 or newer") while the headers/codegen libs came from the new one.
+# (Entries cached by an older configure would otherwise still win, so drop them first.)
+unset(CPPCODETOOLS_LIBCLANG_INCLUDE_DIR CACHE)
+unset(CPPCODETOOLS_LIBCLANG_IMPLIB CACHE)
+unset(CPPCODETOOLS_LIBCLANG_DLL CACHE)
+find_path(CPPCODETOOLS_LIBCLANG_INCLUDE_DIR clang-c/Index.h NO_CACHE
     HINTS "${CPPCODETOOLS_LLVM_ROOT}/include")
-find_library(CPPCODETOOLS_LIBCLANG_IMPLIB NAMES libclang
+find_library(CPPCODETOOLS_LIBCLANG_IMPLIB NAMES libclang NO_CACHE
     HINTS "${CPPCODETOOLS_LLVM_ROOT}/lib")
-find_file(CPPCODETOOLS_LIBCLANG_DLL NAMES libclang.dll
+find_file(CPPCODETOOLS_LIBCLANG_DLL NAMES libclang.dll NO_CACHE
     HINTS "${CPPCODETOOLS_LLVM_ROOT}/bin")
 
 if(NOT CPPCODETOOLS_LIBCLANG_INCLUDE_DIR OR NOT CPPCODETOOLS_LIBCLANG_IMPLIB OR NOT CPPCODETOOLS_LIBCLANG_DLL)
@@ -221,6 +229,8 @@ add_library(cpptools STATIC
     src/parser.cpp
     src/compileflags.cpp
     src/log.cpp
+    src/delegatebindings.cpp
+    include/cpptools/delegatebindings.h
     include/cpptools/symbol.h
     include/cpptools/compileflags.h
     include/cpptools/diagnostic.h
@@ -250,7 +260,11 @@ add_library(cpptools_codegen STATIC
     src/codegen/methodinsertion.cpp
     include/cpptools_codegen/methodinsertion.h
     src/codegen/delegatewiring.cpp
-    include/cpptools_codegen/delegatewiring.h)
+    include/cpptools_codegen/delegatewiring.h
+    src/codegen/fieldinsertion.cpp
+    include/cpptools_codegen/fieldinsertion.h
+    src/codegen/controllerwiring.cpp
+    include/cpptools_codegen/controllerwiring.h)
 
 target_include_directories(cpptools_codegen PUBLIC include)
 # LLVM's own exported CMake targets (ClangTargets.cmake) don't set INTERFACE_INCLUDE_DIRECTORIES/
@@ -340,6 +354,26 @@ add_library(NativeEditControls SHARED
     extension/NativeEditControls/HighlightController.cpp
     extension/NativeEditControls/FindEngine.h
     extension/NativeEditControls/FindEngine.cpp
+    extension/NativeEditControls/DocumentEditService.h
+    extension/NativeEditControls/DocumentEditService.cpp
+    extension/NativeEditControls/HostEditorBridge.h
+    extension/NativeEditControls/HostEditorBridge.cpp
+    extension/NativeEditControls/CodegenEditAdapter.h
+    extension/NativeEditControls/CodegenEditAdapter.cpp
+    extension/NativeEditControls/WiringRequestBuilder.h
+    extension/NativeEditControls/WiringRequestBuilder.cpp
+    extension/NativeEditControls/ControllerRef.h
+    extension/NativeEditControls/ControllerRef.cpp
+    extension/NativeEditControls/ControllerBindings.h
+    extension/NativeEditControls/ControllerBindings.cpp
+    extension/NativeEditControls/ControllerWiringAction.h
+    extension/NativeEditControls/ControllerWiringAction.cpp
+    extension/NativeEditControls/NewControllerDialog.h
+    extension/NativeEditControls/NewControllerDialog.cpp
+    extension/NativeEditControls/IncludeManager.h
+    extension/NativeEditControls/IncludeManager.cpp
+    extension/NativeEditControls/IncludePlanner.h
+    extension/NativeEditControls/IncludePlanner.cpp
     extension/NativeEditControls/FindReplaceController.h
     extension/NativeEditControls/FindReplaceController.cpp
     extension/NativeEditControls/MinimapStrip.h
@@ -430,6 +464,16 @@ add_executable(testharness
     extension/NativeEditControls/MenuDesigner.cpp
     extension/NativeEditControls/SourceView.cpp
     extension/NativeEditControls/HighlightController.cpp
+    extension/NativeEditControls/IncludeManager.cpp
+    extension/NativeEditControls/IncludePlanner.cpp
+    extension/NativeEditControls/NewControllerDialog.cpp
+    extension/NativeEditControls/ControllerWiringAction.cpp
+    extension/NativeEditControls/ControllerBindings.cpp
+    extension/NativeEditControls/ControllerRef.cpp
+    extension/NativeEditControls/WiringRequestBuilder.cpp
+    extension/NativeEditControls/CodegenEditAdapter.cpp
+    extension/NativeEditControls/HostEditorBridge.cpp
+    extension/NativeEditControls/DocumentEditService.cpp
     extension/NativeEditControls/FindEngine.cpp
     extension/NativeEditControls/FindReplaceController.cpp
     extension/NativeEditControls/MinimapStrip.cpp

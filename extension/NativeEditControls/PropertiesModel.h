@@ -2,12 +2,16 @@
 
 #include "PropertyEditor.h"
 
+#include <cpptools/delegatebindings.h>
+
 #include <newui/models.h>
 #include <newui/reflection.h>
 #include <newui/subview.h>
 #include <newui/view.h>
 
 #include <any>
+#include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -147,7 +151,29 @@ namespace CodeToolsVsix
 
         Node nodeAt(const std::vector<std::size_t>& path) const;
 
+        // How a Delegates row's value reads (delegateRowText()). Set by whoever knows what the last
+        // check of the recorded handlers found; without one each handler just shows by name.
+        struct DelegatePresenter
+        {
+            // What the last check said about `descriptor` on owner's `delegateName`, if it has run.
+            std::function<std::optional<cpptools::BindingCheck>(newui::Component* owner, const std::string& delegateName,
+                                                                const std::string& descriptor)> status;
+            // The row's text while nothing is recorded on it ("" = "(no listeners)").
+            std::function<std::string()> emptyText;
+        };
+        void setDelegatePresenter(DelegatePresenter presenter) { delegatePresenter_ = std::move(presenter); }
+
+        // The value cell of a Kind::DelegateEntry row: each recorded handler by name - "onSaveButtonClick",
+        // or "presenter_.onSave" when it lives on a member - and, when its last check found a problem,
+        // "! name (method missing)" ("? name (can't verify)" when it couldn't be checked). Joined with ", ".
+        // UIColorRole has no error/warning color, so the marker and words carry it, not a color.
+        std::string delegateRowText(const Node& node) const;
+        // "this@Class.method" -> "method"; "object@Class.method" -> "object.method"; anything else as is.
+        static std::string handlerLabelOf(const std::string& descriptor);
+        static std::string statusPhrase(cpptools::BindingStatus status);
+
     private:
+        DelegatePresenter delegatePresenter_;
         Node resolveNode(const std::vector<std::size_t>& path) const;
         // Also marks every editable row read-only when the selected view is
         // newui::DesignTimeFlags::ReadOnly (its owning control manages its state).

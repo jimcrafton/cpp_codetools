@@ -51,6 +51,12 @@ ClassBuilder& ClassBuilder::addPrivateField(std::string declaration) {
     return *this;
 }
 
+ClassBuilder& ClassBuilder::addConnectField(const std::string& type, const std::string& name) {
+    privateMembers_.fields.push_back("//@reflect connect=true");
+    privateMembers_.fields.push_back(type + "* " + name + " = nullptr;");
+    return *this;
+}
+
 std::string ClassBuilder::toString(std::size_t indentLevel) const {
     std::ostringstream out;
     const std::string baseIndent(indentLevel * 4, ' ');

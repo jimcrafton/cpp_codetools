@@ -1,6 +1,7 @@
 #include "DesignerEditor.h"
 #include "ComponentEditor.h"
 #include "DesignerClipboard.h"
+#include "NewControllerDialog.h"
 #include "Logging.h"
 #include "TextEncoding.h"
 
@@ -28,9 +29,14 @@
 #pragma pop_macro("min")
 #include <newui/keyboard_constants.h>
 
+#include <cpptools/compileflags.h>
+
 #include <algorithm>
+#include <atomic>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <thread>
 #include <utility>
 
 namespace CodeToolsVsix
@@ -217,8 +223,17 @@ namespace CodeToolsVsix
         }
     }
 
+    struct DesignerEditor::VerifyState
+    {
+        std::atomic<bool> alive{true};
+        std::atomic<unsigned> generation{0};
+    };
+
     DesignerEditor::~DesignerEditor()
     {
+        if (verifyState_ != nullptr) {
+            verifyState_->alive = false;   // a worker still running drops its result
+        }
         *aliveFlag_ = false;
         if (workspace_ != nullptr && workspace_->canvasWell() != nullptr) {
             workspace_->canvasWell()->onSizeChanged.remove(canvasWellSizeConnection_);
@@ -383,6 +398,41 @@ namespace CodeToolsVsix
                 handlePropertiesParentChangeRequested(view, newParent);
             });
         workspace_->setUndoStack(&undoStack_);
+
+        // The Delegates rows: each recorded handler with what its last check found, and a hint when
+        // there is nothing yet; a double-click adds a handler (activateDelegate()).
+        {
+            PropertiesModel::DelegatePresenter presenter;
+            presenter.status = [this](newui::Component* owner, const std::string& delegateName,
+                                      const std::string& descriptor) -> std::optional<cpptools::BindingCheck> {
+                const auto* view = dynamic_cast<const newui::SubView*>(owner);
+                if (view == nullptr) {
+                    return std::nullopt;
+                }
+                for (const VerifiedBinding& binding : bindingChecks_) {
+                    if (binding.viewName == view->name() && binding.delegate == delegateName &&
+                        binding.descriptor == descriptor) {
+                        return binding.check;
+                    }
+                }
+                return std::nullopt;
+            };
+            presenter.emptyText = [this]() -> std::string {
+                const bool canWire = document_ != nullptr && document_->hasFilePath() && shape_ == DocumentShape::Frame;
+                return canWire ? "(double-click to add a handler)" : std::string();
+            };
+            workspace_->propertiesPane()->model().setDelegatePresenter(std::move(presenter));
+            workspace_->propertiesPane()->setDelegateActivatedHandler(
+                [this](newui::Component* owner, const std::string& delegateName, const std::vector<std::string>& recorded) {
+                    if (auto* view = dynamic_cast<newui::SubView*>(owner)) {
+                        activateDelegate(*view, delegateName, recorded);
+                    }
+                });
+            onBindingsVerified.add([this](DesignerEditor&) {
+                refreshDelegateRows();
+                return newui::SyncReturn::Handled;
+            });
+        }
 
         workspace_->modeControl()->onSelectionChanged.add(this, &DesignerEditor::handleModeChanged);
 
@@ -1577,7 +1627,266 @@ namespace CodeToolsVsix
             std::ifstream in(utf8ToWide(document_->filePath()), std::ios::binary);
             existing.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
         }
-        return newui::Bundle::instance().writeRootViewToText(*workspace_->rootViewProxy(), existing, /*designMode=*/true);
+        return withControllerRef(newui::Bundle::instance().writeRootViewToText(*workspace_->rootViewProxy(), existing, /*designMode=*/true));
+    }
+
+    std::string DesignerEditor::withControllerRef(std::string text) const
+    {
+        if (!controllerRef_ || shape_ != DocumentShape::Frame) {
+            return text;
+        }
+        const std::wstring wide = utf8ToWide(text);
+        ControllerRef current;
+        if (readControllerRef(wide, current) && current == *controllerRef_) {
+            return text;
+        }
+        std::vector<TextEdit> edits;
+        std::wstring edited = wide;
+        if (!planSetControllerRef(wide, *controllerRef_, edits) || !applyTextEdits(edited, edits)) {
+            return text;   // a document that doesn't parse cleanly is left as it is
+        }
+        return wideToUtf8(edited);
+    }
+
+    void DesignerEditor::setControllerRef(const ControllerRef& ref)
+    {
+        if (shape_ != DocumentShape::Frame) {
+            return;
+        }
+        if (ref.className.empty()) {
+            controllerRef_.reset();
+        } else {
+            controllerRef_ = ref;
+        }
+        if (document_ != nullptr) {
+            document_->markModified();
+        }
+        refreshSourceIfUnedited();
+    }
+
+    CreateControllerStatus DesignerEditor::createController(const std::string& className, const std::string& header)
+    {
+        if (document_ == nullptr || !document_->hasFilePath() || shape_ != DocumentShape::Frame) {
+            return CreateControllerStatus::NoDocument;
+        }
+        const CreateControllerStatus status = CodeToolsVsix::createController(
+            std::filesystem::path(utf8ToWide(document_->filePath())), className, header);
+        if (status == CreateControllerStatus::Created || status == CreateControllerStatus::Adopted) {
+            setControllerRef(ControllerRef{className, header});
+        }
+        return status;
+    }
+
+    void DesignerEditor::wireDelegate(newui::SubView& view, const std::string& delegateName,
+                                      const std::string& handlerName, std::function<void(WireResult)> done)
+    {
+        WireResult result;
+        if (document_ == nullptr || !document_->hasFilePath() || shape_ != DocumentShape::Frame) {
+            result.status = WireStatus::NoDocument;
+            done(std::move(result));
+            return;
+        }
+        if (!controllerRef_) {
+            result.status = WireStatus::NoController;
+            done(std::move(result));
+            return;
+        }
+        const newui::reflection::Class* clazz = newui::reflection::classinfo(std::type_index(typeid(view)));
+        if (clazz == nullptr) {
+            result.status = WireStatus::UnknownDelegate;
+            done(std::move(result));
+            return;
+        }
+
+        if (verifyState_ == nullptr) {
+            verifyState_ = std::make_shared<VerifyState>();
+        }
+        std::shared_ptr<VerifyState> state = verifyState_;
+        CodeToolsVsix::wireDelegate(documentEditService(), std::filesystem::path(utf8ToWide(document_->filePath())),
+            *controllerRef_, view, view.name(), *clazz, delegateName, handlerName,
+            [this, state, done = std::move(done)](WireResult wired) mutable
+            {
+                if (state->alive && wired.status == WireStatus::Ok) {
+                    document_->markModified();   // the control now records a mapping the file doesn't have yet
+                    verifyControllerBindings();
+                }
+                done(std::move(wired));
+            });
+    }
+
+    void DesignerEditor::setDelegateStatusMessage(std::string message)
+    {
+        delegateStatusMessage_ = std::move(message);
+        if (workspace_ != nullptr && workspace_->undoRedoStatusLabel() != nullptr) {
+            workspace_->undoRedoStatusLabel()->setText(delegateStatusMessage_);
+        }
+    }
+
+    void DesignerEditor::installDialogPrompts()
+    {
+        newControllerPrompt_ = [this](const std::filesystem::path& documentPath, const std::string& className,
+                                      const std::string& header) -> std::optional<ControllerRef> {
+            NewControllerDialog dialog;
+            dialog.setContext(documentPath, className, header);
+            if (dialog.showModal(getRootView()) != newui::DialogResult::Ok) {
+                return std::nullopt;
+            }
+            return dialog.choice();
+        };
+    }
+
+    void DesignerEditor::refreshDelegateRows()
+    {
+        if (workspace_ == nullptr) {
+            return;
+        }
+        workspace_->propertiesPane()->treeView()->style().markDirty();   // the row text is read at paint time
+        getRootView()->markDirty();
+    }
+
+    void DesignerEditor::activateDelegate(newui::SubView& view, const std::string& delegateName,
+                                          const std::vector<std::string>& recorded)
+    {
+        if (!recorded.empty()) {
+            setDelegateStatusMessage(delegateName + " is already wired to " + PropertiesModel::handlerLabelOf(recorded.front()));
+            return;
+        }
+        if (document_ == nullptr || !document_->hasFilePath() || shape_ != DocumentShape::Frame) {
+            setDelegateStatusMessage("Save the document first - its controller is created next to it");
+            return;
+        }
+
+        if (!controllerRef_) {
+            const std::filesystem::path documentPath(utf8ToWide(document_->filePath()));
+            std::string className = defaultControllerClassName(documentPath);
+            std::string header = className + ".h";
+            if (newControllerPrompt_) {
+                const std::optional<ControllerRef> chosen = newControllerPrompt_(documentPath, className, header);
+                if (!chosen) {
+                    setDelegateStatusMessage("Cancelled - no controller created");
+                    return;
+                }
+                className = chosen->className;
+                header = chosen->header;
+            }
+            switch (createController(className, header)) {
+            case CreateControllerStatus::Created:
+            case CreateControllerStatus::Adopted:
+                break;
+            case CreateControllerStatus::ExistsWithout:
+                setDelegateStatusMessage(header + " already exists but doesn't define " + className);
+                return;
+            case CreateControllerStatus::WriteFailed:
+                setDelegateStatusMessage("Couldn't create " + header);
+                return;
+            default:
+                setDelegateStatusMessage("Couldn't create a controller for this document");
+                return;
+            }
+        }
+
+        const std::string controllerClass = controllerRef_->className;
+        wireDelegate(view, delegateName, std::string(),
+            [this, delegateName, controllerClass](WireResult result) {
+                switch (result.status) {
+                case WireStatus::Ok:
+                    setDelegateStatusMessage("Wired " + delegateName + " to " + controllerClass + "::" + result.handlerName);
+                    break;
+                case WireStatus::HandlerExists:
+                    setDelegateStatusMessage(controllerClass + " already has " + result.handlerName);
+                    break;
+                case WireStatus::HeaderUnreadable:
+                    setDelegateStatusMessage("Can't read the controller's header");
+                    break;
+                case WireStatus::ControllerClassMissing:
+                    setDelegateStatusMessage("The controller's header doesn't define " + controllerClass);
+                    break;
+                case WireStatus::UnknownDelegate:
+                    setDelegateStatusMessage("Can't wire " + delegateName);
+                    break;
+                case WireStatus::EditFailed:
+                    setDelegateStatusMessage("Couldn't edit the controller's header (status " +
+                                             std::to_string(static_cast<int>(result.editStatus)) + ")");
+                    break;
+                default:
+                    setDelegateStatusMessage("Can't wire " + delegateName + " here");
+                    break;
+                }
+                refreshDelegateRows();
+            });
+    }
+
+    void DesignerEditor::verifyControllerBindings()
+    {
+        verifyControllerBindingsFor(document_ != nullptr && document_->hasFilePath() ? document_->filePath() : std::string());
+    }
+
+    void DesignerEditor::finishBindingVerification(std::vector<VerifiedBinding> results, unsigned generation)
+    {
+        if (verifyState_ == nullptr || generation != verifyState_->generation) {
+            return;   // superseded by a newer check
+        }
+        bindingChecks_ = std::move(results);
+        onBindingsVerified(*this);
+    }
+
+    void DesignerEditor::verifyControllerBindingsFor(const std::string& documentPath)
+    {
+        if (workspace_ == nullptr) {
+            return;
+        }
+        if (verifyState_ == nullptr) {
+            verifyState_ = std::make_shared<VerifyState>();
+        }
+        const unsigned generation = ++verifyState_->generation;
+
+        std::vector<DesignerBinding> bindings = collectRecordedBindings(*workspace_->rootViewProxy());
+        if (!controllerRef_ || bindings.empty() || documentPath.empty()) {
+            finishBindingVerification({}, generation);   // nothing to check: clears the last result
+            return;
+        }
+
+        const std::filesystem::path headerPath =
+            std::filesystem::path(utf8ToWide(documentPath)).parent_path() / std::filesystem::u8path(controllerRef_->header);
+        const std::string className = controllerRef_->className;
+        std::shared_ptr<VerifyState> state = verifyState_;
+        newui::RunLoop& loop = newui::RunLoop::current();
+        newui::RunLoop* runLoop = loop ? &loop : nullptr;
+
+        // The header's text comes through the edit service, so an unsaved edit in an open editor is
+        // what gets checked. The editor and disk routes answer at once; a host may answer later.
+        documentEditService().getText(headerPath,
+            [this, state, generation, bindings = std::move(bindings), className, headerPath, runLoop]
+            (EditStatus status, DocumentSnapshot snapshot) mutable
+            {
+                if (!state->alive || generation != state->generation) {
+                    return;
+                }
+                if (status != EditStatus::Ok) {
+                    finishBindingVerification(
+                        unverifiableBindings(bindings, "the controller's header can't be read (status " +
+                                                      std::to_string(static_cast<int>(status)) + "): " + headerPath.u8string()),
+                        generation);
+                    return;
+                }
+
+                auto verify = [bindings, className, headerPath, text = wideToUtf8(snapshot.text)]() {
+                    return verifyBindings(bindings, className, text, cpptools::compileFlagsFor(headerPath.u8string()).args);
+                };
+                if (runLoop == nullptr) {
+                    finishBindingVerification(verify(), generation);
+                    return;
+                }
+                // libclang on real headers takes seconds: off this thread, result back onto it.
+                std::thread([this, state, generation, runLoop, verify]() {
+                    std::vector<VerifiedBinding> results = verify();
+                    runLoop->post([this, state, generation, results = std::move(results)]() mutable {
+                        if (state->alive && generation == state->generation) {
+                            finishBindingVerification(std::move(results), generation);
+                        }
+                    });
+                }).detach();
+            });
     }
 
     bool DesignerEditor::applyDocumentText(const std::string& text, std::string* error)
@@ -1665,6 +1974,17 @@ namespace CodeToolsVsix
         action.doIt = [swapIn, incoming, outgoing, newFrameSize, newTitle] { swapIn(incoming, outgoing, newFrameSize, newTitle); };
         action.undoIt = [swapIn, incoming, outgoing, oldFrameSize, oldTitle] { swapIn(outgoing, incoming, oldFrameSize, oldTitle); };
         undoStack_.push(std::move(action));
+
+        // The controller key is document metadata, not part of the undoable tree swap above: a
+        // Source edit of it takes effect at once (and isn't undone by Undo).
+        if (shape_ == DocumentShape::Frame) {
+            ControllerRef edited;
+            if (readControllerRef(utf8ToWide(text), edited)) {
+                controllerRef_ = edited;
+            } else {
+                controllerRef_.reset();
+            }
+        }
         return true;
     }
 
@@ -2186,6 +2506,7 @@ namespace CodeToolsVsix
         newui::RootViewProxy* surface = workspace_->rootViewProxy();
 
         shape_ = DocumentShape::Frame;   // New and every load start as a Frame; loadFragment() overrides
+        controllerRef_.reset();
         viewDesignerController_.clearSelection();
 
         // removeChild() only detaches - it never deletes (same "raw-
@@ -2393,6 +2714,12 @@ namespace CodeToolsVsix
         // position instead of replacing them, so anything left from the previous document would
         // survive (extra children, stale properties, old title).
         clearDocument(/*resetDocument=*/false);
+        {
+            ControllerRef loaded;
+            if (readControllerRef(utf8ToWide(text), loaded)) {
+                controllerRef_ = loaded;
+            }
+        }
 
         // designMode=true propagates setDesignTime(true) onto freshly-
         // constructed children (reflection.h's TypedClass<T>::read()).
@@ -2457,6 +2784,7 @@ namespace CodeToolsVsix
         workspace_->rootViewProxy()->setVisible(true);
 
         finishLoad();
+        verifyControllerBindingsFor(absolutePath);   // Document adopts the path only after this returns
 
         // Document::load() marks the document clean and adopts the path once this returns true.
         return true;
@@ -2580,6 +2908,25 @@ namespace CodeToolsVsix
         {
             logToDebugOut(L"DesignerEditor::save: Bundle::writeRootViewToFile failed");
             return false;
+        }
+
+        // The file just written carries only the keys it already had; add the controller reference
+        // if it isn't there (a new file, a Save As, or one set since the file was last saved).
+        if (controllerRef_)
+        {
+            const std::string written = readTextFile(absolutePath);
+            const std::string withKey = withControllerRef(written);
+            if (withKey != written)
+            {
+                std::ofstream file(utf8ToWide(absolutePath), std::ios::binary | std::ios::trunc);
+                file << withKey;
+                file.flush();
+                if (!file)
+                {
+                    logToDebugOut(L"DesignerEditor::save: writing the controller reference failed");
+                    return false;
+                }
+            }
         }
 
         return true;  // Document::save() clears the modified flag and adopts the path

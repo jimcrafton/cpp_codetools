@@ -9,6 +9,7 @@
 #include <memory>
 
 #include "CppDiagnostics.h"
+#include "DocumentEditService.h"
 #include "FindReplaceController.h"
 #include "HighlightController.h"
 #include "NativeEditor.h"
@@ -36,7 +37,7 @@ namespace CodeToolsVsix
     // marshaling actually happens) touches RootView/TextControl state directly with no
     // thread-safety of its own - callers are responsible for only ever reaching this class from
     // the edit thread.
-    class CppEditor : public NativeEditor
+    class CppEditor : public NativeEditor, public IEditableDocument
     {
     public:
         // Constructs the RootView as a child of hwndParent filling (x, y, width, height). Must
@@ -71,6 +72,13 @@ namespace CodeToolsVsix
 		// contentHost: see the constructor's own comment above.
 		bool setupUI(newui::RootView* root, newui::SubView* contentHost = nullptr);
 
+        // IEditableDocument, so other editors (the Designer) can edit this file's live text through
+        // documentEditService() - registered under the path of the last load()/save(). Text and edit
+        // offsets are UTF-16, the model's own. All edits of one call are a single undo step; the
+        // snapshot's version changes on every change to the text.
+        DocumentSnapshot snapshot() const override;
+        EditStatus applyEdits(std::uint64_t expectedVersion, const std::vector<TextEdit>& edits) override;
+
         // The editable source's control (a TextFoldingControl: line numbers, folding, colors), the
         // ScrollView that scrolls it, and the read-only outline's control - for tests.
         newui::TextFoldingControl* textControl() const { return textControl_; }
@@ -79,6 +87,10 @@ namespace CodeToolsVsix
         // Find / Replace / Go to line (null if construction failed) - for tests.
         FindReplaceController* findReplace() const { return find_.get(); }
     private:
+        std::uint64_t editVersion_ = 1;
+        std::filesystem::path registeredPath_;
+        void registerForEdits(const std::wstring& path);
+
         // Each pane is a text control hosted by a ScrollView, which scrolls it (a TextControl has no
         // scrollbar of its own). All owned by the base's RootView child tree.
         newui::ScrollView* scrollView_ = nullptr;

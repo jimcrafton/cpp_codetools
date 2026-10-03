@@ -42,4 +42,41 @@ namespace CodeToolsVsix
         WideCharToMultiByte(CP_UTF8, 0, wide, static_cast<int>(length), result.data(), bytes, nullptr, nullptr);
         return result;
     }
+
+    bool utf8OffsetToUtf16(const std::string& utf8, std::size_t byteOffset, std::size_t& utf16Offset)
+    {
+        if (byteOffset > utf8.size())
+        {
+            return false;
+        }
+        std::size_t units = 0;
+        std::size_t i = 0;
+        while (i < byteOffset)
+        {
+            const unsigned char lead = static_cast<unsigned char>(utf8[i]);
+            std::size_t length = 1;
+            std::size_t width = 1;
+            if (lead >= 0xF0)
+            {
+                length = 4;
+                width = 2;  // a surrogate pair
+            }
+            else if (lead >= 0xE0)
+            {
+                length = 3;
+            }
+            else if (lead >= 0xC0)
+            {
+                length = 2;
+            }
+            i += length;
+            units += width;
+        }
+        if (i != byteOffset)
+        {
+            return false;  // byteOffset landed inside a multi-byte character
+        }
+        utf16Offset = units;
+        return true;
+    }
 }

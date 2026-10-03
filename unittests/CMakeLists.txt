@@ -25,9 +25,18 @@ add_executable(cpptools_codegen_tests
     test_classbuilder.cpp
     test_methodinsertion.cpp
     test_delegatewiring.cpp
+    test_fieldinsertion.cpp
+    test_controllerwiring.cpp
+    test_controllerwiring_newui.cpp
+    test_delegatebindings.cpp
 )
 
 target_link_libraries(cpptools_codegen_tests PRIVATE cpptools_codegen cpptools GTest::gtest_main Threads::Threads)
+
+# test_controllerwiring_newui.cpp reparses generated controllers against the REAL newui headers
+# (libclang with these -I paths), '|'-separated so one definition carries them all.
+target_compile_definitions(cpptools_codegen_tests PRIVATE
+    CODEGEN_TEST_NEWUI_INCLUDES="${newui_SOURCE_DIR}/include|${newui_BINARY_DIR}/include|${newui_SOURCE_DIR}/3rdparty/json5/include|${newui_SOURCE_DIR}/3rdparty/blend2d")
 cpptools_copy_libclang_dll(cpptools_codegen_tests)
 
 # The lex library's checks (from lexer-base) - their CHECK macro reports through GoogleTest, see
@@ -67,6 +76,17 @@ add_executable(nativeeditcontrols_tests
     test_designer_editor.cpp
     test_cpp_editor.cpp
     test_find_engine.cpp
+    test_document_edit_service.cpp
+    test_host_editor_bridge.cpp
+    test_codegen_edit_adapter.cpp
+    test_wiring_request_builder.cpp
+    test_controller_ref.cpp
+    test_controller_bindings.cpp
+    test_controller_wiring_action.cpp
+    test_new_controller_dialog.cpp
+    test_include_manager.cpp
+    test_include_planner.cpp
+    test_delegate_rows.cpp
     test_find_replace_controller.cpp
     test_workspace.cpp
     test_canvas_well.cpp
@@ -97,6 +117,16 @@ add_executable(nativeeditcontrols_tests
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/SourceView.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/HighlightController.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/FindEngine.cpp"
+    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/DocumentEditService.cpp"
+    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/HostEditorBridge.cpp"
+    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/CodegenEditAdapter.cpp"
+    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/WiringRequestBuilder.cpp"
+    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/ControllerRef.cpp"
+    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/ControllerBindings.cpp"
+    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/ControllerWiringAction.cpp"
+    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/NewControllerDialog.cpp"
+    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/IncludeManager.cpp"
+    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/IncludePlanner.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/FindReplaceController.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/MinimapStrip.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/CppHighlight.cpp"
@@ -131,7 +161,7 @@ target_compile_definitions(nativeeditcontrols_tests PRIVATE
 
 target_include_directories(nativeeditcontrols_tests PRIVATE "${CMAKE_SOURCE_DIR}/include" ${VSEXT_INCLUDES})
 
-target_link_libraries(nativeeditcontrols_tests PRIVATE cpptools newui lex user32.lib gdi32.lib comdlg32.lib GTest::gtest_main Threads::Threads)
+target_link_libraries(nativeeditcontrols_tests PRIVATE cpptools cpptools_codegen newui lex user32.lib gdi32.lib comdlg32.lib GTest::gtest_main Threads::Threads)
 
 cpptools_copy_libclang_dll(nativeeditcontrols_tests)
 

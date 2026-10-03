@@ -671,6 +671,13 @@ namespace CodeToolsVsix
         }
 
         PropertiesModel::Node node = model_->nodeAt(*path);
+        if (node.kind == PropertiesModel::Kind::DelegateEntry) {
+            if (delegateActivatedHandler_ && node.delegate != nullptr) {
+                delegateActivatedHandler_(static_cast<newui::Component*>(node.ownerInstance), node.delegate->name(),
+                                          node.delegate->describedListeners(node.ownerInstance));
+            }
+            return newui::SyncReturn::Handled;
+        }
         if (node.readOnly) {
             return newui::SyncReturn::Ignored;
         }

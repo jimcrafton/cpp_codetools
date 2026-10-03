@@ -163,7 +163,15 @@ namespace CodeToolsVsix
 
         int IVsWindowPane.CreatePaneWindow(IntPtr hwndParent, int x, int y, int cx, int cy, out IntPtr hwnd)
         {
-            hwnd = _host.CreateChildWindow(hwndParent, x, y, cx, cy, _oleServiceProvider, DocumentTypeFromPath(_filePath));
+            DocumentType docType = DocumentTypeFromPath(_filePath);
+
+            if (docType == DocumentType.UnrecognizedType)
+            {
+                hwnd = IntPtr.Zero;
+                return VSConstants.E_FAIL;
+            }
+
+            hwnd = _host.CreateChildWindow(hwndParent, x, y, cx, cy, _oleServiceProvider, docType);
 
             // LoadDocData can run before or after the window exists depending on how the doc
             // was opened; flush whichever arrived first now that both are ready.

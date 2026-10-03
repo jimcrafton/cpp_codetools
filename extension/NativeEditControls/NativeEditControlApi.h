@@ -7,6 +7,8 @@
 #include <vsshell.h>
 #include <wil/com.h>
 
+#include "HostEditorBridge.h"
+
 
 typedef wil::com_ptr<IServiceProvider> IServiceProviderPtr;
 
@@ -129,3 +131,17 @@ NATIVEEDITCONTROL_API BOOL __stdcall NativeEditControl_ExecCommand(
 // filePath above) - messageLength is authoritative. Pass nullptr to unregister.
 using LogSinkCallback = void(__stdcall*)(cpptools::Severity severity, const wchar_t* message, size_t messageLength);
 NATIVEEDITCONTROL_API void __stdcall NativeEditControl_SetLogSink(LogSinkCallback sink);
+
+// Lets other editors (the Designer) edit a file that is open in VS's own text editor - see
+// DocumentEditService.h. The native side asks through these callbacks and the host answers later
+// through the two Reply exports, from any thread, never synchronously (VS's UI thread can be
+// blocked waiting on the edit thread). Pass nullptr for both to disconnect; requests still
+// waiting then fail. Callback arguments (path, edit text) are only valid during the call - copy
+// what you need before returning. All text is UTF-16 and all offsets are UTF-16 indices. status is EditStatus (DocumentEditService.h): 0 Ok, 1 NotOpen
+// (the file isn't open in VS's native editor - native then falls back to the file on disk),
+// 2 NotFound, 3 VersionMismatch, 4 InvalidEdit, 5 IoError, 6 Rejected.
+NATIVEEDITCONTROL_API void __stdcall NativeEditControl_SetHostEditor(
+    HostGetTextCallback getText, HostApplyEditsCallback applyEdits);
+NATIVEEDITCONTROL_API void __stdcall NativeEditControl_HostGetTextReply(
+    uint64_t requestId, int32_t status, const wchar_t* text, size_t textLength, uint64_t version);
+NATIVEEDITCONTROL_API void __stdcall NativeEditControl_HostApplyEditsReply(uint64_t requestId, int32_t status);

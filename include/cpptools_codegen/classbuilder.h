@@ -28,6 +28,9 @@ public:
     ClassBuilder& addPublicField(std::string declaration);
     ClassBuilder& addProtectedField(std::string declaration);
     ClassBuilder& addPrivateField(std::string declaration);
+    // A private `Type* name = nullptr;` preceded by `//@reflect connect=true`, for
+    // RootController's auto-binding (see fieldinsertion.h).
+    ClassBuilder& addConnectField(const std::string& type, const std::string& name);
 
     const std::string& name() const { return name_; }
 

@@ -12,6 +12,9 @@
 #include "MenuDesigner.h"
 #include "NativeEditor.h"
 #include "SelectionOverlay.h"
+#include "ControllerBindings.h"
+#include "ControllerRef.h"
+#include "ControllerWiringAction.h"
 #include "ViewDesignerController.h"
 #include "ViewDesignerModel.h"
 #include "Workspace.h"
@@ -214,6 +217,60 @@ namespace CodeToolsVsix
         // kept, so undo puts them back and earlier undo steps stay valid). False, changing
         // nothing, with *error set if text doesn't parse.
         bool applyDocumentText(const std::string& text, std::string* error);
+
+        // The class holding this document's event handlers - the file's top-level `controller` key
+        // (see ControllerRef.h) - or null. Held here, not only in the file: a Save As target has no
+        // such key yet, and writing the open file behind the Designer's back would make VS offer a
+        // reload that could drop unsaved design edits. Save and the Source view add it to the text.
+        // Only Frame documents have one (a View fragment is a single view, not a screen).
+        const ControllerRef* controllerRef() const { return controllerRef_ ? &*controllerRef_ : nullptr; }
+        // Sets it (an empty className clears it) and marks the document modified so Save writes it.
+        void setControllerRef(const ControllerRef& ref);
+
+        // What the last check of the document's recorded delegate bindings (the "delegates" blocks
+        // the design-time load keeps on controls) against the controller's source found - one entry
+        // per binding, empty when there is no controller, nothing recorded, or no check has run.
+        const std::vector<VerifiedBinding>& bindingChecks() const { return bindingChecks_; }
+        // Fired, on the UI thread, each time bindingChecks() is replaced.
+        newui::Delegate<DesignerEditor> onBindingsVerified;
+
+        // Re-checks the recorded bindings against the controller's header (next to the document; its
+        // live text if that is open in an editor). With a run loop (a real host) the libclang parse runs
+        // on a worker thread and the result arrives later; with none (unit tests) it runs inline. A
+        // newer call supersedes one still running. Also runs after every load.
+        void verifyControllerBindings();
+
+        // Step 0: creates the controller header beside the (saved) document - never overwriting a file -
+        // and records it as this document's controller. Adopted = a header of that name already
+        // defines the class, so it is just recorded.
+        CreateControllerStatus createController(const std::string& className, const std::string& header);
+
+        // Wires `view`'s event to a new handler on the document's controller (see wireDelegate() in
+        // ControllerWiringAction.h): the controller's source is edited through the edit service, the
+        // mapping is recorded on the control, the document is marked modified and the bindings are
+        // re-checked. `view` must stay alive until done runs (it always has by return, unless a host
+        // answers later). handlerName empty = on<Control><Event>.
+        void wireDelegate(newui::SubView& view, const std::string& delegateName, const std::string& handlerName,
+                          std::function<void(WireResult)> done);
+
+        // What double-clicking a Delegates row does (PropertiesGrid's delegate-activated handler): with
+        // nothing recorded on the event yet, creates the document's controller if it has none (default
+        // name beside the saved document - see defaultControllerClassName()) and wires the event to a new
+        // on<Control><Event> handler; with a handler already there, just says so (jumping to its source
+        // needs editor navigation, not built yet). recorded = the descriptors already on the event.
+        void activateDelegate(newui::SubView& view, const std::string& delegateName,
+                              const std::vector<std::string>& recorded);
+        // Asked, when the document has no controller yet, which class and header to create - given the
+        // document and a suggestion; nullopt cancels. Unset (a bare editor, e.g. in unit tests) means
+        // "take the suggestion". installDialogPrompts() sets it to the New Controller dialog.
+        using NewControllerPrompt = std::function<std::optional<ControllerRef>(
+            const std::filesystem::path& documentPath, const std::string& className, const std::string& header)>;
+        void setNewControllerPrompt(NewControllerPrompt prompt) { newControllerPrompt_ = std::move(prompt); }
+        // Installs the real, modal prompts (the New Controller dialog). Only a real host calls this
+        // (NativeEditManager) - a modal dialog would hang a headless test.
+        void installDialogPrompts();
+        // What the last activateDelegate() did, or why it couldn't - also shown in the status bar.
+        const std::string& delegateStatusMessage() const { return delegateStatusMessage_; }
 
         // Hover feedback for a Toolbox drag at rootLocalPt (this editor's root space): highlights
         // the target container and shows where the control would land - an insertion line (flex),
@@ -564,6 +621,20 @@ namespace CodeToolsVsix
         void reloadSourceText();
         bool sourceMode_ = false;
         std::string sourceBaseline_;   // the text Source last loaded
+        std::optional<ControllerRef> controllerRef_;   // see controllerRef()
+        std::vector<VerifiedBinding> bindingChecks_;
+        std::string delegateStatusMessage_;
+        NewControllerPrompt newControllerPrompt_;
+        void setDelegateStatusMessage(std::string message);
+        void refreshDelegateRows();   // repaint the Delegates rows (recorded handlers / their status changed)
+        struct VerifyState;                            // shared with the worker thread
+        std::shared_ptr<VerifyState> verifyState_;
+        void verifyControllerBindingsFor(const std::string& documentPath);
+        void finishBindingVerification(std::vector<VerifiedBinding> results, unsigned generation);
+
+        // text with controllerRef_ set as its top-level `controller` key (unchanged if it is already
+        // that, there is none, or this isn't a Frame document).
+        std::string withControllerRef(std::string text) const;
         bool changingMode_ = false;
         // Removed in the destructor - the canvas well (in the root's tree) can outlive this editor
         // and keep laying out while the root is torn down.

@@ -445,4 +445,63 @@ namespace CodeToolsVsix
     {
         return resolveNode(path);
     }
+
+    std::string PropertiesModel::handlerLabelOf(const std::string& descriptor)
+    {
+        const std::size_t at = descriptor.find('@');
+        const std::size_t dot = at == std::string::npos ? std::string::npos : descriptor.find('.', at);
+        if (at == std::string::npos || at == 0 || dot == std::string::npos || dot + 1 >= descriptor.size()) {
+            return descriptor;
+        }
+        const std::string object = descriptor.substr(0, at);
+        const std::string method = descriptor.substr(dot + 1);
+        return object == "this" ? method : object + "." + method;
+    }
+
+    std::string PropertiesModel::statusPhrase(cpptools::BindingStatus status)
+    {
+        switch (status) {
+        case cpptools::BindingStatus::Ok: return std::string();
+        case cpptools::BindingStatus::ControllerMissing: return "controller missing";
+        case cpptools::BindingStatus::ObjectMissing: return "member missing";
+        case cpptools::BindingStatus::MethodMissing: return "method missing";
+        case cpptools::BindingStatus::HeaderErrors: return "header doesn't compile";
+        case cpptools::BindingStatus::SignatureMismatch: return "signature changed";
+        case cpptools::BindingStatus::NotWired: return "not wired";
+        case cpptools::BindingStatus::CannotVerify: return "can't verify";
+        }
+        return std::string();
+    }
+
+    std::string PropertiesModel::delegateRowText(const Node& node) const
+    {
+        if (node.delegate == nullptr) {
+            return std::string();
+        }
+        const std::vector<std::string> listeners = node.delegate->describedListeners(node.ownerInstance);
+        if (listeners.empty()) {
+            std::string empty = delegatePresenter_.emptyText ? delegatePresenter_.emptyText() : std::string();
+            return empty.empty() ? "(no listeners)" : empty;
+        }
+
+        std::string text;
+        for (std::size_t i = 0; i < listeners.size(); ++i) {
+            if (i > 0) {
+                text += ", ";
+            }
+            const std::string label = handlerLabelOf(listeners[i]);
+            std::optional<cpptools::BindingCheck> check;
+            if (delegatePresenter_.status) {
+                check = delegatePresenter_.status(static_cast<newui::Component*>(node.ownerInstance),
+                                                  node.delegate->name(), listeners[i]);
+            }
+            if (check && check->status != cpptools::BindingStatus::Ok) {
+                const char* marker = check->status == cpptools::BindingStatus::CannotVerify ? "? " : "! ";
+                text += marker + label + " (" + statusPhrase(check->status) + ")";
+            } else {
+                text += label;
+            }
+        }
+        return text;
+    }
 }

@@ -1,9 +1,10 @@
 {
+  controller: { class: "S1Controller", header: "S1Controller.h" },
   meta: {
     author: "",
-    date: "2026-09-21",
+    date: "2026-09-29",
     copyright: "",
-    version: "0.1.0.1724"
+    version: "0.1.0.1865"
   },
   rootView: {
     type: "RootView",
@@ -36,6 +37,7 @@
       }
     },
     visible: true,
+    layoutIgnored: false,
     name: "rootview",
     layout: {
       type: "FlexLayout",
@@ -162,6 +164,7 @@
           }
         },
         visible: true,
+        layoutIgnored: false,
         name: "listView1",
         style: {
           type: "ThemedEditStyle",
@@ -249,6 +252,119 @@
         focusScope: false,
         wantsTabKey: false,
         childViews: []
+      },
+      {
+        type: "Button",
+        text: "foo bar",
+        toggleButton: false,
+        checked: false,
+        enabled: true,
+        bounds: {
+          type: "Rect",
+          pos: {
+            type: "Point",
+            x: 0,
+            y: 200
+          },
+          size: {
+            type: "Size",
+            width: 640,
+            height: 32
+          }
+        },
+        visible: true,
+        layoutIgnored: false,
+        name: "button2",
+        style: {
+          type: "ThemedButtonStyle",
+          backgroundFill: {
+            type: "Fill",
+            kind: "None",
+            color: "#000000ff",
+            gradient: {
+              type: "Gradient",
+              kind: "Linear",
+              linearStart: {
+                type: "Point",
+                x: 0,
+                y: 0
+              },
+              linearEnd: {
+                type: "Point",
+                x: 1,
+                y: 0
+              },
+              radialCenter: {
+                type: "Point",
+                x: 0.5,
+                y: 0.5
+              },
+              radialFocalOffset: {
+                type: "Point",
+                x: 0,
+                y: 0
+              },
+              radialRadius: 0.5,
+              conicCenter: {
+                type: "Point",
+                x: 0.5,
+                y: 0.5
+              },
+              conicAngle: 0,
+              conicRepeat: 1,
+              stops: [],
+              extendMode: "Pad",
+              points: [],
+              pointBlendPower: 2,
+              pointRasterMax: 64
+            },
+            imagePath: "",
+            opacity: 1
+          },
+          borderFill: "#00000000",
+          borderWidth: 0,
+          highlightFill: "#00000000",
+          strokeStyle: "StrokeColor",
+          imageFillMode: "Tile",
+          imageAlignment: "Center",
+          rectRadius: 0,
+          opacity: 1,
+          compositingOp: "CompSrcOver",
+          font: {
+            type: "Font",
+            name: "Segoe UI",
+            size: 12,
+            bold: false,
+            italic: false,
+            strikeThrough: false,
+            underlined: false
+          },
+          elevation: 0,
+          pressed: false,
+          enabled: true
+        },
+        highlighted: false,
+        focused: false,
+        desiredSize: {
+          type: "Size",
+          width: 640,
+          height: 32
+        },
+        desiredSizeOverride: false,
+        cursor: {
+          type: "Cursor",
+          kind: "Arrow",
+          path: ""
+        },
+        acceptsFocus: true,
+        focusScope: false,
+        wantsTabKey: false,
+        childViews: [],
+        delegates: {
+          onClick: [
+            "this@S1Controller.onButton2Click"
+          ]
+        }
       }
     ]
   }
