@@ -1,0 +1,85 @@
+// The "New Controller" dialog (Step 0 of wiring a Designer event to C++): which class, and which
+// header, holds this document's event handlers. Loaded by NewControllerDialog (Bundle::loadDialog);
+// the C++ only finds these named nodes and wires behavior onto them.
+{
+  meta: { author: "", date: "2026-09-29", copyright: "", version: "0.1.0.900" },
+  type: "Frame",
+  title: "New Controller",
+  name: "newcontroller",
+  bounds: { type: "Rect", pos: { type: "Point", x: 200, y: 200 }, size: { type: "Size", width: 460, height: 262 } },
+  rootView: {
+    type: "RootView",
+    bounds: { type: "Rect", pos: { type: "Point", x: 0, y: 0 }, size: { type: "Size", width: 460, height: 224 } },
+    visible: true,
+    name: "rootview",
+    layout: { type: "FlexLayout", orientation: "Vertical", spacing: 6, padding: 16, crossAxisAlignment: "Stretch" },
+    childViews: [
+      {
+        type: "Label",
+        name: "classNameLabel",
+        text: "Controller class",
+        style: { type: "LabelStyle", text: "Controller class", textColor: "WindowText" },
+        desiredSize: { type: "Size", width: 0, height: 20 },
+        desiredSizeOverride: true
+      },
+      {
+        type: "TextField",
+        name: "classNameInput",
+        desiredSize: { type: "Size", width: 0, height: 26 },
+        desiredSizeOverride: true
+      },
+      {
+        type: "Label",
+        name: "headerLabel",
+        text: "Header file (relative to the document's folder)",
+        style: { type: "LabelStyle", text: "Header file (relative to the document's folder)", textColor: "WindowText" },
+        desiredSize: { type: "Size", width: 0, height: 20 },
+        desiredSizeOverride: true
+      },
+      {
+        type: "TextField",
+        name: "headerInput",
+        desiredSize: { type: "Size", width: 0, height: 26 },
+        desiredSizeOverride: true
+      },
+      {
+        type: "Label",
+        name: "hintLabel",
+        text: "",
+        style: { type: "LabelStyle", text: "", wordWrap: true, textColor: "DisabledText" },
+        desiredSize: { type: "Size", width: 0, height: 40 },
+        desiredSizeOverride: true
+      },
+      {
+        type: "SubView",
+        visible: true,
+        name: "spacer",
+        layoutParams: { type: "FlexLayoutParams", weight: 1 }
+      },
+      {
+        type: "SubView",
+        visible: true,
+        name: "footer",
+        layout: { type: "FlexLayout", orientation: "Horizontal", mainAxisAlignment: "End", crossAxisAlignment: "Center", spacing: 8 },
+        desiredSize: { type: "Size", width: 0, height: 32 },
+        desiredSizeOverride: true,
+        childViews: [
+          {
+            type: "Button",
+            name: "cancelButton",
+            text: "Cancel",
+            desiredSize: { type: "Size", width: 80, height: 26 },
+            desiredSizeOverride: true
+          },
+          {
+            type: "Button",
+            name: "createButton",
+            text: "Create",
+            desiredSize: { type: "Size", width: 80, height: 26 },
+            desiredSizeOverride: true
+          }
+        ]
+      }
+    ]
+  }
+}
