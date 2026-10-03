@@ -59,6 +59,17 @@ namespace CodeToolsVsix
 
         HWND windowHandle() const { return rootView_ ? rootView_->windowHandle() : nullptr; }
 
+        // Moves and sizes this editor's window within its parent window (client coordinates). Goes
+        // through the RootView, never a raw ::SetWindowPos(): the RootView keeps its own idea of where
+        // it is and re-applies that position on every WM_SIZE, so a window moved behind its back snaps
+        // straight back to the position it still remembers.
+        void setWindowBounds(const newui::Rect& bounds)
+        {
+            if (rootView_) {
+                rootView_->setBounds(bounds);
+            }
+        }
+
         virtual bool load(const wchar_t* filePath, std::size_t filePathLength) = 0;
         virtual bool save(const wchar_t* filePath, std::size_t filePathLength) = 0;
         // Virtual so an editor backed by a newui::Document (DesignerEditor) can report that

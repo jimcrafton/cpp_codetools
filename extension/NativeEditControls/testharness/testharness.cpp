@@ -1,22 +1,15 @@
-// A plain newui::Application/newui::Frame app with a File menu (Open Folder..., Open C++/Save
-// C++, Open Designer/Save Designer) that loads and saves through a real NativeEditor (CppEditor
-// or DesignerEditor - whichever the menu item names), hosted inside a content pane to the right
-// of a directory tree pane (a stand-in for what a real IDE's Solution Explorer would show -
+// A plain newui::Application/newui::Frame app with a File menu (Open Folder..., Open C++, Open
+// Designer, Save, Close Tab) that loads and saves through real NativeEditors
+// (CppEditor or DesignerEditor - whichever the menu item names), hosted in document tabs to the
+// right of a directory tree pane (a stand-in for what a real IDE's Solution Explorer would show -
 // testharness has no VS host providing that, but knowing what directory/project is being worked
-// on is still useful here) via NativeEditManager::createEditor(newui::RootView*, DocumentType,
-// newui::SubView*) - the non-threaded path, added specifically so a harness like this doesn't
-// have to deal with the dedicated-background-thread hosting model NativeEditControlApi.cpp uses
-// for VS. The editor's own View tree lives as plain View children of contentHost (a child of
-// frame.rootView(), not the RootView itself - see CppEditor::setupUI()/DesignerEditor::setupUI()'s
-// own comments for why that split exists), so Open/Save just call load()/save() directly on the
-// NativeEditor pointer this returns - never NativeEditManager's HWND-keyed wrapper methods
-// (loadFileForEditor/saveFileForEditor/closeEditor), which assume a run loop this harness never
-// starts.
+// on is still useful here).
 //
-// Only one NativeEditor's View tree is ever hosted per run - it's built into contentHost once, on
-// the first Open, and NativeEditor doesn't support tearing that content back out again. Picking
-// "Open Designer" after already opening a C++ file (or vice versa) is refused with a message
-// rather than silently mixing both editors' content into the same contentHost.
+// Any number of documents can be open at once, one tab each (DocumentTabs). Each tab's editor has a
+// RootView of its own in a child window, like VS hosts them - see DocumentTabs.h for why they
+// don't share the frame's root. Open/Save call load()/save() directly on the NativeEditor, never
+// NativeEditManager's HWND-keyed wrapper methods (loadFileForEditor/saveFileForEditor/
+// closeEditor), which assume a run loop this harness never starts.
 
 #include "newui/newui.h"
 #include "newui/application.h"
@@ -29,7 +22,10 @@
 #include "newui/subview.h"
 #include "newui/uicolormanager.h"
 
+#include "../CppEditor.h"
+#include "../DesignerEditor.h"
 #include "../DirectoryTree.h"
+#include "../DocumentTabs.h"
 #include "../NativeEditor.h"
 
 #include <commdlg.h>
@@ -81,6 +77,26 @@ namespace
         return type == DocumentType::Designer ? L"Designer" : L"C++";
     }
 
+    // A new editor in a child window of `parent`, built here on the UI thread (not through
+    // NativeEditManager::createEditor(), which hops to its own thread). Sized properly by its tab
+    // page once that is laid out.
+    std::unique_ptr<NativeEditor> makeEditor(DocumentType type, HWND parent)
+    {
+        constexpr int kInitialSize = 100;
+        std::unique_ptr<NativeEditor> editor;
+        if (type == DocumentType::Designer)
+        {
+            auto designer = std::make_unique<DesignerEditor>(parent, 0, 0, kInitialSize, kInitialSize);
+            designer->installDialogPrompts();
+            editor = std::move(designer);
+        }
+        else
+        {
+            editor = std::make_unique<CppEditor>(parent, 0, 0, kInitialSize, kInitialSize);
+        }
+        return editor->windowHandle() != nullptr ? std::move(editor) : nullptr;
+    }
+
     std::wstring toWide(const std::string& utf8)
     {
         if (utf8.empty())
@@ -99,8 +115,10 @@ int main()
     registerReflectionData();
 
     newui::Frame frame;
-    NativeEditor* editor = nullptr;
-    DocumentType editorType = DocumentType::CppSource;
+    // The editors build their root views with the module handle NativeEditManager holds (set by
+    // DllMain in the VSIX); here it is the exe itself.
+    NativeEditManager::setModuleHandle(::GetModuleHandleW(nullptr));
+    DocumentTabs* tabs = nullptr;   // owned by the frame's view tree, built below
 
     newui::Application& app = newui::Application::instance();
     app.setName("codetools++ testharness");
@@ -109,14 +127,11 @@ int main()
     frame.setTitle("codetools++ NativeEditor test harness");
     frame.setBounds(newui::Rect(100, 100, 1000, 700));
 
-    frame.onClosed += [&editor](newui::Frame& frame) {
-        // Not NativeEditManager::closeEditor() - that marshals through runLoop()->postAndWait(),
-        // and this harness never starts a run loop (see this file's own top comment).
-        // unregisterEditor() just erases the map entry directly, no marshaling needed.
-        if (nullptr != editor)
+    frame.onClosed += [&tabs](newui::Frame& frame) {
+        // The editors' windows are children of the frame's: close them while those still exist.
+        if (nullptr != tabs)
         {
-            NativeEditManager::unregisterEditor(editor->windowHandle());
-            editor = nullptr;
+            tabs->closeAll();
         }
         printf("Frame (%p, hwnd: %p) closed, exiting application.\n", &frame, frame.frameHandle());
         return newui::SyncReturn::Handled;
@@ -130,19 +145,16 @@ int main()
     rootLayout->setPadding(0.0f);
     root.setLayout(std::move(rootLayout));
 
-    // mainRow: directoryTree | contentHost, a horizontal split - fixedPane(First) is Splitter's
-    // own default (directoryTree pinned at kDirectoryTreePaneWidth, contentHost grows), matching
-    // the standard docking-IDE convention (Workspace::mainRow, Workspace.cpp, follows the same
-    // convention for its own Toolbox pane). contentHost is deliberately a plain, empty SubView
-    // until an editor is actually opened - CppEditor::setupUI()/DesignerEditor::setupUI() build
-    // their own content straight into it (see NativeEditManager::createEditor()'s own comment).
+    // mainRow: directoryTree | document tabs, a horizontal split - fixedPane(First) is Splitter's
+    // own default (directoryTree pinned at kDirectoryTreePaneWidth, the tabs grow), matching the
+    // standard docking-IDE convention (Workspace::mainRow, Workspace.cpp, follows the same
+    // convention for its own Toolbox pane).
     auto* directoryTree = new DirectoryTree();
     directoryTree->setName("testharnessDirectoryTree");
 
-    auto* contentHost = new newui::SubView();
-    contentHost->setName("testharnessContentHost");
-    contentHost->setVisible(true);
-    contentHost->style().setBackgroundColor(newui::UIColorManager::colorFor(newui::UIColorRole::WindowBackground));
+    tabs = new DocumentTabs(&makeEditor);
+    tabs->setName("testharnessDocumentTabs");
+    tabs->style().setBackgroundColor(newui::UIColorManager::colorFor(newui::UIColorRole::WindowBackground));
 
     auto* mainRow = new newui::Splitter(newui::Orientation::Horizontal);
     mainRow->setName("testharnessMainRow");
@@ -150,42 +162,20 @@ int main()
     mainRow->setDividerThickness(kDividerThickness);
     mainRow->setLayoutParams(std::make_unique<newui::FlexLayoutParams>(1.0f));
     mainRow->addChild(directoryTree);
-    mainRow->addChild(contentHost);
+    mainRow->addChild(tabs);
 
-    // Shared by all four Open/Save menu items below, and by directoryTree's own double-click -
-    // open picks or reuses the editor for type; save just reuses whatever's already open,
-    // refusing if it doesn't match type.
-    auto openPath = [&root, &editor, &editorType, contentHost](const std::wstring& path, DocumentType type) {
+    // Shared by the Open menu items and by directoryTree's own double-click: a new tab, or the one
+    // that already shows the file.
+    auto openPath = [&root, &tabs](const std::wstring& path, DocumentType type) {
         if (path.empty())
         {
             return;
         }
-
-        if (nullptr == editor)
+        if (nullptr == tabs->open(path, type))
         {
-            editor = NativeEditManager::createEditor(&root, type, contentHost);
-            editorType = type;
-            if (nullptr == editor)
-            {
-                printf("testharness: failed to create %ls editor\n", documentTypeName(type));
-                return;
-            }
-        }
-        else if (type != editorType)
-        {
-            printf("testharness: already hosting a %ls editor - restart to open a %ls document\n",
-                   documentTypeName(editorType), documentTypeName(type));
-            // Where a person actually sees it - stdout is usually nowhere.
-            std::wstring message = std::wstring(L"This run is already hosting a ") + documentTypeName(editorType)
-                + L" editor, and testharness can host only one per run.\n\nRestart testharness to open a "
-                + documentTypeName(type) + L" document.";
-            MessageBoxW(root.windowHandle(), message.c_str(), L"codetools++ testharness", MB_OK | MB_ICONINFORMATION);
-            return;
-        }
-
-        if (!editor->load(path.c_str(), path.size()))
-        {
-            printf("testharness: load failed\n");
+            printf("testharness: couldn't open %ls as a %ls document\n", path.c_str(), documentTypeName(type));
+            MessageBoxW(root.windowHandle(), (L"Couldn't open " + path).c_str(), L"codetools++ testharness",
+                        MB_OK | MB_ICONWARNING);
         }
     };
 
@@ -194,24 +184,20 @@ int main()
         openPath(path, type);
     };
 
-    auto saveAs = [&frame, &editor, &editorType](DocumentType type) {
+    // Saves the selected tab to its own file.
+    auto saveActive = [&tabs]() {
+        NativeEditor* editor = tabs->activeEditor();
         if (nullptr == editor)
         {
             printf("testharness: nothing open yet\n");
             return;
         }
-        if (type != editorType)
-        {
-            printf("testharness: the open editor is %ls, not %ls\n",
-                   documentTypeName(editorType), documentTypeName(type));
-            return;
-        }
-
-        std::wstring path = showFileDialog(frame.frameHandle(), true);
-        if (!path.empty() && !editor->save(path.c_str(), path.size()))
+        const std::wstring& path = tabs->activePath();
+        if (!editor->save(path.c_str(), path.size()))
         {
             printf("testharness: save failed\n");
         }
+        tabs->refreshTitles();
     };
 
     // A file in directoryTree is always a C/C++ source/header (DirectoryTreeModel's own
@@ -244,19 +230,19 @@ int main()
             openAs(DocumentType::CppSource);
             return newui::SyncReturn::Handled;
         });
-    fileMenu->addChild(std::make_unique<newui::MenuItem>("Save C++"))->onClick.add(
-        [saveAs](newui::MenuItem&) {
-            saveAs(DocumentType::CppSource);
-            return newui::SyncReturn::Handled;
-        });
     fileMenu->addChild(std::make_unique<newui::MenuItem>("Open Designer"))->onClick.add(
         [openAs](newui::MenuItem&) {
             openAs(DocumentType::Designer);
             return newui::SyncReturn::Handled;
         });
-    fileMenu->addChild(std::make_unique<newui::MenuItem>("Save Designer"))->onClick.add(
-        [saveAs](newui::MenuItem&) {
-            saveAs(DocumentType::Designer);
+    fileMenu->addChild(std::make_unique<newui::MenuItem>("Save"))->onClick.add(
+        [saveActive](newui::MenuItem&) {
+            saveActive();
+            return newui::SyncReturn::Handled;
+        });
+    fileMenu->addChild(std::make_unique<newui::MenuItem>("Close Tab"))->onClick.add(
+        [&tabs](newui::MenuItem&) {
+            tabs->closeActive();
             return newui::SyncReturn::Handled;
         });
     menuItems.push_back(std::move(fileMenu));
