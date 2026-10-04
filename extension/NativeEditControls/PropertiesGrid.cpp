@@ -46,6 +46,7 @@ namespace CodeToolsVsix
         treeView_->onSelectionChanged.add(this, &PropertiesGrid::handleSelectionChanged);
         treeView_->onMouseDown.add(this, &PropertiesGrid::handleTreeMouseDown);
         treeView_->onMouseMove.add(this, &PropertiesGrid::handleTreeMouseMove);
+        treeView_->onMouseLeft.add(this, &PropertiesGrid::handleTreeMouseLeft);
         treeView_->onMouseUp.add(this, &PropertiesGrid::handleTreeMouseUp);
         treeView_->onMouseDblClick.add(this, &PropertiesGrid::handleTreeMouseDblClick);
         // The live editor is placed by absolute bounds inside treeView_, so it has to follow the
@@ -497,16 +498,26 @@ namespace CodeToolsVsix
         }
 
         delegatePickerRows_.clear();
-        const std::vector<std::string> wired = node.delegate->describedListeners(node.ownerInstance);
-        for (const std::string& descriptor : wired) {
+        delegatePickerDescriptors_ = node.delegate->describedListeners(node.ownerInstance);
+        for (const std::string& descriptor : delegatePickerDescriptors_) {
             delegatePickerRows_.push_back(kPickerRowMarker + PropertiesModel::handlerLabelOf(descriptor));   // "bullet name": the UI font has no check mark
+        }
+        delegatePickerReuse_.clear();
+        if (delegateReuseProvider_) {
+            delegatePickerReuse_ = delegateReuseProvider_(static_cast<newui::Component*>(node.ownerInstance), node.delegate->name());
+            if (delegatePickerReuse_.size() > kMaxReuseRows) {
+                delegatePickerReuse_.resize(kMaxReuseRows);
+            }
+        }
+        for (const std::string& name : delegatePickerReuse_) {
+            delegatePickerRows_.push_back("use " + name);
         }
         delegatePickerRows_.push_back("+ Generate new handler...");
 
         liveEditorIsDelegatePicker_ = true;
         delegateEditorOwner_ = static_cast<newui::Component*>(node.ownerInstance);
         delegateEditorName_ = node.delegate->name();
-        delegatePickerWired_ = wired.size();
+        delegatePickerWired_ = delegatePickerDescriptors_.size();
 
         const newui::Rect anchor = treeView_->localToScreen(PropertyItem::ellipsisButtonRectFor(*valueRect));
         // Posted, never inline: this runs inside the row's mouse-down dispatch, and RootView's mouse-down
@@ -550,8 +561,10 @@ namespace CodeToolsVsix
         // Rows start below the reserved band whichever side the tail is on (the type picker's simplification).
         const newui::Size actual = placement.bounds.size();
         for (std::size_t i = 0; i < delegatePickerRows_.size(); ++i) {
+            // Every row does something: a wired handler jumps to its source, "use x" re-points the
+            // event at it, "Generate" asks for a name.
             std::function<void()> onChosen;
-            if (i == delegatePickerWired_) {
+            {
                 std::weak_ptr<bool> alive = aliveFlag_;
                 onChosen = [this, alive, popup, i]() {
                     // Locals first: dismiss() may free the popup, and this closure with it.
@@ -585,10 +598,96 @@ namespace CodeToolsVsix
 
     void PropertiesGrid::chooseDelegatePickerRow(std::size_t index)
     {
-        // A wired handler's row is informational for now (jumping to its source needs editor navigation).
-        if (liveEditorIsDelegatePicker_ && index == delegatePickerWired_) {
-            openDelegateNameEditor();
+        if (!liveEditorIsDelegatePicker_) {
+            return;
         }
+        newui::Component* owner = delegateEditorOwner_;
+        const std::string delegateName = delegateEditorName_;
+        if (index < delegatePickerWired_) {
+            const std::string descriptor = delegatePickerDescriptors_[index];
+            destroyLiveEditor();
+            if (delegateJumpHandler_ && owner != nullptr) {
+                delegateJumpHandler_(owner, delegateName, descriptor);
+            }
+        } else if (index < delegatePickerWired_ + delegatePickerReuse_.size()) {
+            const std::string handler = delegatePickerReuse_[index - delegatePickerWired_];
+            destroyLiveEditor();
+            if (delegateReuseHandler_ && owner != nullptr) {
+                delegateReuseHandler_(owner, delegateName, handler);
+            }
+        } else {
+            openDelegateNameEditor();
+            return;
+        }
+        if (newui::RootView* root = treeView_->rootView()) {
+            root->repaintNow();
+        }
+    }
+
+    std::vector<DelegateChip> PropertiesGrid::selectedDelegateChips() const
+    {
+        std::optional<std::vector<std::size_t>> path = treeView_->selectedPath();
+        std::optional<newui::Rect> valueRect = selectedValueRect();
+        if (!path.has_value() || !valueRect.has_value()) {
+            return {};
+        }
+        const PropertiesModel::Node node = model_->nodeAt(*path);
+        if (node.kind != PropertiesModel::Kind::DelegateEntry || node.delegate == nullptr) {
+            return {};
+        }
+        return DelegateChips::layout(model_->delegateChipLabels(node), PropertyItem::delegateChipAreaFor(*valueRect));
+    }
+
+    bool PropertiesGrid::clickDelegateChip(const newui::Point& point)
+    {
+        std::optional<std::vector<std::size_t>> path = treeView_->selectedPath();
+        if (!path.has_value()) {
+            return false;
+        }
+        const PropertiesModel::Node node = model_->nodeAt(*path);
+        if (node.kind != PropertiesModel::Kind::DelegateEntry || node.delegate == nullptr) {
+            return false;
+        }
+        const std::optional<DelegateChipHit> hit = DelegateChips::hitTest(selectedDelegateChips(), point);
+        if (!hit) {
+            return false;
+        }
+        const std::vector<std::string> descriptors = node.delegate->describedListeners(node.ownerInstance);
+        if (hit->index >= descriptors.size()) {
+            return false;
+        }
+        auto* owner = static_cast<newui::Component*>(node.ownerInstance);
+        const DelegateListenerHandler& handler = hit->remove ? delegateRemoveHandler_ : delegateJumpHandler_;
+        if (handler) {
+            handler(owner, node.delegate->name(), descriptors[hit->index]);
+        }
+        return true;
+    }
+
+    bool PropertiesGrid::updateDelegateChipTooltip(const newui::Point& point)
+    {
+        newui::RootView* root = treeView_->rootView();
+        std::optional<std::vector<std::size_t>> path = treeView_->selectedPath();
+        if (root == nullptr || root->windowHandle() == nullptr || !path.has_value()) {
+            chipTooltip_.hide();
+            return false;
+        }
+        const PropertiesModel::Node node = model_->nodeAt(*path);
+        if (node.kind != PropertiesModel::Kind::DelegateEntry || node.delegate == nullptr) {
+            chipTooltip_.hide();
+            return false;
+        }
+        const std::optional<DelegateChipHit> hit = DelegateChips::hitTest(selectedDelegateChips(), point);
+        const std::vector<std::string> labels = model_->delegateChipLabels(node);
+        if (!hit || hit->index >= labels.size()) {
+            chipTooltip_.hide();
+            return false;
+        }
+        const std::string text = hit->remove ? "Unwire " + labels[hit->index] : labels[hit->index] + "\nClick to jump to the handler";
+        const newui::Rect screen = treeView_->localToScreen(newui::Rect(point.x, point.y, 0.0f, 0.0f));
+        chipTooltip_.show(root->windowHandle(), static_cast<long>(screen.left()) + 12, static_cast<long>(screen.top()) + 20,
+                          utf8ToWide(text));
+        return true;
     }
 
     std::string PropertiesGrid::uniqueHandlerName(const std::string& wanted, const std::vector<std::string>& taken)
@@ -618,6 +717,8 @@ namespace CodeToolsVsix
         for (std::size_t i = 0; i < delegatePickerWired_ && i < delegatePickerRows_.size(); ++i) {
             taken.push_back(delegatePickerRows_[i].substr(kPickerRowMarker.size()));
         }
+        // A new handler can't share a name with a method the controller already has.
+        taken.insert(taken.end(), delegatePickerReuse_.begin(), delegatePickerReuse_.end());
         const std::string suggested = uniqueHandlerName(
             delegateDefaultName_ ? delegateDefaultName_(owner, delegateName) : std::string(), taken);
         textField->setText(utf8ToWide(suggested));
@@ -726,10 +827,21 @@ namespace CodeToolsVsix
 
         PropertiesModel::Node node = model_->nodeAt(*path);
         if (node.kind == PropertiesModel::Kind::DelegateEntry) {
-            // The "..." button opens the handler picker; the rest of the cell is left to double-click.
+            // A chip's label jumps to the handler, its "x" unwires it; the "..." button opens the
+            // handler picker; the rest of the cell is left to double-click.
+            if (clickDelegateChip(pt)) {
+                return;
+            }
             if (std::optional<newui::Rect> valueRect = selectedValueRect()) {
                 if (PropertyItem::ellipsisButtonRectFor(*valueRect).contains(pt)) {
                     openDelegatePicker();
+                } else if (node.delegate != nullptr && PropertyItem::wireButtonRectFor(*valueRect).contains(pt)) {
+                    // Only drawn on a row with no listeners; same as a double-click on it.
+                    const std::vector<std::string> listeners = node.delegate->describedListeners(node.ownerInstance);
+                    if (listeners.empty() && delegateActivatedHandler_) {
+                        delegateActivatedHandler_(static_cast<newui::Component*>(node.ownerInstance), node.delegate->name(),
+                                                  listeners);
+                    }
                 }
             }
             return;
@@ -1126,6 +1238,7 @@ namespace CodeToolsVsix
     newui::SyncReturn PropertiesGrid::handleTreeMouseDown(newui::View& /*sender*/, const newui::Point& pt,
         std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/)
     {
+        chipTooltip_.hide();
         if (isPointNearDivider(pt)) {
             draggingDivider_ = true;
             return newui::SyncReturn::Handled;
@@ -1134,10 +1247,18 @@ namespace CodeToolsVsix
         return newui::SyncReturn::Ignored;
     }
 
+    newui::SyncReturn PropertiesGrid::handleTreeMouseLeft(newui::View& /*sender*/, const newui::Point& /*pt*/,
+        std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/)
+    {
+        chipTooltip_.hide();
+        return newui::SyncReturn::Ignored;
+    }
+
     newui::SyncReturn PropertiesGrid::handleTreeMouseMove(newui::View& /*sender*/, const newui::Point& pt,
         std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/)
     {
         if (!draggingDivider_) {
+            updateDelegateChipTooltip(pt);
             return newui::SyncReturn::Ignored;
         }
 

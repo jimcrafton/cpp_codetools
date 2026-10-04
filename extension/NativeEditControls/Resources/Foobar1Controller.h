@@ -31,7 +31,11 @@ protected:
             return false;
         }
         button1_->onClick.add(this, &Foobar1Controller::onButton1Click);
-        button3_->onClick.add(this, &Foobar1Controller::onButton3Click);
+    button3_->onClick.add(this, &Foobar1Controller::onButton3Click);
+    button3_->onClick.add(this, &Foobar1Controller::onButton1Click);
+    button3_->onClick.add(this, &Foobar1Controller::onButton1Click);
+    button1_->onClick.add(this, &Foobar1Controller::onButton1Click);
+    button1_->onClick.add(this, &Foobar1Controller::onButton3Click);
     return true;
     }
 };

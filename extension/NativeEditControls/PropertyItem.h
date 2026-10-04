@@ -114,6 +114,14 @@ namespace CodeToolsVsix
         // two intentional single clicks before this changed).
         static newui::Rect ellipsisButtonRectFor(const newui::Rect& contentRect);
 
+        // Where a Delegates row's chips (or its "(no listeners)" text) go: the value cell left of its "...".
+        static newui::Rect delegateChipAreaFor(const newui::Rect& valueRect);
+
+        // The "Wire" button a Delegates row with no listeners shows, just left of its "..." (the same
+        // as a double-click on the row: wire the event to a new default-named handler).
+        static constexpr float kWireButtonWidth = 34.0f;
+        static newui::Rect wireButtonRectFor(const newui::Rect& valueRect);
+
         // The "(Type)" a group header shows for node: its real class name, else its enum's name
         // (a flags enum like Anchor has no Class), else "?".
         static std::string groupTypeNameFor(const PropertiesModel::Node& node);

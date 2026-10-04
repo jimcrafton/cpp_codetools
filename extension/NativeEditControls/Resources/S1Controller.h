@@ -26,12 +26,11 @@ protected:
         if (!Component::internal_init()) {
             return false;
         }
-        button2_->onClick.add(this, &S1Controller::onButton2Click);
 
-    button2_->onClick.add(this, &S1Controller::onButton2Click2);
     button2_->onSizeChanged.add(this, &S1Controller::onButton2SizeChanged);
     button2_->onCheckedChanged.add(this, &S1Controller::onButton2CheckedChanged);
     button2_->onStateChanged.add(this, &S1Controller::onButton2StateChanged);
+    button2_->onClick.add(this, &S1Controller::onButton2Click2);
     return true;
     }
 

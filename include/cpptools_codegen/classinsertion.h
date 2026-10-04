@@ -36,4 +36,21 @@ struct MemberInsertion {
 std::optional<MemberInsertion> memberInsertionPoint(const std::string& content, const std::string& className,
                                                       MemberAccess access);
 
+// Gathers a class's repeated access sections (older generation appended a fresh "private:" per
+// member) into one section per access, in the order each first appears; a later section that
+// matches the class's implicit leading access joins that leading section. Members keep their
+// relative order and text. Nothing is written - the caller applies the returned content.
+struct AccessMerge {
+    enum class Status {
+        ClassNotFound,   // className isn't a class/struct definition in content
+        Unchanged,       // every access already appears once; content is returned as given
+        Merged,          // content holds the rewritten text
+        Unsafe,          // a preprocessor line sits between sections; content is returned as given
+    };
+    Status status = Status::ClassNotFound;
+    std::string content;
+};
+
+AccessMerge mergeAccessSections(const std::string& content, const std::string& className);
+
 } // namespace cpptools_codegen

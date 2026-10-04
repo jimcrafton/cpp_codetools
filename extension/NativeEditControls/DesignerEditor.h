@@ -271,8 +271,10 @@ namespace CodeToolsVsix
         // mapping is recorded on the control, the document is marked modified and the bindings are
         // re-checked. `view` must stay alive until done runs (it always has by return, unless a host
         // answers later). handlerName empty = on<Control><Event>.
+        // reuseExisting: handlerName is a handler the controller already has - nothing is generated, the
+        // event is just connected to it.
         void wireDelegate(newui::SubView& view, const std::string& delegateName, const std::string& handlerName,
-                          std::function<void(WireResult)> done);
+                          std::function<void(WireResult)> done, bool reuseExisting = false);
 
         // What double-clicking a Delegates row does (PropertiesGrid's delegate-activated handler): with
         // nothing recorded on the event yet, creates the document's controller if it has none (default
@@ -285,7 +287,20 @@ namespace CodeToolsVsix
         // same controller-create-if-needed and wiring as activateDelegate(), but with that handler name
         // (empty = default) and even when the event already has a listener - it adds another. A name that
         // isn't a C++ identifier is refused with a status message.
-        void wireDelegateAs(newui::SubView& view, const std::string& delegateName, const std::string& handlerName);
+        // reuseExisting: connect to the controller's existing handler of that name instead (the Delegates
+        // row's "use <handler>" entries).
+        void wireDelegateAs(newui::SubView& view, const std::string& delegateName, const std::string& handlerName,
+                            bool reuseExisting = false);
+        // The controller's methods an event could be pointed at instead of a new handler: every method in
+        // its header (live text if known, else the file) that isn't already on this event. Empty without a
+        // controller.
+        std::vector<std::string> reusableHandlers(const newui::SubView& view, const std::string& delegateName) const;
+        // Opens the controller's header at the handler a recorded descriptor ("this@Class.method") names -
+        // through the open-location handler, else the status bar says where it is.
+        void openHandlerSource(const std::string& descriptor);
+        // Removes one listener: its `.add()` line from the controller's header and its record on the
+        // control (see unwireDelegate() in ControllerWiringAction.h). The handler method stays.
+        void unwireDelegate(newui::SubView& view, const std::string& delegateName, const std::string& descriptor);
         // The name wiring would use for `view`'s event by default - what the name field starts with.
         static std::string defaultHandlerNameFor(const newui::SubView& view, const std::string& delegateName);
         // Asked, when the document has no controller yet, which class and header to create - given the

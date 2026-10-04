@@ -168,6 +168,9 @@ namespace CodeToolsVsix
         // "! name (method missing)" ("? name (can't verify)" when it couldn't be checked). Joined with ", ".
         // UIColorRole has no error/warning color, so the marker and words carry it, not a color.
         std::string delegateRowText(const Node& node) const;
+        // The same per-handler text delegateRowText() joins, one entry per recorded handler in the order
+        // describedListeners() gives - what each chip on the row says. Empty when nothing is recorded.
+        std::vector<std::string> delegateChipLabels(const Node& node) const;
         // "this@Class.method" -> "method"; "object@Class.method" -> "object.method"; anything else as is.
         static std::string handlerLabelOf(const std::string& descriptor);
         static std::string statusPhrase(cpptools::BindingStatus status);

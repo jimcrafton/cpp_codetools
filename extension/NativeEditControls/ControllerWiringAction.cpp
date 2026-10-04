@@ -3,8 +3,11 @@
 #include <cctype>
 #include <fstream>
 #include <iterator>
+#include <optional>
+#include <regex>
 #include <vector>
 
+#include <cpptools/parser.h>
 #include <cpptools_codegen/classbuilder.h>
 #include <cpptools_codegen/controllerwiring.h>
 
@@ -193,7 +196,7 @@ namespace CodeToolsVsix
     void wireDelegate(DocumentEditService& service, const std::filesystem::path& documentPath,
                       const ControllerRef& controller, newui::View& view, const std::string& viewName,
                       const newui::reflection::Class& viewClass, const std::string& delegateName,
-                      const std::string& handlerName, std::function<void(WireResult)> done)
+                      const std::string& handlerName, std::function<void(WireResult)> done, bool reuseExisting)
     {
         WireResult result;
 
@@ -205,6 +208,7 @@ namespace CodeToolsVsix
             return;
         }
         request.handlerName = handlerName;
+        request.reuseExistingHandler = reuseExisting;
 
         const std::filesystem::path headerPath =
             documentPath.parent_path() / std::filesystem::u8path(controller.header);
@@ -235,6 +239,12 @@ namespace CodeToolsVsix
                 if (plan.status == cpptools_codegen::ControllerWiringStatus::HandlerExists)
                 {
                     result.status = WireStatus::HandlerExists;
+                    done(std::move(result));
+                    return;
+                }
+                if (plan.status == cpptools_codegen::ControllerWiringStatus::HandlerNotFound)
+                {
+                    result.status = WireStatus::HandlerNotFound;
                     done(std::move(result));
                     return;
                 }
@@ -285,5 +295,165 @@ namespace CodeToolsVsix
                         done(std::move(result));
                     });
             });
+    }
+
+    namespace
+    {
+        void dropDescriptor(newui::View& view, const newui::reflection::Class& viewClass,
+                            const std::string& delegateName, const std::string& descriptor)
+        {
+            std::vector<const newui::reflection::Delegate*> delegates;
+            viewClass.allDelegates(delegates);
+            for (const newui::reflection::Delegate* delegate : delegates)
+            {
+                if (delegate->name() == delegateName)
+                {
+                    delegate->removeDescriptorListener(&view, descriptor);
+                    break;
+                }
+            }
+        }
+
+        // The byte range to delete for the first `field->event.add(this, &Class::handler);` in text: the
+        // whole line when nothing else is on it, else just the statement. Spacing is free. Empty if absent.
+        std::optional<TextEdit> removalOf(const std::wstring& text, const std::string& field, const std::string& delegateName,
+                                          const std::string& className, const std::string& handler)
+        {
+            const std::wstring pattern = utf8ToWide(field) + L"\\s*->\\s*" + utf8ToWide(delegateName) +
+                L"\\s*\\.\\s*add\\s*\\(\\s*this\\s*,\\s*&\\s*" + utf8ToWide(className) + L"\\s*::\\s*" +
+                utf8ToWide(handler) + L"\\s*\\)\\s*;";
+            std::wsmatch match;
+            if (!std::regex_search(text, match, std::wregex(pattern)))
+            {
+                return std::nullopt;
+            }
+            std::size_t begin = static_cast<std::size_t>(match.position(0));
+            std::size_t end = begin + static_cast<std::size_t>(match.length(0));
+
+            std::size_t lineBegin = begin;
+            while (lineBegin > 0 && (text[lineBegin - 1] == L' ' || text[lineBegin - 1] == L'\t'))
+            {
+                --lineBegin;
+            }
+            std::size_t lineEnd = end;
+            while (lineEnd < text.size() && (text[lineEnd] == L' ' || text[lineEnd] == L'\t'))
+            {
+                ++lineEnd;
+            }
+            const bool startsLine = lineBegin == 0 || text[lineBegin - 1] == L'\n';
+            const bool endsLine = lineEnd >= text.size() || text[lineEnd] == L'\n' || text[lineEnd] == L'\r';
+            if (startsLine && endsLine)
+            {
+                if (lineEnd < text.size() && text[lineEnd] == L'\r')
+                {
+                    ++lineEnd;
+                }
+                if (lineEnd < text.size() && text[lineEnd] == L'\n')
+                {
+                    ++lineEnd;
+                }
+                begin = lineBegin;
+                end = lineEnd;
+            }
+            return TextEdit{ begin, end - begin, std::wstring() };
+        }
+    }
+
+    void unwireDelegate(DocumentEditService& service, const std::filesystem::path& documentPath,
+                        const ControllerRef& controller, newui::View& view, const std::string& viewName,
+                        const newui::reflection::Class& viewClass, const std::string& delegateName,
+                        const std::string& descriptor, std::function<void(UnwireStatus)> done)
+    {
+        // Only "this@<controller>.<handler>" is something the controller's header says.
+        const std::string prefix = "this@" + controller.className + ".";
+        if (descriptor.compare(0, prefix.size(), prefix) != 0)
+        {
+            dropDescriptor(view, viewClass, delegateName, descriptor);
+            done(UnwireStatus::DocumentOnly);
+            return;
+        }
+        const std::string handler = descriptor.substr(prefix.size());
+        const std::string field = cpptools_codegen::controllerFieldName(viewName);
+        const std::filesystem::path headerPath = documentPath.parent_path() / std::filesystem::u8path(controller.header);
+
+        service.getText(headerPath,
+            [&service, headerPath, &view, &viewClass, delegateName, descriptor, handler, field,
+             className = controller.className, done = std::move(done)](EditStatus status, DocumentSnapshot snapshot) mutable
+            {
+                if (status != EditStatus::Ok)
+                {
+                    done(UnwireStatus::HeaderUnreadable);
+                    return;
+                }
+                const std::optional<TextEdit> removal = removalOf(snapshot.text, field, delegateName, className, handler);
+                if (!removal)
+                {
+                    dropDescriptor(view, viewClass, delegateName, descriptor);
+                    done(UnwireStatus::DocumentOnly);
+                    return;
+                }
+
+                FileEdits file;
+                file.path = headerPath;
+                file.expectedVersion = snapshot.version;
+                file.edits.push_back(*removal);
+                std::vector<FileEdits> group;
+                group.push_back(std::move(file));
+                service.applyGroup(std::move(group),
+                    [&view, &viewClass, delegateName, descriptor, done = std::move(done)]
+                    (EditStatus applied, std::size_t /*appliedCount*/) mutable
+                    {
+                        if (applied != EditStatus::Ok)
+                        {
+                            done(UnwireStatus::EditFailed);
+                            return;
+                        }
+                        dropDescriptor(view, viewClass, delegateName, descriptor);
+                        done(UnwireStatus::Ok);
+                    });
+            });
+    }
+
+    namespace
+    {
+        const cpptools::Symbol* findClassSymbol(const std::vector<cpptools::Symbol>& symbols, const std::string& className)
+        {
+            for (const cpptools::Symbol& symbol : symbols)
+            {
+                if ((symbol.kind == cpptools::SymbolKind::Class || symbol.kind == cpptools::SymbolKind::Struct) &&
+                    symbol.name == className)
+                {
+                    return &symbol;
+                }
+                if (symbol.kind == cpptools::SymbolKind::Namespace)
+                {
+                    if (const cpptools::Symbol* inner = findClassSymbol(symbol.children, className))
+                    {
+                        return inner;
+                    }
+                }
+            }
+            return nullptr;
+        }
+    }
+
+    std::vector<ControllerMethod> controllerMethods(const std::string& headerText, const std::string& className)
+    {
+        std::vector<ControllerMethod> methods;
+        cpptools::Parser parser;
+        const cpptools::ParseResult parsed = parser.parseBuffer("controller.h", headerText);
+        const cpptools::Symbol* controller = findClassSymbol(parsed.symbols, className);
+        if (controller == nullptr)
+        {
+            return methods;
+        }
+        for (const cpptools::Symbol& child : controller->children)
+        {
+            if (child.kind == cpptools::SymbolKind::Method && child.name != "internal_init")
+            {
+                methods.push_back({ child.name, child.location.line, child.location.column });
+            }
+        }
+        return methods;
     }
 }

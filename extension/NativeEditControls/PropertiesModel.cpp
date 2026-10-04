@@ -473,34 +473,43 @@ namespace CodeToolsVsix
         return std::string();
     }
 
+    std::vector<std::string> PropertiesModel::delegateChipLabels(const Node& node) const
+    {
+        std::vector<std::string> labels;
+        if (node.delegate == nullptr) {
+            return labels;
+        }
+        for (const std::string& listener : node.delegate->describedListeners(node.ownerInstance)) {
+            const std::string label = handlerLabelOf(listener);
+            std::optional<cpptools::BindingCheck> check;
+            if (delegatePresenter_.status) {
+                check = delegatePresenter_.status(static_cast<newui::Component*>(node.ownerInstance),
+                                                  node.delegate->name(), listener);
+            }
+            if (check && check->status != cpptools::BindingStatus::Ok) {
+                const char* marker = check->status == cpptools::BindingStatus::CannotVerify ? "? " : "! ";
+                labels.push_back(marker + label + " (" + statusPhrase(check->status) + ")");
+            } else {
+                labels.push_back(label);
+            }
+        }
+        return labels;
+    }
+
     std::string PropertiesModel::delegateRowText(const Node& node) const
     {
         if (node.delegate == nullptr) {
             return std::string();
         }
-        const std::vector<std::string> listeners = node.delegate->describedListeners(node.ownerInstance);
-        if (listeners.empty()) {
+        const std::vector<std::string> labels = delegateChipLabels(node);
+        if (labels.empty()) {
             std::string empty = delegatePresenter_.emptyText ? delegatePresenter_.emptyText() : std::string();
             return empty.empty() ? "(no listeners)" : empty;
         }
 
         std::string text;
-        for (std::size_t i = 0; i < listeners.size(); ++i) {
-            if (i > 0) {
-                text += ", ";
-            }
-            const std::string label = handlerLabelOf(listeners[i]);
-            std::optional<cpptools::BindingCheck> check;
-            if (delegatePresenter_.status) {
-                check = delegatePresenter_.status(static_cast<newui::Component*>(node.ownerInstance),
-                                                  node.delegate->name(), listeners[i]);
-            }
-            if (check && check->status != cpptools::BindingStatus::Ok) {
-                const char* marker = check->status == cpptools::BindingStatus::CannotVerify ? "? " : "! ";
-                text += marker + label + " (" + statusPhrase(check->status) + ")";
-            } else {
-                text += label;
-            }
+        for (std::size_t i = 0; i < labels.size(); ++i) {
+            text += (i > 0 ? ", " : "") + labels[i];
         }
         return text;
     }

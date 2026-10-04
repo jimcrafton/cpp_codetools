@@ -865,6 +865,94 @@ TEST_F(PropertiesGridTest, SelectingAnotherRowDiscardsTheOpenPickerWithoutWiring
     EXPECT_EQ(calls, 0);
 }
 
+namespace {
+// Records `descriptor` on button's delegate `delegateName`, so its Delegates row has a listener.
+void recordOn(newui::Button& button, const std::string& delegateName, const std::string& descriptor)
+{
+    std::vector<const newui::reflection::Delegate*> delegates;
+    newui::reflection::classinfo(std::string("Button"))->allDelegates(delegates);
+    for (const newui::reflection::Delegate* delegate : delegates) {
+        if (delegate->name() == delegateName) {
+            delegate->addDescriptorListener(&button, descriptor);
+        }
+    }
+}
+}
+
+TEST_F(PropertiesGridTest, ThePickerOffersTheControllersExistingHandlersBetweenTheWiredOnesAndGenerate)
+{
+    std::vector<std::string> reused;
+    grid_->setDelegateReuse(
+        [](newui::Component*, const std::string&) { return std::vector<std::string>{"onA", "onB"}; },
+        [&](newui::Component*, const std::string& d, const std::string& h) { reused.push_back(d + ":" + h); });
+    SELECT_FIRST_DELEGATE_ROW(rowPath);
+    recordOn(button_, grid_->model().nodeAt(rowPath).delegate->name(), "this@C.onWired");
+    grid_->openDelegatePicker();
+
+    const std::vector<std::string> expected{"\xE2\x80\xA2 onWired", "use onA", "use onB", "+ Generate new handler..."};
+    EXPECT_EQ(grid_->delegatePickerRows(), expected);
+
+    grid_->chooseDelegatePickerRow(2);   // "use onB"
+
+    EXPECT_FALSE(grid_->delegatePickerOpen());
+    ASSERT_EQ(reused.size(), 1u);
+    EXPECT_NE(reused[0].find(":onB"), std::string::npos) << reused[0];
+}
+
+TEST_F(PropertiesGridTest, ChoosingAWiredHandlerInThePickerJumpsToIt)
+{
+    std::vector<std::string> jumped;
+    grid_->setDelegateListenerHandlers(
+        [&](newui::Component*, const std::string&, const std::string& descriptor) { jumped.push_back(descriptor); }, nullptr);
+    SELECT_FIRST_DELEGATE_ROW(rowPath);
+    recordOn(button_, grid_->model().nodeAt(rowPath).delegate->name(), "this@C.onWired");
+    grid_->openDelegatePicker();
+
+    grid_->chooseDelegatePickerRow(0);
+
+    EXPECT_EQ(jumped, std::vector<std::string>{"this@C.onWired"});
+}
+
+TEST_F(PropertiesGridTest, AGeneratedNameNeverCollidesWithAnExistingHandlerOfTheController)
+{
+    grid_->setDelegateNaming([](newui::Component*, const std::string&) { return std::string("onThing"); }, nullptr);
+    grid_->setDelegateReuse(
+        [](newui::Component*, const std::string&) { return std::vector<std::string>{"onThing"}; }, nullptr);
+    SELECT_FIRST_DELEGATE_ROW(rowPath);
+    grid_->openDelegatePicker();
+
+    grid_->chooseDelegatePickerRow(1);   // Generate, after the one "use onThing" row
+
+    auto* field = dynamic_cast<newui::TextField*>(grid_->treeView()->childViews().at(0));
+    ASSERT_NE(field, nullptr);
+    EXPECT_EQ(field->text(), L"onThing2");
+}
+
+TEST_F(PropertiesGridTest, AChipsLabelJumpsAndItsXUnwires)
+{
+    std::vector<std::string> jumped, removed;
+    grid_->setDelegateListenerHandlers(
+        [&](newui::Component*, const std::string&, const std::string& d) { jumped.push_back(d); },
+        [&](newui::Component*, const std::string&, const std::string& d) { removed.push_back(d); });
+    SELECT_FIRST_DELEGATE_ROW(rowPath);
+    const std::string delegateName = grid_->model().nodeAt(rowPath).delegate->name();
+    recordOn(button_, delegateName, "this@C.onFirst");
+    recordOn(button_, delegateName, "this@C.onSecond");
+    grid_->treeView()->style().markDirty();
+
+    const std::vector<CodeToolsVsix::DelegateChip> chips = grid_->selectedDelegateChips();
+    ASSERT_EQ(chips.size(), 2u);
+
+    const newui::Point onSecondLabel(chips[1].bounds.left() + 8.0f, chips[1].bounds.top() + 8.0f);
+    EXPECT_TRUE(grid_->clickDelegateChip(onSecondLabel));
+    const newui::Point onFirstX(chips[0].removeBox.left() + 2.0f, chips[0].removeBox.top() + 2.0f);
+    EXPECT_TRUE(grid_->clickDelegateChip(onFirstX));
+    EXPECT_FALSE(grid_->clickDelegateChip(newui::Point(-50.0f, -50.0f)));
+
+    EXPECT_EQ(jumped, std::vector<std::string>{"this@C.onSecond"});
+    EXPECT_EQ(removed, std::vector<std::string>{"this@C.onFirst"});
+}
+
 TEST(PropertiesGridHandlerNames, ASuggestionAlreadyWiredGetsANumberAppendedUntilFree)
 {
     using CodeToolsVsix::PropertiesGrid;

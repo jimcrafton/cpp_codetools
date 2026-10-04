@@ -24,6 +24,7 @@ add_executable(cpptools_codegen_tests
     test_methodbuilder.cpp
     test_classbuilder.cpp
     test_methodinsertion.cpp
+    test_accessmerge.cpp
     test_delegatewiring.cpp
     test_fieldinsertion.cpp
     test_controllerwiring.cpp
@@ -75,6 +76,7 @@ add_executable(nativeeditcontrols_tests
     test_designer_arrange.cpp
     test_designer_editor.cpp
     test_document_tabs.cpp
+    test_delegate_chips.cpp
     test_issue_peek.cpp
     test_host_location_opener.cpp
     test_host_services.cpp

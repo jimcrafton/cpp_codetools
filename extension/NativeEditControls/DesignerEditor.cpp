@@ -442,6 +442,25 @@ namespace CodeToolsVsix
                         wireDelegateAs(*view, delegateName, handlerName);
                     }
                 });
+            workspace_->propertiesPane()->setDelegateReuse(
+                [this](newui::Component* owner, const std::string& delegateName) -> std::vector<std::string> {
+                    auto* view = dynamic_cast<newui::SubView*>(owner);
+                    return view != nullptr ? reusableHandlers(*view, delegateName) : std::vector<std::string>();
+                },
+                [this](newui::Component* owner, const std::string& delegateName, const std::string& handlerName) {
+                    if (auto* view = dynamic_cast<newui::SubView*>(owner)) {
+                        wireDelegateAs(*view, delegateName, handlerName, /*reuseExisting=*/true);
+                    }
+                });
+            workspace_->propertiesPane()->setDelegateListenerHandlers(
+                [this](newui::Component*, const std::string&, const std::string& descriptor) {
+                    openHandlerSource(descriptor);
+                },
+                [this](newui::Component* owner, const std::string& delegateName, const std::string& descriptor) {
+                    if (auto* view = dynamic_cast<newui::SubView*>(owner)) {
+                        unwireDelegate(*view, delegateName, descriptor);
+                    }
+                });
             onBindingsVerified.add([this](DesignerEditor&) {
                 refreshDelegateRows();
                 return newui::SyncReturn::Handled;
@@ -1697,7 +1716,8 @@ namespace CodeToolsVsix
     }
 
     void DesignerEditor::wireDelegate(newui::SubView& view, const std::string& delegateName,
-                                      const std::string& handlerName, std::function<void(WireResult)> done)
+                                      const std::string& handlerName, std::function<void(WireResult)> done,
+                                      bool reuseExisting)
     {
         WireResult result;
         if (document_ == nullptr || !document_->hasFilePath() || shape_ != DocumentShape::Frame) {
@@ -1730,6 +1750,120 @@ namespace CodeToolsVsix
                     verifyControllerBindings();
                 }
                 done(std::move(wired));
+            },
+            reuseExisting);
+    }
+
+    namespace
+    {
+        // "this@Class.method" -> "method" when Class is className; empty otherwise.
+        std::string handlerOnController(const std::string& descriptor, const std::string& className)
+        {
+            const std::string prefix = "this@" + className + ".";
+            return descriptor.compare(0, prefix.size(), prefix) == 0 ? descriptor.substr(prefix.size()) : std::string();
+        }
+    }
+
+    std::vector<std::string> DesignerEditor::reusableHandlers(const newui::SubView& view, const std::string& delegateName) const
+    {
+        std::vector<std::string> names;
+        if (!controllerRef_ || document_ == nullptr || !document_->hasFilePath()) {
+            return names;
+        }
+        std::string text = controllerHeaderText_;
+        if (text.empty()) {
+            text = readTextFile(
+                (std::filesystem::path(utf8ToWide(document_->filePath())).parent_path() /
+                 std::filesystem::u8path(controllerRef_->header)).u8string());
+        }
+
+        std::vector<std::string> already;
+        if (const newui::reflection::Class* clazz = newui::reflection::classinfo(std::type_index(typeid(view)))) {
+            std::vector<const newui::reflection::Delegate*> delegates;
+            clazz->allDelegates(delegates);
+            for (const newui::reflection::Delegate* delegate : delegates) {
+                if (delegate->name() == delegateName) {
+                    for (const std::string& descriptor : delegate->describedListeners(const_cast<newui::SubView*>(&view))) {
+                        already.push_back(handlerOnController(descriptor, controllerRef_->className));
+                    }
+                }
+            }
+        }
+        for (const ControllerMethod& method : controllerMethods(text, controllerRef_->className)) {
+            if (std::find(already.begin(), already.end(), method.name) == already.end()) {
+                names.push_back(method.name);
+            }
+        }
+        return names;
+    }
+
+    void DesignerEditor::openHandlerSource(const std::string& descriptor)
+    {
+        if (!controllerRef_ || document_ == nullptr || !document_->hasFilePath()) {
+            return;
+        }
+        const std::string handler = handlerOnController(descriptor, controllerRef_->className);
+        if (handler.empty()) {
+            setDelegateStatusMessage(PropertiesModel::handlerLabelOf(descriptor) + " isn't a method of " + controllerRef_->className);
+            return;
+        }
+        const std::filesystem::path headerPath =
+            std::filesystem::path(utf8ToWide(document_->filePath())).parent_path() / std::filesystem::u8path(controllerRef_->header);
+        const std::string text = controllerHeaderText_.empty() ? readTextFile(headerPath.u8string()) : controllerHeaderText_;
+        for (const ControllerMethod& method : controllerMethods(text, controllerRef_->className)) {
+            if (method.name != handler) {
+                continue;
+            }
+            const std::size_t column = utf16Column(text, method.line, method.column);
+            if (openLocationHandler_ && openLocationHandler_(headerPath.wstring(), method.line, column)) {
+                return;
+            }
+            setDelegateStatusMessage(controllerRef_->header + ":" + std::to_string(method.line) + "  " + handler);
+            return;
+        }
+        setDelegateStatusMessage("Can't find " + handler + " in " + controllerRef_->header);
+    }
+
+    void DesignerEditor::unwireDelegate(newui::SubView& view, const std::string& delegateName, const std::string& descriptor)
+    {
+        if (!controllerRef_ || document_ == nullptr || !document_->hasFilePath()) {
+            return;
+        }
+        const newui::reflection::Class* clazz = newui::reflection::classinfo(std::type_index(typeid(view)));
+        if (clazz == nullptr) {
+            return;
+        }
+        if (verifyState_ == nullptr) {
+            verifyState_ = std::make_shared<VerifyState>();
+        }
+        std::shared_ptr<VerifyState> state = verifyState_;
+        const std::string label = PropertiesModel::handlerLabelOf(descriptor);
+        CodeToolsVsix::unwireDelegate(documentEditService(), std::filesystem::path(utf8ToWide(document_->filePath())),
+            *controllerRef_, view, view.name(), *clazz, delegateName, descriptor,
+            [this, state, delegateName, label](UnwireStatus status) {
+                if (!state->alive) {
+                    return;
+                }
+                switch (status) {
+                case UnwireStatus::Ok:
+                    setDelegateStatusMessage("Unwired " + label + " from " + delegateName + " (the handler stays in the controller)");
+                    break;
+                case UnwireStatus::DocumentOnly:
+                    setDelegateStatusMessage("Removed " + label + " from " + delegateName +
+                                             " - no matching .add() line was found in the controller");
+                    break;
+                case UnwireStatus::HeaderUnreadable:
+                    setDelegateStatusMessage("Can't read the controller's header");
+                    break;
+                default:
+                    setDelegateStatusMessage("Couldn't edit the controller's header");
+                    break;
+                }
+                if (status == UnwireStatus::Ok || status == UnwireStatus::DocumentOnly) {
+                    document_->markModified();
+                    verifyControllerBindings();
+                }
+                refreshDelegateRows();
             });
     }
 
@@ -1778,7 +1912,8 @@ namespace CodeToolsVsix
         return cpptools_codegen::defaultHandlerName(view.name(), delegateName);
     }
 
-    void DesignerEditor::wireDelegateAs(newui::SubView& view, const std::string& delegateName, const std::string& handlerName)
+    void DesignerEditor::wireDelegateAs(newui::SubView& view, const std::string& delegateName, const std::string& handlerName,
+                                        bool reuseExisting)
     {
         if (!handlerName.empty()) {
             const bool identifier = !std::isdigit(static_cast<unsigned char>(handlerName[0])) &&
@@ -1799,7 +1934,11 @@ namespace CodeToolsVsix
             const std::filesystem::path documentPath(utf8ToWide(document_->filePath()));
             std::string className = defaultControllerClassName(documentPath);
             std::string header = className + ".h";
-            if (newControllerPrompt_) {
+            // A header that already defines the class is simply used - nothing to ask.
+            std::error_code existsError;
+            const bool adoptsExisting = std::filesystem::exists(documentPath.parent_path() / std::filesystem::u8path(header), existsError) &&
+                checkNewController(documentPath, className, header).ok;
+            if (newControllerPrompt_ && !adoptsExisting) {
                 const std::optional<ControllerRef> chosen = newControllerPrompt_(documentPath, className, header);
                 if (!chosen) {
                     setDelegateStatusMessage("Cancelled - no controller created");
@@ -1834,6 +1973,9 @@ namespace CodeToolsVsix
                 case WireStatus::HandlerExists:
                     setDelegateStatusMessage(controllerClass + " already has " + result.handlerName);
                     break;
+                case WireStatus::HandlerNotFound:
+                    setDelegateStatusMessage(controllerClass + " has no " + result.handlerName);
+                    break;
                 case WireStatus::HeaderUnreadable:
                     setDelegateStatusMessage("Can't read the controller's header");
                     break;
@@ -1852,7 +1994,8 @@ namespace CodeToolsVsix
                     break;
                 }
                 refreshDelegateRows();
-            });
+            },
+            reuseExisting);
     }
 
     void DesignerEditor::verifyControllerBindings()

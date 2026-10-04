@@ -1,5 +1,7 @@
 #pragma once
 
+#include "DelegateChips.h"
+#include "HoverTooltip.h"
 #include "PropertiesModel.h"
 #include "PropertyItem.h"
 
@@ -118,6 +120,37 @@ namespace CodeToolsVsix
             delegateDefaultName_ = std::move(defaultName);
             delegateWireHandler_ = std::move(wire);
         }
+
+        // "use <handler>" entries in the picker: the controller's existing methods an event could be
+        // pointed at (the provider's answer, capped), and what to do when one is picked. Without a
+        // provider the picker lists none.
+        using DelegateReuseProvider = std::function<std::vector<std::string>(newui::Component* owner,
+                                                                             const std::string& delegateName)>;
+        void setDelegateReuse(DelegateReuseProvider provider, DelegateWireHandler reuse)
+        {
+            delegateReuseProvider_ = std::move(provider);
+            delegateReuseHandler_ = std::move(reuse);
+        }
+        // What clicking a handler's chip (or its row in the picker) and a chip's "x" do - each given the
+        // control, the event and the handler's descriptor ("this@Class.method"). Jumping to source and
+        // unwiring are the caller's.
+        using DelegateListenerHandler = std::function<void(newui::Component* owner, const std::string& delegateName,
+                                                           const std::string& descriptor)>;
+        void setDelegateListenerHandlers(DelegateListenerHandler jump, DelegateListenerHandler remove)
+        {
+            delegateJumpHandler_ = std::move(jump);
+            delegateRemoveHandler_ = std::move(remove);
+        }
+        // The chips of the selected Delegates row as laid out now (value-cell coordinates of the tree
+        // view) - for tests and hit-testing; empty when the row isn't a Delegates row or has none.
+        std::vector<DelegateChip> selectedDelegateChips() const;
+        // What a click at `point` (tree-view coordinates) on the selected Delegates row's chips does:
+        // jump for a chip's label, remove for its "x". False if it isn't on a chip.
+        bool clickDelegateChip(const newui::Point& point);
+
+        // Shows (or hides) the tooltip for the selected Delegates row's chip under `point`: its full
+        // label (status included), or "Unwire" over its "x". Returns whether one is showing.
+        bool updateDelegateChipTooltip(const newui::Point& point);
 
         // Where the grid tells the user what to do next (the name field's "type a name, press Enter").
         void setDelegateHint(std::function<void(const std::string&)> hint) { delegateHint_ = std::move(hint); }
@@ -258,6 +291,8 @@ namespace CodeToolsVsix
         bool isPointNearDivider(const newui::Point& localPt) const;
         newui::SyncReturn handleTreeMouseDown(newui::View& sender, const newui::Point& pt,
             std::uint32_t btnMask, std::uint32_t keyMask);
+        newui::SyncReturn handleTreeMouseLeft(newui::View& sender, const newui::Point& pt,
+            std::uint32_t btnMask, std::uint32_t keyMask);
         newui::SyncReturn handleTreeMouseMove(newui::View& sender, const newui::Point& pt,
             std::uint32_t btnMask, std::uint32_t keyMask);
         newui::SyncReturn handleTreeMouseUp(newui::View& sender, const newui::Point& pt,
@@ -304,6 +339,7 @@ namespace CodeToolsVsix
         newui::UndoStack* undoStack_ = nullptr;
         AfterCommitHandler afterCommitHandler_;
         bool draggingDivider_ = false;
+        HoverTooltip chipTooltip_;
 
         std::unique_ptr<PropertyEditor> liveEditor_;
         newui::SubView* liveEditorView_ = nullptr;
@@ -332,6 +368,15 @@ namespace CodeToolsVsix
         std::string delegateEditorName_;
         std::size_t delegatePickerWired_ = 0;
         std::vector<std::string> delegatePickerRows_;
+        // Rows [0, wired) are wired handlers (descriptors below), then one per reusable handler, then
+        // the "Generate" row.
+        std::vector<std::string> delegatePickerDescriptors_;
+        std::vector<std::string> delegatePickerReuse_;
+        static constexpr std::size_t kMaxReuseRows = 8;
+        DelegateReuseProvider delegateReuseProvider_;
+        DelegateWireHandler delegateReuseHandler_;
+        DelegateListenerHandler delegateJumpHandler_;
+        DelegateListenerHandler delegateRemoveHandler_;
         void showDelegatePickerPopup(const newui::Rect& anchorScreenRect);
         DelegateDefaultNameProvider delegateDefaultName_;
         DelegateWireHandler delegateWireHandler_;

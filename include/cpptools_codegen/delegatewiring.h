@@ -24,7 +24,8 @@ struct DelegateWiringEdit {
 // caller already has to resolve the delegate's own signature via reflection to build it).
 //
 // - handlerDeclarationText: the complete handler method text (e.g. a MethodBuilder::toString()
-//   result), inserted as a new private member just before className's own closing brace.
+//   result), inserted at the end of className's private section (a new section only if it has none).
+//   Empty = the handler already exists: only the wiring call is planned.
 // - wiringCallLine: one statement (e.g. "saveButton_->onClick.add(this,
 //   &MyDialog::onSaveButtonClicked);"), inserted into className's internal_init() override - if
 //   className already has one, appended just before its closing brace; if not, a new protected

@@ -15,9 +15,14 @@ std::optional<std::vector<DelegateWiringEdit>> planDelegateWiring(const std::str
         return std::nullopt;
     }
 
+    // An empty handlerDeclarationText means the handler already exists: only the wiring is planned.
+    const bool addHandler = !handlerDeclarationText.empty();
+
     std::vector<DelegateWiringEdit> edits;
-    edits.push_back(DelegateWiringEdit{handlerAt->offset,
-                                       handlerAt->prefix + handlerDeclarationText + handlerAt->suffix});
+    if (addHandler) {
+        edits.push_back(DelegateWiringEdit{handlerAt->offset,
+                                           handlerAt->prefix + handlerDeclarationText + handlerAt->suffix});
+    }
 
     const std::optional<std::size_t> initInsertionOffset =
         functionBodyInsertionPoint(content, className, "internal_init");
@@ -39,7 +44,7 @@ std::optional<std::vector<DelegateWiringEdit>> planDelegateWiring(const std::str
 
     const std::optional<MemberInsertion> initAt = memberInsertionPoint(content, className, MemberAccess::Protected);
     const std::string initText = initAt->prefix + internalInit.toString(1) + initAt->suffix;
-    if (initAt->offset == handlerAt->offset) {
+    if (addHandler && initAt->offset == handlerAt->offset) {
         // Same offset: one combined edit, so the caller needn't reason about same-offset order.
         edits.front().text += initText;
     } else {

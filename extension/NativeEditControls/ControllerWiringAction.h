@@ -60,6 +60,7 @@ namespace CodeToolsVsix
         HeaderUnreadable,
         ControllerClassMissing, // the header doesn't define the controller class
         HandlerExists,          // the controller already has that handler; nothing was changed
+        HandlerNotFound,        // reuse requested, but the controller has no such handler; nothing was changed
         NoDocument,             // (DesignerEditor) no saved Frame document
         NoController,           // (DesignerEditor) the document has no controller yet - create one first
         EditFailed,             // the edit couldn't be applied (see editStatus)
@@ -79,8 +80,41 @@ namespace CodeToolsVsix
     // copy - and, once that succeeds, records the descriptor on `view` (addDescriptorListener) so the
     // document keeps the mapping. The editor and disk routes complete before this returns; a host may
     // complete later. handlerName empty = the default on<Control><Event>.
+    //
+    // reuseExisting: handlerName names a handler the controller already has; nothing is generated, the
+    // event is just connected to it (field if missing + `.add()` call + the recorded descriptor).
     void wireDelegate(DocumentEditService& service, const std::filesystem::path& documentPath,
                       const ControllerRef& controller, newui::View& view, const std::string& viewName,
                       const newui::reflection::Class& viewClass, const std::string& delegateName,
-                      const std::string& handlerName, std::function<void(WireResult)> done);
+                      const std::string& handlerName, std::function<void(WireResult)> done,
+                      bool reuseExisting = false);
+
+    enum class UnwireStatus
+    {
+        Ok,                 // the `.add()` line was removed and the descriptor dropped from the control
+        DocumentOnly,       // the descriptor was dropped but no matching `.add()` line was found to remove
+        HeaderUnreadable,
+        EditFailed,
+    };
+
+    // Undoes one wiring: removes the `<field>->event.add(this, &Class::handler);` line from the
+    // controller's header (through the edit service, like wireDelegate) and drops `descriptor` from
+    // `view`'s event. The handler method itself is left alone - it may hold the user's code. A
+    // descriptor that isn't `this@<controller class>.<handler>` has no line to remove: only the
+    // control's record is dropped. `done` may run later when the host answers.
+    void unwireDelegate(DocumentEditService& service, const std::filesystem::path& documentPath,
+                        const ControllerRef& controller, newui::View& view, const std::string& viewName,
+                        const newui::reflection::Class& viewClass, const std::string& delegateName,
+                        const std::string& descriptor, std::function<void(UnwireStatus)> done);
+
+    // The controller class's methods as found in its header text - what an event can be re-pointed at
+    // and where each one is. Constructors, destructors and internal_init() are left out. Empty when
+    // the class isn't found.
+    struct ControllerMethod
+    {
+        std::string name;
+        std::size_t line = 0;     // 1-based
+        std::size_t column = 0;   // 1-based, UTF-8 bytes (clang's)
+    };
+    std::vector<ControllerMethod> controllerMethods(const std::string& headerText, const std::string& className);
 }

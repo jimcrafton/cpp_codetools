@@ -46,8 +46,10 @@ ControllerWiringPlan planControllerDelegateWiring(const std::string& content, co
         plan.status = ControllerWiringStatus::ClassNotFound;
         return plan;
     }
-    if (classHasMember(content, request.className, plan.handlerName)) {
-        plan.status = ControllerWiringStatus::HandlerExists;
+    const bool handlerPresent = classHasMember(content, request.className, plan.handlerName);
+    if (request.reuseExistingHandler ? !handlerPresent : handlerPresent) {
+        plan.status = request.reuseExistingHandler ? ControllerWiringStatus::HandlerNotFound
+                                                   : ControllerWiringStatus::HandlerExists;
         return plan;
     }
 
@@ -67,7 +69,8 @@ ControllerWiringPlan planControllerDelegateWiring(const std::string& content, co
     const std::string wiringCall = plan.fieldName + "->" + request.delegateName + ".add(this, &" + request.className +
                                    "::" + plan.handlerName + ");";
 
-    auto wiring = planDelegateWiring(content, request.className, handler.toString(1), wiringCall);
+    auto wiring = planDelegateWiring(content, request.className,
+                                     request.reuseExistingHandler ? std::string() : handler.toString(1), wiringCall);
     if (!wiring.has_value()) {
         plan.status = ControllerWiringStatus::ClassNotFound;
         plan.edits.clear();

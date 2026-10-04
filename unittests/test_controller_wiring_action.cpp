@@ -270,3 +270,113 @@ TEST_F(Fixture, CreateControllerRefusesNamesThatAreNotIdentifiers) {
     EXPECT_EQ(createController(document, "Has Space", "A.h"), CreateControllerStatus::InvalidName);
     EXPECT_EQ(createController(document, "Fine", ""), CreateControllerStatus::InvalidName);
 }
+
+TEST_F(Fixture, ASecondControlReusesTheFirstOnesHandlerWithoutAnotherBeingGenerated) {
+    writeHeader(kControllerHeader);
+    newui::Button* save = addButton("saveButton");
+    newui::Button* other = addButton("otherButton");
+    ASSERT_EQ(wire(*save).status, WireStatus::Ok);
+
+    WireResult reused;
+    wireDelegate(service, document, controller, *other, other->name(), buttonClass(), "onClick", "onSaveButtonClick",
+                 [&](WireResult r) { reused = std::move(r); }, /*reuseExisting=*/true);
+
+    ASSERT_EQ(reused.status, WireStatus::Ok) << static_cast<int>(reused.editStatus);
+    EXPECT_EQ(reused.descriptor, "this@SaveDialogController.onSaveButtonClick");
+    const std::string text = headerOnDisk();
+    EXPECT_EQ(countOf(text, "onSaveButtonClick(newui::Control& sender)"), 1u) << text;
+    EXPECT_NE(text.find("otherButton_->onClick.add(this, &SaveDialogController::onSaveButtonClick);"), std::string::npos) << text;
+    EXPECT_NE(text.find("newui::Button* otherButton_ = nullptr;"), std::string::npos) << text;
+    EXPECT_EQ(recorded(*other), std::vector<std::string>{"this@SaveDialogController.onSaveButtonClick"});
+}
+
+TEST_F(Fixture, ReusingAHandlerThatIsNotThereChangesNothing) {
+    writeHeader(kControllerHeader);
+    newui::Button* button = addButton("saveButton");
+
+    WireResult result;
+    wireDelegate(service, document, controller, *button, button->name(), buttonClass(), "onClick", "onNothing",
+                 [&](WireResult r) { result = std::move(r); }, /*reuseExisting=*/true);
+
+    EXPECT_EQ(result.status, WireStatus::HandlerNotFound);
+    EXPECT_EQ(headerOnDisk(), kControllerHeader);
+    EXPECT_TRUE(recorded(*button).empty());
+}
+
+TEST_F(Fixture, UnwiringRemovesTheAddLineAndTheRecordButLeavesTheHandler) {
+    writeHeader(kControllerHeader);
+    newui::Button* button = addButton("saveButton");
+    ASSERT_EQ(wire(*button).status, WireStatus::Ok);
+
+    UnwireStatus status = UnwireStatus::EditFailed;
+    unwireDelegate(service, document, controller, *button, button->name(), buttonClass(), "onClick",
+                   "this@SaveDialogController.onSaveButtonClick", [&](UnwireStatus s) { status = s; });
+
+    EXPECT_EQ(status, UnwireStatus::Ok);
+    const std::string text = headerOnDisk();
+    EXPECT_EQ(text.find("onClick.add("), std::string::npos) << text;
+    EXPECT_NE(text.find("newui::SyncReturn onSaveButtonClick(newui::Control& sender)"), std::string::npos) << text;
+    EXPECT_TRUE(recorded(*button).empty());
+}
+
+TEST_F(Fixture, UnwiringOneOfTwoListenersLeavesTheOtherWired) {
+    writeHeader(kControllerHeader);
+    newui::Button* save = addButton("saveButton");
+    newui::Button* other = addButton("otherButton");
+    ASSERT_EQ(wire(*save).status, WireStatus::Ok);
+    WireResult reused;
+    wireDelegate(service, document, controller, *other, other->name(), buttonClass(), "onClick", "onSaveButtonClick",
+                 [&](WireResult r) { reused = std::move(r); }, /*reuseExisting=*/true);
+    ASSERT_EQ(reused.status, WireStatus::Ok);
+
+    unwireDelegate(service, document, controller, *other, other->name(), buttonClass(), "onClick",
+                   "this@SaveDialogController.onSaveButtonClick", [](UnwireStatus) {});
+
+    const std::string text = headerOnDisk();
+    EXPECT_EQ(text.find("otherButton_->onClick.add("), std::string::npos) << text;
+    EXPECT_NE(text.find("saveButton_->onClick.add(this, &SaveDialogController::onSaveButtonClick);"), std::string::npos) << text;
+    EXPECT_EQ(recorded(*save).size(), 1u);
+    EXPECT_TRUE(recorded(*other).empty());
+}
+
+TEST_F(Fixture, UnwiringAListenerTheHeaderDoesNotSayOnlyDropsTheControlsRecord) {
+    writeHeader(kControllerHeader);
+    newui::Button* button = addButton("saveButton");
+    std::vector<const newui::reflection::Delegate*> delegates;
+    buttonClass().allDelegates(delegates);
+    for (const auto* d : delegates) {
+        if (d->name() == "onClick") {
+            ASSERT_TRUE(d->addDescriptorListener(button, "presenter@Other.onSave"));
+        }
+    }
+
+    UnwireStatus status = UnwireStatus::EditFailed;
+    unwireDelegate(service, document, controller, *button, button->name(), buttonClass(), "onClick",
+                   "presenter@Other.onSave", [&](UnwireStatus s) { status = s; });
+
+    EXPECT_EQ(status, UnwireStatus::DocumentOnly);
+    EXPECT_EQ(headerOnDisk(), kControllerHeader);
+    EXPECT_TRUE(recorded(*button).empty());
+}
+
+TEST(ControllerMethods, ListsTheClassesMethodsWithWhereTheyAreAndSkipsInternalInit) {
+    const std::string text =
+        "class C {\n"
+        "public:\n"
+        "    C() = default;\n"
+        "    void onA() {}\n"
+        "protected:\n"
+        "    bool internal_init() { return true; }\n"
+        "private:\n"
+        "    int onB(int x) { return x; }\n"
+        "    int field_ = 0;\n"
+        "};\n";
+
+    const std::vector<ControllerMethod> methods = controllerMethods(text, "C");
+    ASSERT_EQ(methods.size(), 2u);
+    EXPECT_EQ(methods[0].name, "onA");
+    EXPECT_EQ(methods[0].line, 4u);
+    EXPECT_EQ(methods[1].name, "onB");
+    EXPECT_EQ(methods[1].line, 8u);
+    EXPECT_TRUE(controllerMethods(text, "Missing").empty());
+}

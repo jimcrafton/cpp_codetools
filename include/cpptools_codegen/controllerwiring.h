@@ -20,12 +20,16 @@ struct ControllerWiringRequest {
     std::vector<std::pair<std::string, std::string>> arguments;
     // Empty = defaultHandlerName().
     std::string handlerName;
+    // Wire to a handler the class already has (handlerName must name it) instead of generating one:
+    // only the connect field (if missing) and the `.add()` call are planned.
+    bool reuseExistingHandler = false;
 };
 
 enum class ControllerWiringStatus {
     Ok,
     ClassNotFound,   // className isn't a class/struct definition in the content
     HandlerExists,   // the class already has a member with the handler's name; nothing planned
+    HandlerNotFound, // reuseExistingHandler, but the class has no member of that name; nothing planned
 };
 
 struct ControllerWiringPlan {

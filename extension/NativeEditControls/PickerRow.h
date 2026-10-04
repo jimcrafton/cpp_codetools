@@ -29,6 +29,11 @@ namespace CodeToolsVsix
             // A click lands on the deepest view under the cursor and doesn't bubble, so the label
             // (which covers most of the row) has to run the row's action itself.
             label->onMouseDown.add(this, &PickerRow::handleMouseDown);
+            // The label is the deepest view under the cursor, so it reports hover for the row too.
+            label->onMouseEntered.add(this, &PickerRow::handleEntered);
+            label->onMouseLeft.add(this, &PickerRow::handleLeft);
+            onMouseEntered.add(this, &PickerRow::handleEntered);
+            onMouseLeft.add(this, &PickerRow::handleLeft);
             addChild(label);
         }
 
@@ -53,10 +58,36 @@ namespace CodeToolsVsix
                 ctx.set_stroke_width(1.0);
                 ctx.stroke_round_rect(BLRect(bounds), 4.0);
             }
+            if (onChosen_ && hovered_) {
+                BLRgba32 tint = newui::UIColorManager::colorFor(newui::UIColorRole::HighlightBackground).toBLRgba32();
+                tint.setA(70);
+                ctx.set_fill_style(tint);
+                ctx.fill_round_rect(BLRect(bounds), 4.0);
+            }
             ctx.restore();
         }
 
     private:
+        newui::SyncReturn handleEntered(newui::View&, const newui::Point&, std::uint32_t, std::uint32_t)
+        {
+            setHovered(true);
+            return newui::SyncReturn::Handled;
+        }
+
+        newui::SyncReturn handleLeft(newui::View&, const newui::Point&, std::uint32_t, std::uint32_t)
+        {
+            setHovered(false);
+            return newui::SyncReturn::Handled;
+        }
+
+        void setHovered(bool hovered)
+        {
+            if (hovered_ != hovered) {
+                hovered_ = hovered;
+                style().markDirty();
+            }
+        }
+
         newui::SyncReturn handleMouseDown(newui::View&, const newui::Point&, std::uint32_t, std::uint32_t)
         {
             if (onChosen_) {
@@ -67,5 +98,6 @@ namespace CodeToolsVsix
 
         std::function<void()> onChosen_;
         newui::Label* label_ = nullptr;
+        bool hovered_ = false;
     };
 }

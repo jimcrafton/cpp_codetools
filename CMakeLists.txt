@@ -252,6 +252,7 @@ add_dependencies(cpptools cpptools_version)
 # (Fluent Builder) work starts.
 add_library(cpptools_codegen STATIC
     src/codegen/classinsertion.cpp
+    src/codegen/accessmerge.cpp
     include/cpptools_codegen/classinsertion.h
     src/codegen/methodbuilder.cpp
     include/cpptools_codegen/methodbuilder.h
@@ -347,6 +348,7 @@ add_library(nativeeditcontrols_core OBJECT
     extension/NativeEditControls/ControllerWiringAction.cpp
     extension/NativeEditControls/ControllerBindings.cpp
     extension/NativeEditControls/ControllerRef.cpp
+    extension/NativeEditControls/DelegateChips.cpp
     extension/NativeEditControls/WiringRequestBuilder.cpp
     extension/NativeEditControls/CodegenEditAdapter.cpp
     extension/NativeEditControls/HostEditorBridge.cpp

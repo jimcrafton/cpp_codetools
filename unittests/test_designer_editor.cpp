@@ -2164,6 +2164,64 @@ TEST_F(DesignerEditorFileFixture, WiringAgainWithAnotherNameAddsASecondListener)
     ::DeleteFileA(header.c_str());
 }
 
+TEST_F(DesignerEditorFileFixture, AnExistingHandlerCanBeReusedUnwiredAndJumpedTo)
+{
+    writeFile(R"({ title: "T", rootView: { type: "RootView", childViews: [ { type: "Button", name: "saveButton" }, { type: "Button", name: "otherButton" } ] } })");
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+    std::wstring path = filePath();
+    ASSERT_TRUE(editor.load(path.c_str(), path.size()));
+    newui::Button* save = nullptr;
+    newui::Button* other = nullptr;
+    for (newui::SubView* child : editor.workspace()->rootViewProxy()->childViews()) {
+        if (child->name() == "saveButton") {
+            save = dynamic_cast<newui::Button*>(child);
+        } else if (child->name() == "otherButton") {
+            other = dynamic_cast<newui::Button*>(child);
+        }
+    }
+    ASSERT_NE(save, nullptr);
+    ASSERT_NE(other, nullptr);
+    const std::string header = (std::filesystem::path(path_).parent_path() / "DesignerEditorProbeController.h").string();
+
+    editor.activateDelegate(*save, "onClick", {});
+
+    // Reuse: the first control's handler is on offer to the second, and wiring it adds only a call.
+    const std::vector<std::string> offered = editor.reusableHandlers(*other, "onClick");
+    EXPECT_NE(std::find(offered.begin(), offered.end(), "onSaveButtonClick"), offered.end());
+    EXPECT_EQ(std::find(offered.begin(), offered.end(), "internal_init"), offered.end());
+    EXPECT_TRUE(editor.reusableHandlers(*save, "onClick").empty() ||
+                std::find(editor.reusableHandlers(*save, "onClick").begin(), editor.reusableHandlers(*save, "onClick").end(),
+                          "onSaveButtonClick") == editor.reusableHandlers(*save, "onClick").end())
+        << "already wired to this event: not offered again";
+    editor.wireDelegateAs(*other, "onClick", "onSaveButtonClick", /*reuseExisting=*/true);
+    std::string text = readAll(header);
+    EXPECT_NE(text.find("otherButton_->onClick.add(this, &DesignerEditorProbeController::onSaveButtonClick);"), std::string::npos) << text;
+    EXPECT_EQ(editor.delegateStatusMessage(), "Wired onClick to DesignerEditorProbeController::onSaveButtonClick");
+
+    // Jump: the host is asked to open the header at the handler's line.
+    std::wstring openedPath;
+    std::size_t openedLine = 0;
+    editor.setOpenLocationHandler([&](const std::wstring& p, std::size_t line, std::size_t) {
+        openedPath = p;
+        openedLine = line;
+        return true;
+    });
+    editor.openHandlerSource("this@DesignerEditorProbeController.onSaveButtonClick");
+    EXPECT_NE(openedPath.find(L"DesignerEditorProbeController.h"), std::wstring::npos);
+    EXPECT_GT(openedLine, 1u);
+
+    // Unwire: the second control's call and record go, the handler and the first control's wiring stay.
+    editor.unwireDelegate(*other, "onClick", "this@DesignerEditorProbeController.onSaveButtonClick");
+    text = readAll(header);
+    EXPECT_EQ(text.find("otherButton_->onClick.add("), std::string::npos) << text;
+    EXPECT_NE(text.find("saveButton_->onClick.add(this, &DesignerEditorProbeController::onSaveButtonClick);"), std::string::npos) << text;
+    EXPECT_NE(text.find("newui::SyncReturn onSaveButtonClick("), std::string::npos) << text;
+    EXPECT_NE(editor.delegateStatusMessage().find("Unwired"), std::string::npos) << editor.delegateStatusMessage();
+    EXPECT_EQ(delegateRowTextFor(editor, *other, "onClick").find("onSaveButtonClick"), std::string::npos);
+    ::DeleteFileA(header.c_str());
+}
+
 TEST_F(DesignerEditorFileFixture, AHandlerNameThatIsNotAnIdentifierIsRefusedAndCreatesNothing)
 {
     writeFile(R"({ title: "T", rootView: { type: "RootView", childViews: [ { type: "Button", name: "saveButton" } ] } })");

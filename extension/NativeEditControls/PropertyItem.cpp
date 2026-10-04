@@ -1,4 +1,5 @@
 #include "PropertyItem.h"
+#include "DelegateChips.h"
 #include "PaintUtils.h"
 
 #include <newui/color.h>
@@ -319,9 +320,24 @@ namespace CodeToolsVsix
         if (node.kind == PropertiesModel::Kind::DelegateEntry) {
             const newui::Rect buttonRect = ellipsisButtonRectFor(valueRect);
             paintEllipsisButton(ctx, buttonRect, dimTextColor(*this));
-            const newui::Rect textRect(valueRect.left(), valueRect.top(),
-                buttonRect.left() - valueRect.left() - 4.0f, valueRect.size().height);
-            paintText(ctx, textRect, model->delegateRowText(node), rowTextColor(*this));
+            const newui::Rect chipArea = delegateChipAreaFor(valueRect);
+            const std::vector<std::string> labels = model->delegateChipLabels(node);
+            if (labels.empty()) {
+                const newui::Rect wire = wireButtonRectFor(valueRect);
+                paintText(ctx, newui::Rect(chipArea.left(), chipArea.top(), wire.left() - chipArea.left() - 4.0f,
+                                           chipArea.size().height),
+                          model->delegateRowText(node), rowTextColor(*this));
+                ctx.save();
+                ctx.set_stroke_style(dimTextColor(*this).toBLRgba32());
+                ctx.set_stroke_width(1.0);
+                ctx.stroke_round_rect(BLRect(wire.left(), wire.top(), wire.size().width, wire.size().height), 3.0);
+                ctx.restore();
+                paintText(ctx, newui::Rect(wire.left() + 5.0f, wire.top(), wire.size().width - 5.0f, wire.size().height),
+                          "Wire", rowTextColor(*this));
+            } else {
+                DelegateChips::paint(ctx, DelegateChips::layout(labels, chipArea), rowTextColor(*this),
+                                     dimTextColor(*this), dimTextColor(*this));
+            }
             return;
         }
 
@@ -393,6 +409,21 @@ namespace CodeToolsVsix
         float keyWidth = rowRect.size().width * keyColumnFraction;
         return newui::Rect(rowRect.left() + keyWidth + kRowPadding, rowRect.top(),
             rowRect.size().width - keyWidth - kRowPadding, rowRect.size().height);
+    }
+
+    newui::Rect PropertyItem::delegateChipAreaFor(const newui::Rect& valueRect)
+    {
+        const newui::Rect button = ellipsisButtonRectFor(valueRect);
+        return newui::Rect(valueRect.left(), valueRect.top(), button.left() - valueRect.left() - 4.0f,
+                           valueRect.size().height);
+    }
+
+    newui::Rect PropertyItem::wireButtonRectFor(const newui::Rect& valueRect)
+    {
+        const newui::Rect chipArea = delegateChipAreaFor(valueRect);
+        const float size = kEllipsisButtonSize;
+        return newui::Rect(chipArea.right() - kWireButtonWidth, valueRect.top() + (valueRect.size().height - size) * 0.5f,
+                           kWireButtonWidth, size);
     }
 
     newui::Rect PropertyItem::ellipsisButtonRectFor(const newui::Rect& contentRect)

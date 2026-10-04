@@ -213,3 +213,53 @@ TEST(ControllerWiring, ACustomHandlerNameIsUsedVerbatim) {
     EXPECT_EQ(plan.handlerName, "saveClicked");
     EXPECT_NE(applyPlan(content, plan.edits).find("&SaveDialogController::saveClicked);"), std::string::npos);
 }
+
+TEST(ControllerWiringReuse, WiresASecondEventToAnExistingHandlerWithoutGeneratingOne) {
+    // saveButton_ is already wired to onSaveButtonClick; reuse it for the key event.
+    const std::string content = std::string(kPreamble) +
+        "class SaveDialogController : public newui::RootController {\n"
+        "public:\n"
+        "    SaveDialogController() = default;\n"
+        "\n"
+        "protected:\n"
+        "    bool internal_init() override {\n"
+        "        if (!Component::internal_init()) {\n"
+        "            return false;\n"
+        "        }\n"
+        "        return true;\n"
+        "    }\n"
+        "\n"
+        "private:\n"
+        "    //@reflect connect=true\n"
+        "    newui::Button* saveButton_ = nullptr;\n"
+        "    newui::SyncReturn onSaveButtonClick(newui::Control& sender) { return newui::SyncReturn::Handled; }\n"
+        "};\n";
+
+    ControllerWiringRequest r = saveButtonClick();
+    r.handlerName = "onSaveButtonClick";
+    r.reuseExistingHandler = true;
+
+    const ControllerWiringPlan plan = planControllerDelegateWiring(content, r);
+    ASSERT_EQ(plan.status, ControllerWiringStatus::Ok);
+    const std::string generated = applyPlan(content, plan.edits);
+
+    EXPECT_NE(generated.find("saveButton_->onClick.add(this, &SaveDialogController::onSaveButtonClick);"), std::string::npos)
+        << generated;
+    const cpptools::ParseResult result = parseClean(generated);
+    const cpptools::Symbol* controller = controllerIn(result);
+    ASSERT_NE(controller, nullptr);
+    EXPECT_EQ(countChildren(*controller, "onSaveButtonClick"), 1u) << "no second handler was generated";
+    EXPECT_EQ(countChildren(*controller, "saveButton_"), 1u) << "the field was already there";
+    EXPECT_EQ(countChildren(*controller, "internal_init"), 1u);
+}
+
+TEST(ControllerWiringReuse, RefusesAHandlerTheClassDoesNotHave) {
+    const std::string content = std::string(kPreamble) + kController;
+    ControllerWiringRequest r = saveButtonClick();
+    r.handlerName = "onNothingHere";
+    r.reuseExistingHandler = true;
+
+    const ControllerWiringPlan plan = planControllerDelegateWiring(content, r);
+    EXPECT_EQ(plan.status, ControllerWiringStatus::HandlerNotFound);
+    EXPECT_TRUE(plan.edits.empty());
+}
