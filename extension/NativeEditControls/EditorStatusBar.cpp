@@ -45,6 +45,40 @@ namespace CodeToolsVsix
 
         updateNavigator();
         caretMoved();
+
+        clickConnection_ = text_.controller().onAnnotationClicked.add(this, &EditorStatusBar::annotationClicked);
+        hoverConnection_ = text_.controller().onAnnotationHovered.add(this, &EditorStatusBar::annotationHovered);
+    }
+
+    EditorStatusBar::~EditorStatusBar()
+    {
+        text_.controller().onAnnotationClicked.remove(clickConnection_);
+        text_.controller().onAnnotationHovered.remove(hoverConnection_);
+    }
+
+    newui::SyncReturn EditorStatusBar::annotationHovered(newui::TextController& /*sender*/, std::size_t index)
+    {
+        const auto& annotations = text_.lineAnnotations();
+        if (index >= annotations.size()) {
+            caretMoved();   // back to the position
+            return newui::SyncReturn::Handled;
+        }
+        position_->setText("  " + annotations[index].text);
+        row_->style().markDirty();
+        return newui::SyncReturn::Handled;
+    }
+
+    newui::SyncReturn EditorStatusBar::annotationClicked(newui::TextController& /*sender*/, std::size_t index)
+    {
+        const auto& annotations = text_.lineAnnotations();
+        if (index >= annotations.size() || !goTo_) {
+            return newui::SyncReturn::Ignored;
+        }
+        const std::wstring text = text_.text();
+        const std::size_t offset = annotations[index].offset < text.size() ? annotations[index].offset : text.size();
+        const std::size_t line = lineOfOffset(text, offset);
+        goTo_(line, offset - offsetOfLine(text, line, 1) + 1);
+        return newui::SyncReturn::Handled;
     }
 
     newui::Label* EditorStatusBar::makeArrow(const std::string& glyph, bool forward)

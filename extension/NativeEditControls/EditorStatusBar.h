@@ -32,6 +32,7 @@ namespace CodeToolsVsix
         using MarksSink = std::function<void(std::vector<MinimapStrip::Mark> marks)>;
 
         EditorStatusBar(newui::View& host, newui::TextFoldingControl& text);
+        ~EditorStatusBar();
 
         void setGoTo(GoTo goTo) { goTo_ = std::move(goTo); }
         void setMarksSink(MarksSink sink) { marksSink_ = std::move(sink); }
@@ -57,6 +58,10 @@ namespace CodeToolsVsix
         static std::string positionFor(const std::wstring& text, std::size_t offset);
 
     private:
+        // The inline message under the pointer is shown in full in place of the position; a click on
+        // it puts the caret where the problem is.
+        newui::SyncReturn annotationHovered(newui::TextController& sender, std::size_t index);
+        newui::SyncReturn annotationClicked(newui::TextController& sender, std::size_t index);
         std::size_t caretOffset() const;
         newui::Label* makeArrow(const std::string& glyph, bool forward);
         void updateNavigator();
@@ -70,6 +75,8 @@ namespace CodeToolsVsix
         newui::Label* summary_ = nullptr;
         newui::Label* next_ = nullptr;
 
+        newui::Connection clickConnection_;
+        newui::Connection hoverConnection_;
         std::vector<Problem> problems_;
         GoTo goTo_;
         MarksSink marksSink_;
