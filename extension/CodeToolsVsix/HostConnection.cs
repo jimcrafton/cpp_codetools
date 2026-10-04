@@ -27,9 +27,7 @@ namespace CodeToolsVsix
             {
                 Size = (uint)Marshal.SizeOf<HostServices>(),
 
-                // No managed log sink yet: native logs to stdout, which VS discards. A sink that
-                // writes to a VS Output window pane would go here (a LogSinkCallback).
-                LogSink = IntPtr.Zero,
+                LogSink = Marshal.GetFunctionPointerForDelegate(OutputWindowLogger.LogCallback),
 
                 GetText = Marshal.GetFunctionPointerForDelegate(HostDocumentEditor.GetTextCallback),
                 ApplyEdits = Marshal.GetFunctionPointerForDelegate(HostDocumentEditor.ApplyEditsCallback),
