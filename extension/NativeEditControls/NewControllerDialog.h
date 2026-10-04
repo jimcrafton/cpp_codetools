@@ -48,6 +48,7 @@ namespace CodeToolsVsix
         newui::TextField* classNameField() const { return classNameField_; }
         newui::TextField* headerField() const { return headerField_; }
         newui::Label* hintLabel() const { return hintLabel_; }
+        newui::Label* folderLabel() const { return folderLabel_; }
         newui::Button* createButton() const { return createButton_; }
         newui::Button* cancelButton() const { return cancelButton_; }
 
@@ -68,6 +69,7 @@ namespace CodeToolsVsix
         newui::TextField* classNameField_ = nullptr;
         newui::TextField* headerField_ = nullptr;
         newui::Label* hintLabel_ = nullptr;
+        newui::Label* folderLabel_ = nullptr;
         newui::Button* createButton_ = nullptr;
         newui::Button* cancelButton_ = nullptr;
     };

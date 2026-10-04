@@ -143,6 +143,7 @@ namespace CodeToolsVsix
         page->setTitle(titleFor(path, false));
         page->attach(editor.get());
         NativeEditor* raw = editor.get();
+        raw->setStateChangedHandler([this]() { refreshTitles(); });
         tabs_.push_back(Tab{ path, type, std::move(editor), page });
         tabControl_->addTab(titleFor(path, false), page);
         tabControl_->selectTab(tabs_.size() - 1);
@@ -230,6 +231,11 @@ namespace CodeToolsVsix
     void DocumentTabs::refreshTitles()
     {
         for (Tab& tab : tabs_) {
+            // A Save As inside the editor moves the document to a new file; the tab follows it.
+            const std::wstring current = tab.editor != nullptr ? tab.editor->currentPath() : std::wstring();
+            if (!current.empty()) {
+                tab.path = current;
+            }
             tab.page->setTitle(titleFor(tab.path, tab.editor != nullptr && tab.editor->isDirty()));
         }
     }

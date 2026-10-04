@@ -106,6 +106,8 @@ TEST_F(NewControllerDialogTest, SetContextSeedsTheFieldsAndSaysWhatCreateWillDo)
     EXPECT_EQ(dialog.hint(), "Will create SaveController.h next to the document");
     EXPECT_EQ(dialog.hintLabel()->text(), dialog.hint());
     EXPECT_TRUE(dialog.createButton()->isEnabled());
+    ASSERT_NE(dialog.folderLabel(), nullptr);
+    EXPECT_EQ(dialog.folderLabel()->text(), "Folder: " + wideToUtf8(document.parent_path().wstring()));
 }
 
 TEST_F(NewControllerDialogTest, AnInvalidNameDisablesCreateAndTheHintSaysWhy) {

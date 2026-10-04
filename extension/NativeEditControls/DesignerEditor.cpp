@@ -280,6 +280,10 @@ namespace CodeToolsVsix
     {
         document_ = new DesignerDocument(*this);
         documentController_.addDocument(document_);  // takes ownership
+        document_->onModifiedChanged.add([this](newui::Document&) {
+            notifyStateChanged();
+            return newui::SyncReturn::Handled;
+        });
 
         root->style().setBackgroundColor(newui::UIColorManager::colorFor(newui::UIColorRole::WindowBackground));
 
@@ -2800,7 +2804,14 @@ namespace CodeToolsVsix
             logToDebugOut(L"DesignerEditor::load: workspace is null (construction must have failed)");
             return false;
         }
-        return document_->load(wideToUtf8(copyPath(filePath, filePathLength)));
+        const bool loaded = document_->load(wideToUtf8(copyPath(filePath, filePathLength)));
+        notifyStateChanged();
+        return loaded;
+    }
+
+    std::wstring DesignerEditor::currentPath() const
+    {
+        return document_ != nullptr ? utf8ToWide(document_->filePath()) : std::wstring();
     }
 
     bool DesignerEditor::loadFromFile(const std::string& absolutePath)
@@ -2979,7 +2990,9 @@ namespace CodeToolsVsix
             logToDebugOut(L"DesignerEditor::save: workspace is null (construction must have failed)");
             return false;
         }
-        return document_->save(wideToUtf8(copyPath(filePath, filePathLength)));
+        const bool saved = document_->save(wideToUtf8(copyPath(filePath, filePathLength)));
+        notifyStateChanged();   // a Save As changes the path without flipping the modified flag
+        return saved;
     }
 
     bool DesignerEditor::saveToFile(const std::string& absolutePath)

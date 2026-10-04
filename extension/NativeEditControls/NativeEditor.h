@@ -2,6 +2,7 @@
 #include <Windows.h>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -77,8 +78,22 @@ namespace CodeToolsVsix
         virtual bool isDirty() const { return dirty_; }
         virtual bool execCommand(EditorCommand command, std::uint32_t flags, const EditorCommandArgs* args) = 0;
 
+        // The file this editor currently shows - it can change under the host (a Save As) - or empty
+        // if the editor doesn't track one.
+        virtual std::wstring currentPath() const { return std::wstring(); }
+
+        // Called when what a tab label shows (path, dirty state) may have changed.
+        void setStateChangedHandler(std::function<void()> handler) { stateChanged_ = std::move(handler); }
+
     protected:
         NativeEditor() = default;
+
+        void notifyStateChanged()
+        {
+            if (stateChanged_) {
+                stateChanged_();
+            }
+        }
 
         // A subclass constructor calls this once its own RootView (and whatever child View tree
         // it builds, and initialize()) is fully built - see this class's own comment on why the
@@ -98,6 +113,7 @@ namespace CodeToolsVsix
         
         std::unique_ptr<newui::RootView> rootView_;
         bool dirty_ = false;
+        std::function<void()> stateChanged_;
     };
 
 

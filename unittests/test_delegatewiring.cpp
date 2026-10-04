@@ -152,3 +152,83 @@ TEST(DelegateWiringTest, AppendsIntoAnExistingInternalInitOverrideBeforeItsFinal
     // internal_init() must not have been duplicated - exactly one, the pre-existing override.
     EXPECT_EQ(countMethodChildren(*widget, "internal_init"), 1u);
 }
+
+TEST(DelegateWiringTest, AddsTheHandlerToAnExistingPrivateSectionInsteadOfANewOne) {
+    const std::string content = std::string(kComponentPreamble) +
+        "class Widget : public Component {\n"
+        "public:\n"
+        "    Widget() = default;\n"
+        "\n"
+        "protected:\n"
+        "    bool internal_init() override {\n"
+        "        return Component::internal_init();\n"
+        "    }\n"
+        "\n"
+        "private:\n"
+        "    FakeButton* saveButton_ = nullptr;\n"
+        "};\n";
+
+    MethodBuilder handler("onSaveButtonClicked");
+    handler.addArgument("int", "x").addBodyLine("// handle click");
+
+    const auto edits = planDelegateWiring(content, "Widget", handler.toString(1),
+                                          "saveButton_->onClick.add(this, &Widget::onSaveButtonClicked);");
+    ASSERT_TRUE(edits.has_value());
+    const std::string generated = applyEdits(content, *edits);
+
+    const auto count = [&](const std::string& text) {
+        std::size_t n = 0;
+        for (std::size_t at = generated.find(text); at != std::string::npos; at = generated.find(text, at + 1)) {
+            ++n;
+        }
+        return n;
+    };
+    EXPECT_EQ(count("private:"), 1u) << generated;
+    EXPECT_LT(generated.find("saveButton_ = nullptr;"), generated.find("void onSaveButtonClicked")) << generated;
+    EXPECT_LT(generated.find("void onSaveButtonClicked"), generated.rfind("};")) << generated;
+}
+
+TEST(DelegateWiringTest, AddsTheHandlerBeforeALaterSpecifierAndKeepsItInTheSameSection) {
+    const std::string content = std::string(kComponentPreamble) +
+        "class Widget : public Component {\n"
+        "private:\n"
+        "    FakeButton* saveButton_ = nullptr;\n"
+        "public:\n"
+        "    Widget() = default;\n"
+        "};\n";
+
+    MethodBuilder handler("onSaveButtonClicked");
+    handler.addArgument("int", "x").addBodyLine("// handle click");
+
+    const auto edits = planDelegateWiring(content, "Widget", handler.toString(1),
+                                          "saveButton_->onClick.add(this, &Widget::onSaveButtonClicked);");
+    ASSERT_TRUE(edits.has_value());
+    const std::string generated = applyEdits(content, *edits);
+
+    const std::size_t handlerPos = generated.find("void onSaveButtonClicked");
+    ASSERT_NE(handlerPos, std::string::npos);
+    EXPECT_GT(handlerPos, generated.find("saveButton_ = nullptr;")) << generated;
+    EXPECT_LT(handlerPos, generated.find("public:")) << generated;
+    // Still exactly one private: and the original public: - only the new protected: is added.
+    EXPECT_EQ(generated.find("private:", generated.find("private:") + 1), std::string::npos) << generated;
+}
+
+TEST(DelegateWiringTest, UsesTheImplicitPrivateSectionOfAClass) {
+    const std::string content = std::string(kComponentPreamble) +
+        "class Widget : public Component {\n"
+        "    FakeButton* saveButton_ = nullptr;\n"
+        "public:\n"
+        "    Widget() = default;\n"
+        "};\n";
+
+    MethodBuilder handler("onSaveButtonClicked");
+    handler.addArgument("int", "x").addBodyLine("// handle click");
+
+    const auto edits = planDelegateWiring(content, "Widget", handler.toString(1),
+                                          "saveButton_->onClick.add(this, &Widget::onSaveButtonClicked);");
+    ASSERT_TRUE(edits.has_value());
+    const std::string generated = applyEdits(content, *edits);
+
+    EXPECT_EQ(generated.find("private:"), std::string::npos) << generated;
+    EXPECT_LT(generated.find("void onSaveButtonClicked"), generated.find("public:")) << generated;
+}

@@ -27,7 +27,10 @@ public:
         return false;
     }
     void edit() { markDirty(); }
+    void saveAs(const std::wstring& path) { path_ = path; notifyStateChanged(); }
+    std::wstring currentPath() const override { return path_; }
 
+    std::wstring path_;
     std::wstring wentTo;   // the "line:column" of the last GotoLine
 
 private:
@@ -219,4 +222,15 @@ TEST(DocumentTabs, RefreshingTitlesFollowsTheEditorsDirtyFlag) {
 
     EXPECT_EQ(h.tabs->activeEditor(), editor);
     EXPECT_EQ(h.tabs->tabControl()->tabCount(), 1u);
+}
+
+TEST(DocumentTabs, ASaveAsInsideTheEditorMovesTheTabToTheNewFile) {
+    Harness h;
+    auto* editor = static_cast<FakeEditor*>(h.tabs->open(L"C:\proj\s1.newui", DocumentType::Designer));
+    ASSERT_NE(editor, nullptr);
+
+    editor->saveAs(L"C:\proj\new1.newui");
+
+    EXPECT_EQ(h.tabs->activePath(), L"C:\proj\new1.newui");
+    EXPECT_EQ(h.tabs->count(), 1u);
 }

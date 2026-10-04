@@ -16,11 +16,12 @@ namespace CodeToolsVsix
 
     void NewControllerDialog::buildChrome()
     {
-        classNameField_ = dynamic_cast<newui::TextField*>(rootView().findView("classNameInput"));
-        headerField_ = dynamic_cast<newui::TextField*>(rootView().findView("headerInput"));
-        hintLabel_ = dynamic_cast<newui::Label*>(rootView().findView("hintLabel"));
-        createButton_ = dynamic_cast<newui::Button*>(rootView().findView("createButton"));
-        cancelButton_ = dynamic_cast<newui::Button*>(rootView().findView("cancelButton"));
+        classNameField_ = rootView().findView<newui::TextField>("classNameInput");
+        headerField_ = rootView().findView<newui::TextField>("headerInput");
+        hintLabel_ = rootView().findView<newui::Label>("hintLabel");
+        folderLabel_ = rootView().findView<newui::Label>("folderLabel");
+        createButton_ = rootView().findView<newui::Button>("createButton");
+        cancelButton_ = rootView().findView<newui::Button>("cancelButton");
 
         if (classNameField_ != nullptr) {
             classNameField_->model().onChanged.add([this](newui::Model&) {
@@ -92,6 +93,9 @@ namespace CodeToolsVsix
                                          const std::string& header)
     {
         documentPath_ = documentPath;
+        if (folderLabel_ != nullptr) {
+            folderLabel_->setText("Folder: " + wideToUtf8(documentPath.parent_path().wstring()));
+        }
         lastSuggestedHeader_ = header;
         setFieldText(classNameField_, className);
         setFieldText(headerField_, header);

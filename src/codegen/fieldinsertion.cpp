@@ -42,11 +42,11 @@ std::string connectFieldDeclaration(const std::string& type, const std::string& 
 
 std::optional<DelegateWiringEdit> planConnectField(const std::string& content, const std::string& className,
                                                     const std::string& type, const std::string& name) {
-    const std::optional<BraceRange> classBraces = classInsertionPoint(content, className);
-    if (!classBraces.has_value() || classHasMember(content, className, name)) {
+    const std::optional<MemberInsertion> where = memberInsertionPoint(content, className, MemberAccess::Private);
+    if (!where.has_value() || classHasMember(content, className, name)) {
         return std::nullopt;
     }
-    return DelegateWiringEdit{classBraces->closeOffset, "\nprivate:\n" + connectFieldDeclaration(type, name)};
+    return DelegateWiringEdit{where->offset, where->prefix + connectFieldDeclaration(type, name) + where->suffix};
 }
 
 } // namespace cpptools_codegen

@@ -333,6 +333,7 @@ namespace CodeToolsVsix
         // Uses Bundle::loadRootViewFromFile()/loadFrameFromFile() directly,
         // not setExecutableDirOverride() (see bundle.h).
         bool load(const wchar_t* filePath, std::size_t filePathLength) override;
+        std::wstring currentPath() const override;
 
         // Write-side counterpart to load() - Bundle::writeRootViewToFile().
         bool save(const wchar_t* filePath, std::size_t filePathLength) override;
