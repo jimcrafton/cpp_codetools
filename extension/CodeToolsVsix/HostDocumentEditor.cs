@@ -58,18 +58,10 @@ namespace CodeToolsVsix
     /// Text and offsets crossing the boundary are UTF-16, the buffer's own coordinates.</summary>
     internal static class HostDocumentEditor
     {
-        // Native keeps these function pointers, so the delegates must stay alive for good.
-        private static readonly HostGetTextCallback GetTextCallback = OnGetText;
-        private static readonly HostApplyEditsCallback ApplyEditsCallback = OnApplyEdits;
-        private static int _registered;
-
-        public static void EnsureRegistered()
-        {
-            if (Interlocked.Exchange(ref _registered, 1) == 0)
-            {
-                NativeMethods.NativeEditControl_SetHostEditor(GetTextCallback, ApplyEditsCallback);
-            }
-        }
+        // Native keeps these function pointers (HostConnection puts them in the HostServices table), so
+        // the delegates must stay alive for good.
+        internal static readonly HostGetTextCallback GetTextCallback = OnGetText;
+        internal static readonly HostApplyEditsCallback ApplyEditsCallback = OnApplyEdits;
 
         private static void OnGetText(ulong requestId, IntPtr path, UIntPtr pathLength)
         {

@@ -85,38 +85,32 @@ BOOL __stdcall NativeEditControl_ExecCommand(HWND hwnd, EditorCommand command, u
     return NativeEditManager::execCmdForEditor(hwnd, command, flags, args) ? TRUE : FALSE;
 }
 
-void __stdcall NativeEditControl_SetLogSink(LogSinkCallback sink)
+void __stdcall NativeEditControl_SetHost(const HostServices* services)
 {
-    setManagedLogSink(sink);
+    const HostServices host = copyHostServices(services);
 
-    // Called once, from the managed host's own init thread (never the edit thread's dedicated
-    // one) - so this is always safe to call the sink from directly, unlike log() calls made from
-    // CppEditorControl.cpp's dedicated-thread code (see Logging.h's own comment on why those
-    // queue instead). This is the actual compiled-in NativeEditControls.dll version (also embedded
-    // in the DLL's own VERSIONINFO resource, see NativeEditControl.rc) - distinct from
-    // OutputWindowLogger's own managed-assembly version line, which reports CodeToolsVsix.dll's
-    // version, not this native DLL's. Also reports newui's own version (its generated
-    // include/newui/version.h, transitively reachable since NativeEditControls links newui) -
-    // useful since 3rdparty/newui/ is a separately-versioned dependency pulled via FetchContent
-    // (see root CMakeLists.txt's "newui - Dependency" section), not something whose version is
-    // otherwise visible anywhere in this extension.
-    CodeToolsVsix::log(cpptools::Severity::Note,
-        std::string("NativeEditControls.dll version ") + CPPTOOLS_VERSION_STRING
-        + " (newui " + NEWUI_VERSION_STRING + ")");
-}
+    // The log sink. Called once, from the managed host's own init thread (never the edit thread) - so
+    // it is always safe to call the sink from here directly, unlike log() calls made from the edit
+    // thread (see Logging.h's own comment on why those queue instead). Reports this DLL's compiled-in
+    // version (also in its VERSIONINFO resource, see NativeEditControl.rc) and newui's own (its generated
+    // include/newui/version.h) - useful since 3rdparty/newui/ is a separately-versioned dependency pulled
+    // via FetchContent (see the root CMakeLists.txt's "newui - Dependency" section), not something whose
+    // version is otherwise visible anywhere in this extension.
+    setManagedLogSink(host.logSink);
+    if (host.logSink != nullptr) {
+        CodeToolsVsix::log(cpptools::Severity::Note,
+            std::string("NativeEditControls.dll version ") + CPPTOOLS_VERSION_STRING
+            + " (newui " + NEWUI_VERSION_STRING + ")");
+    }
 
-void __stdcall NativeEditControl_SetHostEditor(HostGetTextCallback getText, HostApplyEditsCallback applyEdits)
-{
+    // Reading/editing files open in VS: set on the edit thread, where the bridge is used.
     NativeEditManager::startRunLoop();
-    NativeEditManager::runLoop()->post([getText, applyEdits]() {
+    NativeEditManager::runLoop()->post([getText = host.getText, applyEdits = host.applyEdits]() {
         hostBridge().setCallbacks(getText, applyEdits);
         documentEditService().setHost(hostBridge().connected() ? &hostBridge() : nullptr);
     });
-}
 
-void __stdcall NativeEditControl_SetHostOpenLocation(HostOpenLocationCallback callback)
-{
-    HostLocationOpener::instance().setCallback(callback);
+    HostLocationOpener::instance().setCallback(host.openLocation);
 }
 
 void __stdcall NativeEditControl_HostGetTextReply(

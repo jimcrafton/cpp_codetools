@@ -136,6 +136,9 @@ namespace CodeToolsVsix
         void commitDelegateName(const std::string& name);
 
     private:
+        // Prefix of a wired handler's row: a bullet (the UI font has no check mark).
+        static inline const std::string kPickerRowMarker = "\xE2\x80\xA2 ";
+
         newui::SyncReturn handleSelectionChanged(newui::TreeView& sender);
         // Commits the typed text (rebuildLiveEditor()'s own TextField),
         // then closes the editor - a lost-focus event fires for *any*

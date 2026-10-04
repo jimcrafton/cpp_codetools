@@ -322,144 +322,10 @@ add_subdirectory(tools/cppoutline)
 # (see CppEditorControl.cpp/EditThreadHost.cpp). CodeToolsVsix.csproj's own build invokes
 # `cmake --build --target NativeEditControls` against this build tree before deploying the result
 # alongside itself - nothing needs to be add_subdirectory()'d here for that.
-add_library(NativeEditControls SHARED
-    extension/NativeEditControls/NativeEditControlApi.h
-    extension/NativeEditControls/CppEditor.h
-    extension/NativeEditControls/CppEditor.cpp
-    extension/NativeEditControls/DesignerEditor.h
-    extension/NativeEditControls/DesignerEditor.cpp
-    extension/NativeEditControls/PropertyEditor.h
-    extension/NativeEditControls/PropertyEditor.cpp
-    extension/NativeEditControls/CalloutPlacement.h
-    extension/NativeEditControls/CalloutPlacement.cpp
-    extension/NativeEditControls/ViewStyleRegistry.h
-    extension/NativeEditControls/ViewStyleRegistry.cpp
-    extension/NativeEditControls/GradientEditorDialog.h
-    extension/NativeEditControls/GradientEditorDialog.cpp
-    extension/NativeEditControls/ColorPicker.h
-    extension/NativeEditControls/ColorPicker.cpp
-    extension/NativeEditControls/ColorEditorDialog.h
-    extension/NativeEditControls/ColorEditorDialog.cpp
-    extension/NativeEditControls/PaintUtils.h
-    extension/NativeEditControls/PaintUtils.cpp
-    extension/NativeEditControls/ColorChoices.h
-    extension/NativeEditControls/ColorChoices.cpp
-    extension/NativeEditControls/ComponentEditor.h
-    extension/NativeEditControls/ComponentEditor.cpp
-    extension/NativeEditControls/MenuDesigner.h
-    extension/NativeEditControls/MenuDesigner.cpp
-    extension/NativeEditControls/SourceView.h
-    extension/NativeEditControls/SourceView.cpp
-    extension/NativeEditControls/HighlightController.h
-    extension/NativeEditControls/HighlightController.cpp
-    extension/NativeEditControls/FindEngine.h
-    extension/NativeEditControls/FindEngine.cpp
-    extension/NativeEditControls/DocumentEditService.h
-    extension/NativeEditControls/DocumentEditService.cpp
-    extension/NativeEditControls/HostEditorBridge.h
-    extension/NativeEditControls/HostEditorBridge.cpp
-    extension/NativeEditControls/HostLocationOpener.cpp
-    extension/NativeEditControls/HostLocationOpener.h
-    extension/NativeEditControls/CodegenEditAdapter.h
-    extension/NativeEditControls/CodegenEditAdapter.cpp
-    extension/NativeEditControls/WiringRequestBuilder.h
-    extension/NativeEditControls/WiringRequestBuilder.cpp
-    extension/NativeEditControls/ControllerRef.h
-    extension/NativeEditControls/ControllerRef.cpp
-    extension/NativeEditControls/ControllerBindings.h
-    extension/NativeEditControls/ControllerBindings.cpp
-    extension/NativeEditControls/ControllerWiringAction.h
-    extension/NativeEditControls/ControllerWiringAction.cpp
-    extension/NativeEditControls/NewControllerDialog.h
-    extension/NativeEditControls/NewControllerDialog.cpp
-    extension/NativeEditControls/IncludeManager.h
-    extension/NativeEditControls/IncludeManager.cpp
-    extension/NativeEditControls/IncludePlanner.h
-    extension/NativeEditControls/IncludePlanner.cpp
-    extension/NativeEditControls/FindReplaceController.h
-    extension/NativeEditControls/FindReplaceController.cpp
-    extension/NativeEditControls/MinimapStrip.h
-    extension/NativeEditControls/MinimapStrip.cpp
-    extension/NativeEditControls/CppHighlight.h
-    extension/NativeEditControls/CppHighlight.cpp
-    extension/NativeEditControls/CppDiagnostics.h
-    extension/NativeEditControls/CppDiagnostics.cpp
-    extension/NativeEditControls/DesignerClipboard.h
-    extension/NativeEditControls/DesignerClipboard.cpp
-    extension/NativeEditControls/DesignerArrange.h
-    extension/NativeEditControls/DesignerArrange.cpp
-    extension/NativeEditControls/ToolboxRegistry.h
-    extension/NativeEditControls/ToolboxRegistry.cpp
-    extension/NativeEditControls/Toolbox.h
-    extension/NativeEditControls/Toolbox.cpp
-    extension/NativeEditControls/Workspace.h
-    extension/NativeEditControls/Workspace.cpp
-    extension/NativeEditControls/CanvasWell.h
-    extension/NativeEditControls/CanvasWell.cpp
-    extension/NativeEditControls/ViewDesignerController.h
-    extension/NativeEditControls/ViewDesignerController.cpp
-    extension/NativeEditControls/ViewDesignerModel.h
-    extension/NativeEditControls/ViewDesignerModel.cpp
-    extension/NativeEditControls/PropertiesModel.h
-    extension/NativeEditControls/PropertiesModel.cpp
-    extension/NativeEditControls/PropertyItem.h
-    extension/NativeEditControls/PropertyItem.cpp
-    extension/NativeEditControls/PropertiesGrid.h
-    extension/NativeEditControls/PropertiesGrid.cpp
-    extension/NativeEditControls/PickerRow.h
-    extension/NativeEditControls/IssuesPopup.h
-    extension/NativeEditControls/IssuesPopup.cpp
-    extension/NativeEditControls/IssuePeek.cpp
-    extension/NativeEditControls/IssuePeek.h
-    extension/NativeEditControls/ProblemList.cpp
-    extension/NativeEditControls/ProblemList.h
-    extension/NativeEditControls/EditorStatusBar.cpp
-    extension/NativeEditControls/EditorStatusBar.h
-    extension/NativeEditControls/PropertiesPanel.h
-    extension/NativeEditControls/PropertiesPanel.cpp
-    extension/NativeEditControls/DocumentOutline.h
-    extension/NativeEditControls/DocumentOutline.cpp
-    extension/NativeEditControls/SelectionOverlay.h
-    extension/NativeEditControls/SelectionOverlay.cpp
-    extension/NativeEditControls/LayoutEditingPolicy.h
-    extension/NativeEditControls/LayoutEditingPolicy.cpp
-
-
-    extension/NativeEditControls/NativeEditControlApi.cpp
-    extension/NativeEditControls/TextEncoding.h
-    extension/NativeEditControls/TextEncoding.cpp
-    extension/NativeEditControls/Logging.h
-    extension/NativeEditControls/Logging.cpp
-    extension/NativeEditControls/dllmain.cpp
-    extension/NativeEditControls/NativeEditControl.rc
-    extension/NativeEditControls/NativeEditor.cpp)
-
-target_compile_definitions(NativeEditControls PRIVATE
-    NATIVEEDITCONTROL_EXPORTS
-    WIN32_LEAN_AND_MEAN
-    UNICODE
-    _UNICODE
-)
-
-set(VSEXT_INCLUDES "C:/Program Files/Microsoft Visual Studio/18/Community/VSSDK/VisualStudioIntegration/Common/Inc")
-
-
-target_include_directories(NativeEditControls PUBLIC include ${VSEXT_INCLUDES})
-
-target_link_libraries(NativeEditControls PRIVATE cpptools cpptools_codegen newui lex user32.lib gdi32.lib)
-add_dependencies(NativeEditControls cpptools_version)
-
-# testharness - a plain newui::Application/newui::Frame .exe (extension/NativeEditControls/
-# testharness/testharness.cpp) for exercising NativeEditControls' editing code directly, without
-# going through VS/the managed VSIX layer at all. Compiles NativeEditor.cpp/CppEditor.cpp/
-# DesignerEditor.cpp/TextEncoding.cpp/Logging.cpp directly into this .exe rather than linking
-# NativeEditControls.dll - NativeEditor/NativeEditManager/CppEditor/DesignerEditor are plain
-# classes, never __declspec(dllexport)'d (only the extern "C" functions in
-# NativeEditControlApi.cpp are), so the DLL's import library wouldn't expose them for this
-# harness to call directly the way it does (createEditor(newui::RootView*, ...), editor->load()/
-# save()) - see NativeEditor.h's own comment on that overload.
-add_executable(testharness
-    extension/NativeEditControls/testharness/testharness.cpp
+# nativeeditcontrols_core - every NativeEditControls source shared by the DLL, testharness and
+# nativeeditcontrols_tests, compiled once. An OBJECT library (not STATIC) so no translation unit
+# is dropped by the linker for lack of a reference (static registrations).
+add_library(nativeeditcontrols_core OBJECT
     extension/NativeEditControls/NativeEditor.cpp
     extension/NativeEditControls/CppEditor.cpp
     extension/NativeEditControls/DesignerEditor.cpp
@@ -515,16 +381,38 @@ add_executable(testharness
     extension/NativeEditControls/TextEncoding.cpp
     extension/NativeEditControls/Logging.cpp)
 
-target_compile_definitions(testharness PRIVATE
+target_compile_definitions(nativeeditcontrols_core PUBLIC
     WIN32_LEAN_AND_MEAN
     UNICODE
     _UNICODE
 )
 
-target_include_directories(testharness PRIVATE include ${VSEXT_INCLUDES})
+set(VSEXT_INCLUDES "C:/Program Files/Microsoft Visual Studio/18/Community/VSSDK/VisualStudioIntegration/Common/Inc")
+target_include_directories(nativeeditcontrols_core PUBLIC include ${VSEXT_INCLUDES})
+target_link_libraries(nativeeditcontrols_core PUBLIC cpptools cpptools_codegen newui lex user32.lib gdi32.lib comdlg32.lib)
+add_dependencies(nativeeditcontrols_core cpptools_version)
 
-target_link_libraries(testharness PRIVATE cpptools cpptools_codegen newui lex user32.lib gdi32.lib comdlg32.lib)
-add_dependencies(testharness cpptools_version)
+add_library(NativeEditControls SHARED
+    extension/NativeEditControls/NativeEditControlApi.h
+    extension/NativeEditControls/NativeEditControlApi.cpp
+    extension/NativeEditControls/dllmain.cpp
+    extension/NativeEditControls/NativeEditControl.rc)
+
+target_compile_definitions(NativeEditControls PRIVATE NATIVEEDITCONTROL_EXPORTS)
+
+target_link_libraries(NativeEditControls PRIVATE nativeeditcontrols_core)
+
+# testharness - a plain newui::Application/newui::Frame .exe (extension/NativeEditControls/
+# testharness/testharness.cpp) for exercising NativeEditControls' editing code directly, without
+# going through VS/the managed VSIX layer at all. Compiles NativeEditor.cpp/CppEditor.cpp/
+# DesignerEditor.cpp/TextEncoding.cpp/Logging.cpp directly into this .exe rather than linking
+# NativeEditControls.dll - NativeEditor/NativeEditManager/CppEditor/DesignerEditor are plain
+# classes, never __declspec(dllexport)'d (only the extern "C" functions in
+# NativeEditControlApi.cpp are), so the DLL's import library wouldn't expose them for this
+# harness to call directly the way it does (createEditor(newui::RootView*, ...), editor->load()/
+# save()) - see NativeEditor.h's own comment on that overload.
+add_executable(testharness extension/NativeEditControls/testharness/testharness.cpp)
+target_link_libraries(testharness PRIVATE nativeeditcontrols_core)
 
 cpptools_copy_libclang_dll(NativeEditControls)
 cpptools_copy_libclang_dll(testharness)

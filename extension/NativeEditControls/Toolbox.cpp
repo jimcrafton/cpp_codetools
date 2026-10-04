@@ -192,7 +192,6 @@ namespace CodeToolsVsix
 
     namespace
     {
-        const wchar_t kDragPayloadPrefix[] = L"codetools-toolbox-entry:";
     }
 
     std::wstring Toolbox::dragPayloadFor(std::size_t categoryIndex, std::size_t entryIndex)
@@ -205,7 +204,7 @@ namespace CodeToolsVsix
         // The registry entry a payload names, or nullptr for anything else.
         const ToolboxEntry* entryForPayload(const std::wstring& text)
         {
-            const std::wstring prefix(kDragPayloadPrefix);
+            const std::wstring prefix(Toolbox::kDragPayloadPrefix);
             if (text.compare(0, prefix.size(), prefix) != 0) {
                 return nullptr;
             }

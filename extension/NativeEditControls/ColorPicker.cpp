@@ -11,11 +11,8 @@ namespace CodeToolsVsix
 {
     namespace
     {
-        constexpr float kHueRailWidth = 18.0f;
-        constexpr float kAlphaRailWidth = 18.0f;
+        // Shared by HueRail and AlphaRail - two sibling classes - so it stays here, not in either.
         constexpr float kRailThumbHeight = 7.0f;
-        constexpr float kSVThumbRadius = 6.0f;
-        constexpr int kHueGradientStopCount = 7;
 
         // Same double-ring shape GradientEditorDialog::StopTrack's own stop handles use (a
         // semi-transparent dark ring just outside a white one) - a plain white marker alone all
@@ -48,6 +45,8 @@ namespace CodeToolsVsix
         class SVSquare : public newui::SubView
         {
         public:
+            static constexpr float kSVThumbRadius = 6.0f;
+
             explicit SVSquare(ColorPicker& owner) : owner_(owner)
             {
                 onMouseDown.add(this, &SVSquare::handleMouseDown);
@@ -134,6 +133,8 @@ namespace CodeToolsVsix
         class HueRail : public newui::SubView
         {
         public:
+            static constexpr int kHueGradientStopCount = 7;
+
             explicit HueRail(ColorPicker& owner) : owner_(owner)
             {
                 onMouseDown.add(this, &HueRail::handleMouseDown);

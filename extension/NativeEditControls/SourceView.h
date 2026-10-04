@@ -65,6 +65,11 @@ namespace CodeToolsVsix
         static HighlightResult analyze(const std::wstring& text);
 
     private:
+        static constexpr float kErrorBarHeight = 26.0f;
+        static constexpr float kStatusBarHeight = 22.0f;
+        static constexpr float kBreadcrumbBarHeight = 22.0f;
+        static constexpr const char* kCrumbSeparator = "  \xE2\x80\xBA  ";   // " > " as a single angle quote
+
         // The status bar follows the text as it changes (the colors and folds come from highlight_).
         newui::SyncReturn handleTextChanged(newui::Model& sender);
         newui::SyncReturn handleEditStateChanged(newui::TextController& sender);

@@ -16,7 +16,7 @@ namespace CodeToolsVsix
 {
     // Where a native editor sends "open this file in an editor, at this line" when it is hosted in VS
     // (the Designer's Open in editor on a controller header problem): the managed host registers a
-    // callback through NativeEditControl_SetHostOpenLocation, and open() calls it. A fire-and-forget
+    // callback in the HostServices table (NativeEditControl_SetHost), and open() calls it. A fire-and-forget
     // request, like every call from the edit thread out to the host - the callback must return at once
     // and do the real work on VS's UI thread (see HostDocumentEditor.cs for why). With no host connected
     // (the testharness) open() reports false, and the caller falls back to something else.

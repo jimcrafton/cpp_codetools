@@ -14,7 +14,6 @@ namespace CodeToolsVsix
 {
     namespace
     {
-        constexpr char kMagic[] = "codetools-designer-views/1\n";
 
         void uniquifyRecursive(newui::SubView& view, newui::RootView& root)
         {

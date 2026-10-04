@@ -17,13 +17,6 @@ namespace CodeToolsVsix
 {
     namespace
     {
-        constexpr float kTextLeft = 28.0f;      // check-mark gutter
-        constexpr float kShortcutGap = 32.0f;
-        constexpr float kArrowWidth = 16.0f;
-        constexpr float kRightPadding = 10.0f;
-        constexpr float kMinColumnWidth = 140.0f;
-        constexpr float kBarPlaceholderWidth = 80.0f;
-        const char* const kTypeHere = "Type Here";
 
         newui::Color roleColor(newui::UIColorRole role)
         {
@@ -188,7 +181,7 @@ namespace CodeToolsVsix
             }
 
             const float textRight = row.right() - kArrowWidth;
-            paintText(ctx, newui::Rect(row.left() + kTextLeft, row.top(), textRight - row.left() - kTextLeft, row.size().height),
+            paintText(ctx, newui::Rect(row.left() + MenuColumnView::kTextLeft, row.top(), textRight - row.left() - MenuColumnView::kTextLeft, row.size().height),
                 newui::stripMnemonics(item->text()), rowText, newui::SystemUIFont::Menu);
             if (!item->shortcutText().empty()) {
                 const float w = static_cast<float>(textWidth(item->shortcutText()));
@@ -209,8 +202,8 @@ namespace CodeToolsVsix
 
         const newui::Rect placeholder(4.0f, rowTop(items.size()) + 2.0f, size.width - 8.0f, kRowHeight - 4.0f);
         strokeDashedRect(ctx, placeholder, withAlpha(dim, 200));
-        paintText(ctx, newui::Rect(placeholder.left() + kTextLeft - 4.0f, placeholder.top(),
-            placeholder.size().width - kTextLeft, placeholder.size().height), kTypeHere, dim, newui::SystemUIFont::Menu);
+        paintText(ctx, newui::Rect(placeholder.left() + MenuColumnView::kTextLeft - 4.0f, placeholder.top(),
+            placeholder.size().width - MenuColumnView::kTextLeft, placeholder.size().height), MenuColumnView::kTypeHere, dim, newui::SystemUIFont::Menu);
         ctx.restore();
     }
 
@@ -275,7 +268,7 @@ namespace CodeToolsVsix
         const newui::Size size = bounds().size();
         const newui::Color dim = roleColor(newui::UIColorRole::DisabledText);
         strokeDashedRect(ctx, newui::Rect(0.0f, 0.0f, size.width, size.height), withAlpha(dim, 200));
-        paintText(ctx, newui::Rect(8.0f, 0.0f, size.width - 12.0f, size.height), kTypeHere, dim, newui::SystemUIFont::Menu);
+        paintText(ctx, newui::Rect(8.0f, 0.0f, size.width - 12.0f, size.height), MenuColumnView::kTypeHere, dim, newui::SystemUIFont::Menu);
     }
 
     // --- MenuDesigner -----------------------------------------------------------------------

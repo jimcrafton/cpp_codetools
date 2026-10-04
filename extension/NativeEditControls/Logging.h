@@ -7,7 +7,7 @@
 namespace CodeToolsVsix
 {
     // This DLL's own logging entry point - relayed to a managed sink (see setManagedLogSink),
-    // typically a real VS Output window pane (OutputWindowLogger.cs). cpptools::setLogSink is
+    // typically a real VS Output window pane (none is written yet - see HostServices.h). cpptools::setLogSink is
     // wired (see ensureCpptoolsLogSinkRegistered in CppEditorControl.cpp) to call this too, so
     // cpptools's own internal logging (e.g. a parse failure) ends up here alongside this DLL's
     // own log calls. Falls back to plain stdout (fputs, not OutputDebugString - see below for why
@@ -48,7 +48,7 @@ namespace CodeToolsVsix
 
     // Matches NativeEditor.h's LogSinkCallback. Registered once by the managed host
     // (typically to relay log() calls into a real VS Output window pane) - optional; a host that
-    // never calls NativeEditControl_SetLogSink just gets no logging at all (see log()'s own
+    // never passes a logSink in its HostServices (NativeEditControl_SetHost) just gets no logging at all (see log()'s own
     // comment on why this doesn't fall back to OutputDebugStringA).
     using LogSinkCallback = void(__stdcall*)(cpptools::Severity severity, const wchar_t* message, std::size_t messageLength);
     void setManagedLogSink(LogSinkCallback sink);

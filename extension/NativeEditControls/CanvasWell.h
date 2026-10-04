@@ -20,6 +20,12 @@ namespace CodeToolsVsix
     class CanvasWell : public newui::SubView
     {
     public:
+        // Below this margin, a dimension ruler wouldn't have room to read
+        // (line + label + padding) - skipped rather than drawn cramped.
+        static constexpr float kMinRulerMargin = 24.0f;
+        static constexpr float kArrowSize = 5.0f;
+        static constexpr float kLabelGapPadding = 4.0f;
+
         // How close (in pixels, this view's own local space) a point needs
         // to be to a guide line to grab it for a resize drag.
         static constexpr float kEdgeGrabTolerance = 4.0f;

@@ -66,6 +66,11 @@ namespace CodeToolsVsix
         friend class DesignerDocument;
 
     public:
+        // Canvas left around a fragment. A View draws its drop shadow (and focus ring) outside its own
+        // bounds, but the design surface clips to its own - a fragment flush against the edge would lose
+        // them - so it sits this far in from the canvas edge. Design-time only: not saved (below).
+        static constexpr float kFragmentCanvasMargin = 24.0f;
+
         DesignerEditor(HWND hwndParent, int x, int y, int width, int height);
 
         // contentHost: see NativeEditManager::createEditor()'s own comment - nullptr (default)

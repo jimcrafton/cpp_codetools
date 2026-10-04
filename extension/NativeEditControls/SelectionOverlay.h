@@ -31,6 +31,28 @@ namespace CodeToolsVsix
     class SelectionOverlay : public newui::Overlay
     {
     public:
+        static constexpr float kHandleSize = 7.0f;
+        static constexpr float kHandleHalf = kHandleSize * 0.5f;
+        static constexpr float kOutlineWidth = 2.0f;
+        static constexpr float kBadgePaddingX = 6.0f;
+        static constexpr float kBadgeHeight = 18.0f;
+        static constexpr float kBadgeGap = 4.0f;  // between the badge's own bottom and the parent box's top
+        static constexpr float kParentBoxWidth = 1.5f;
+        static constexpr float kReparentTargetBoxWidth = 1.0f;
+        // Amber, deliberately distinct from the blue accent used for the primary selection
+        // itself - Chrome DevTools/Figma-style "this is the container" color-coding, so the
+        // parent adornment reads as a different semantic layer, not a second, confusingly
+        // similar selection outline. No UIColorManager role fits (only Window/Control/
+        // Highlight/Link roles exist) - same "hardcode it, design-time-only decoration"
+        // precedent LayoutEditingPolicy.cpp's own grid-tracker lines already set.
+        static inline const BLRgba32 kLayoutAdornmentColor{0xD9, 0x77, 0x06, 0xFF};
+        static inline const BLRgba32 kLayoutAdornmentTextColor{0x2B, 0x1B, 0x00, 0xFF};
+        // Emerald, deliberately distinct from *both* the blue selection accent and the amber
+        // parent adornment - a "valid drop target" color, thinner and un-badged (unlike
+        // paintContainerHighlight() below) since this paints live, every frame, while actively
+        // dragging - a badge here would sit on top of exactly the area you're trying to look at.
+        static inline const BLRgba32 kReparentTargetColor{0x10, 0xB9, 0x81, 0xFF};
+
         // clipView, when given, restricts all painting to its own bounds
         // (boundsInRootView(clipView)) - DesignerEditor passes
         // workspace_->canvasWell(), the actual Splitter-constrained

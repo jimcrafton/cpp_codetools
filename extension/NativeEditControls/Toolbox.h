@@ -91,6 +91,8 @@ namespace CodeToolsVsix
     class Toolbox : public newui::ScrollView
     {
     public:
+        static inline const wchar_t kDragPayloadPrefix[] = L"codetools-toolbox-entry:";
+
         Toolbox();
 
         // The caller (Workspace) is responsible for addChild()ing the

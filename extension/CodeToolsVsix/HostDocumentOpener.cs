@@ -23,17 +23,9 @@ namespace CodeToolsVsix
     /// reply - if the file can't be opened VS shows its own error, and native has nothing more to do.</summary>
     internal static class HostDocumentOpener
     {
-        // Native keeps this function pointer, so the delegate must stay alive for good.
-        private static readonly HostOpenLocationCallback OpenLocationCallback = OnOpenLocation;
-        private static int _registered;
-
-        public static void EnsureRegistered()
-        {
-            if (Interlocked.Exchange(ref _registered, 1) == 0)
-            {
-                NativeMethods.NativeEditControl_SetHostOpenLocation(OpenLocationCallback);
-            }
-        }
+        // Native keeps this function pointer (HostConnection puts it in the HostServices table), so the
+        // delegate must stay alive for good.
+        internal static readonly HostOpenLocationCallback OpenLocationCallback = OnOpenLocation;
 
         private static void OnOpenLocation(IntPtr path, UIntPtr pathLength, ulong line, ulong column)
         {

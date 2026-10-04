@@ -77,6 +77,7 @@ add_executable(nativeeditcontrols_tests
     test_document_tabs.cpp
     test_issue_peek.cpp
     test_host_location_opener.cpp
+    test_host_services.cpp
     test_problem_list.cpp
     test_cpp_editor.cpp
     test_find_engine.cpp
@@ -108,70 +109,9 @@ add_executable(nativeeditcontrols_tests
     test_document_outline.cpp
     test_selection_overlay.cpp
     test_layout_editing_policy.cpp
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/PropertyEditor.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/CalloutPlacement.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/ViewStyleRegistry.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/GradientEditorDialog.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/ColorPicker.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/ColorEditorDialog.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/PaintUtils.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/ColorChoices.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/ComponentEditor.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/MenuDesigner.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/SourceView.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/HighlightController.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/FindEngine.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/DocumentEditService.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/HostEditorBridge.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/HostLocationOpener.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/CodegenEditAdapter.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/WiringRequestBuilder.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/ControllerRef.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/ControllerBindings.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/ControllerWiringAction.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/NewControllerDialog.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/IncludeManager.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/IncludePlanner.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/FindReplaceController.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/MinimapStrip.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/CppHighlight.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/CppDiagnostics.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/DesignerClipboard.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/DesignerArrange.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/ToolboxRegistry.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/Toolbox.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/DesignerEditor.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/CppEditor.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/NativeEditor.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/TextEncoding.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/Logging.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/Workspace.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/CanvasWell.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/ViewDesignerController.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/ViewDesignerModel.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/PropertiesModel.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/PropertyItem.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/PropertiesGrid.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/IssuesPopup.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/IssuePeek.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/ProblemList.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/EditorStatusBar.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/DocumentTabs.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/PropertiesPanel.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/DocumentOutline.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/SelectionOverlay.cpp"
-    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/LayoutEditingPolicy.cpp"
 )
 
-target_compile_definitions(nativeeditcontrols_tests PRIVATE
-    WIN32_LEAN_AND_MEAN
-    UNICODE
-    _UNICODE
-)
-
-target_include_directories(nativeeditcontrols_tests PRIVATE "${CMAKE_SOURCE_DIR}/include" ${VSEXT_INCLUDES})
-
-target_link_libraries(nativeeditcontrols_tests PRIVATE cpptools cpptools_codegen newui lex user32.lib gdi32.lib comdlg32.lib GTest::gtest_main Threads::Threads)
+target_link_libraries(nativeeditcontrols_tests PRIVATE nativeeditcontrols_core GTest::gtest_main Threads::Threads)
 
 cpptools_copy_libclang_dll(nativeeditcontrols_tests)
 

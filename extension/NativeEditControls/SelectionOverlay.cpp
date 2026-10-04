@@ -8,36 +8,13 @@ namespace CodeToolsVsix
 {
     namespace
     {
-        constexpr float kHandleSize = 7.0f;
-        constexpr float kHandleHalf = kHandleSize * 0.5f;
-        constexpr float kOutlineWidth = 2.0f;
-        constexpr float kBadgePaddingX = 6.0f;
-        constexpr float kBadgeHeight = 18.0f;
-        constexpr float kBadgeGap = 4.0f;  // between the badge's own bottom and the parent box's top
-        constexpr float kParentBoxWidth = 1.5f;
-        constexpr float kReparentTargetBoxWidth = 1.0f;
-
-        // Amber, deliberately distinct from the blue accent used for the primary selection
-        // itself - Chrome DevTools/Figma-style "this is the container" color-coding, so the
-        // parent adornment reads as a different semantic layer, not a second, confusingly
-        // similar selection outline. No UIColorManager role fits (only Window/Control/
-        // Highlight/Link roles exist) - same "hardcode it, design-time-only decoration"
-        // precedent LayoutEditingPolicy.cpp's own grid-tracker lines already set.
-        const BLRgba32 kLayoutAdornmentColor(0xD9, 0x77, 0x06, 0xFF);
-        const BLRgba32 kLayoutAdornmentTextColor(0x2B, 0x1B, 0x00, 0xFF);
-
-        // Emerald, deliberately distinct from *both* the blue selection accent and the amber
-        // parent adornment - a "valid drop target" color, thinner and un-badged (unlike
-        // paintContainerHighlight() below) since this paints live, every frame, while actively
-        // dragging - a badge here would sit on top of exactly the area you're trying to look at.
-        const BLRgba32 kReparentTargetColor(0x10, 0xB9, 0x81, 0xFF);
 
         // Mirrors Main.dc.html's own ".handle" (7x7 white square, 1.5px
         // accent border) - centered on the given point, matching the
         // mockup's corner-of-the-box placement (h-tl/h-tr/h-bl/h-br).
         void paintHandle(BLContext& ctx, float cx, float cy, BLRgba32 borderColor)
         {
-            BLRect r(cx - kHandleHalf, cy - kHandleHalf, kHandleSize, kHandleSize);
+            BLRect r(cx - SelectionOverlay::kHandleHalf, cy - SelectionOverlay::kHandleHalf, SelectionOverlay::kHandleSize, SelectionOverlay::kHandleSize);
             ctx.set_fill_style(BLRgba32(0xFFFFFFFFu));
             ctx.fill_rect(r);
             ctx.set_stroke_style(borderColor);
@@ -80,18 +57,18 @@ namespace CodeToolsVsix
             BLTextMetrics metrics;
             blFont->get_text_metrics(glyphBuffer, metrics);
 
-            float badgeWidth = static_cast<float>(metrics.advance.x) + kBadgePaddingX * 2.0f;
+            float badgeWidth = static_cast<float>(metrics.advance.x) + SelectionOverlay::kBadgePaddingX * 2.0f;
             float badgeX = parentBounds.left();
-            float badgeY = parentBounds.top() - kBadgeHeight - kBadgeGap;
+            float badgeY = parentBounds.top() - SelectionOverlay::kBadgeHeight - SelectionOverlay::kBadgeGap;
 
-            BLRoundRect badgeRect(badgeX, badgeY, badgeWidth, kBadgeHeight, 4.0);
-            ctx.set_fill_style(kLayoutAdornmentColor);
+            BLRoundRect badgeRect(badgeX, badgeY, badgeWidth, SelectionOverlay::kBadgeHeight, 4.0);
+            ctx.set_fill_style(SelectionOverlay::kLayoutAdornmentColor);
             ctx.fill_round_rect(badgeRect);
 
             const BLFontMetrics& fontMetrics = blFont->metrics();
-            double tx = badgeX + kBadgePaddingX;
-            double ty = badgeY + (kBadgeHeight - (fontMetrics.ascent + fontMetrics.descent)) * 0.5 + fontMetrics.ascent;
-            ctx.set_fill_style(kLayoutAdornmentTextColor);
+            double tx = badgeX + SelectionOverlay::kBadgePaddingX;
+            double ty = badgeY + (SelectionOverlay::kBadgeHeight - (fontMetrics.ascent + fontMetrics.descent)) * 0.5 + fontMetrics.ascent;
+            ctx.set_fill_style(SelectionOverlay::kLayoutAdornmentTextColor);
             ctx.fill_utf8_text(BLPoint(tx, ty), *blFont, text.c_str(), text.size());
         }
 
@@ -101,8 +78,8 @@ namespace CodeToolsVsix
         // dragging.
         void paintContainerHighlight(BLContext& ctx, const newui::Rect& containerBounds, const std::string& label)
         {
-            ctx.set_stroke_style(kLayoutAdornmentColor);
-            ctx.set_stroke_width(kParentBoxWidth);
+            ctx.set_stroke_style(SelectionOverlay::kLayoutAdornmentColor);
+            ctx.set_stroke_width(SelectionOverlay::kParentBoxWidth);
             ctx.stroke_box(containerBounds.left(), containerBounds.top(), containerBounds.right(), containerBounds.bottom());
             paintLayoutBadge(ctx, containerBounds, label);
         }
@@ -112,8 +89,8 @@ namespace CodeToolsVsix
         // treatment from paintContainerHighlight() above.
         void paintReparentTargetHighlight(BLContext& ctx, const newui::Rect& containerBounds)
         {
-            ctx.set_stroke_style(kReparentTargetColor);
-            ctx.set_stroke_width(kReparentTargetBoxWidth);
+            ctx.set_stroke_style(SelectionOverlay::kReparentTargetColor);
+            ctx.set_stroke_width(SelectionOverlay::kReparentTargetBoxWidth);
             ctx.stroke_box(containerBounds.left(), containerBounds.top(), containerBounds.right(), containerBounds.bottom());
         }
 

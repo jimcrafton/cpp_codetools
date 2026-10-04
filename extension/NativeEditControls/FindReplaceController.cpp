@@ -18,12 +18,6 @@ namespace CodeToolsVsix
 {
     namespace
     {
-        // Dip, not Dlu - these are chrome sizing (an overlay's own inset/gap, a fixed-width strip),
-        // not text-relative, so they should scale with monitor DPI but not with the theme font - see
-        // display-units-plan.md's "Monitor DPI scaling" vs "Font-relative sizing" distinction.
-        constexpr newui::DisplayValue kEdge(6.0f, newui::DisplayUnit::Dip);       // keep an overlay this far inside the host
-        constexpr newui::DisplayValue kCaretGap(6.0f, newui::DisplayUnit::Dip);   // between the caret's line and an overlay next to it
-        constexpr newui::DisplayValue kMinimapWidth(28.0f, newui::DisplayUnit::Dip);
 
         // The lex theme's own color for style, converted from its packed 0xAARRGGBB to newui::Color -
         // the minimap's ticks are content colors (they match the syntax highlight hues), not chrome.
@@ -107,9 +101,9 @@ namespace CodeToolsVsix
     newui::Point overlayPositionBesideCaret(const newui::Point& caretTopLeft, float caretHeight,
         const newui::Size& overlay, const newui::Size& host, const newui::DisplayMetrics& metrics)
     {
-        const float edgeX = kEdge.toPixelsX(metrics);
-        const float edgeY = kEdge.toPixelsY(metrics);
-        const float caretGapY = kCaretGap.toPixelsY(metrics);
+        const float edgeX = FindReplaceController::kEdge.toPixelsX(metrics);
+        const float edgeY = FindReplaceController::kEdge.toPixelsY(metrics);
+        const float caretGapY = FindReplaceController::kCaretGap.toPixelsY(metrics);
 
         const float left = clampTo(caretTopLeft.x - 24.0f, edgeX, host.width - overlay.width - edgeX);
         float top = caretTopLeft.y + caretHeight + caretGapY;   // below the caret's line

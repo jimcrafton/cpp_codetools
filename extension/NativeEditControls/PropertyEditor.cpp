@@ -52,11 +52,6 @@ namespace CodeToolsVsix
             }
         }
 
-        constexpr float kTypePickerCellSize = 84.0f;
-        constexpr float kTypePickerGap = 10.0f;
-        constexpr float kTypePickerLabelHeight = 16.0f;
-        constexpr float kTypePickerTopReserve = 20.0f;  // clears CalloutTool's own top tail+margin
-
         // One clickable option cell in the Layout/ViewStyle type-swap popup - plain SubView + its
         // own click detection, same "custom control, own onMouseDown" shape PresetButton/
         // AddPresetButton (GradientEditorDialog.cpp) already establish for a custom-painted
@@ -75,6 +70,11 @@ namespace CodeToolsVsix
         class TypePickerCell : public newui::SubView
         {
         public:
+            static constexpr float kTypePickerCellSize = 84.0f;
+            static constexpr float kTypePickerGap = 10.0f;
+            static constexpr float kTypePickerLabelHeight = 16.0f;
+            static constexpr float kTypePickerTopReserve = 20.0f;  // clears CalloutTool's own top tail+margin
+
             TypePickerCell(const std::string& label, std::function<void()> onSelected,
                     std::function<void(BLContext&, const newui::Rect&)> paintPreview = nullptr)
                 : onSelected_(std::move(onSelected)), paintPreview_(std::move(paintPreview))
@@ -197,11 +197,11 @@ namespace CodeToolsVsix
         {
             std::vector<newui::Rect> rects;
             rects.reserve(count);
-            float totalWidth = float(count) * kTypePickerCellSize + float(count > 0 ? count - 1 : 0) * kTypePickerGap;
+            float totalWidth = float(count) * TypePickerCell::kTypePickerCellSize + float(count > 0 ? count - 1 : 0) * TypePickerCell::kTypePickerGap;
             float startX = (popupSize.width - totalWidth) * 0.5f;
             for (std::size_t i = 0; i < count; ++i) {
-                float x = startX + float(i) * (kTypePickerCellSize + kTypePickerGap);
-                rects.emplace_back(x, kTypePickerTopReserve, kTypePickerCellSize, kTypePickerCellSize);
+                float x = startX + float(i) * (TypePickerCell::kTypePickerCellSize + TypePickerCell::kTypePickerGap);
+                rects.emplace_back(x, TypePickerCell::kTypePickerTopReserve, TypePickerCell::kTypePickerCellSize, TypePickerCell::kTypePickerCellSize);
             }
             return rects;
         }
@@ -213,8 +213,8 @@ namespace CodeToolsVsix
         newui::Size typePickerPopupSize(std::size_t optionCount)
         {
             return newui::Size(
-                float(optionCount) * (kTypePickerCellSize + kTypePickerGap) - kTypePickerGap + kTypePickerTopReserve * 2.0f,
-                kTypePickerCellSize + kTypePickerTopReserve * 2.0f);
+                float(optionCount) * (TypePickerCell::kTypePickerCellSize + TypePickerCell::kTypePickerGap) - TypePickerCell::kTypePickerGap + TypePickerCell::kTypePickerTopReserve * 2.0f,
+                TypePickerCell::kTypePickerCellSize + TypePickerCell::kTypePickerTopReserve * 2.0f);
         }
 
         // Whether a candidate Font would actually resolve to a real, loadable BLFont -

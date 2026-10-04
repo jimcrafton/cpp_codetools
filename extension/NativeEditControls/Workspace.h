@@ -41,6 +41,8 @@ namespace CodeToolsVsix
     class Workspace : public newui::SubView
     {
     public:
+        static constexpr float kNewControlDefaultMargin = 20.0f;
+
         static constexpr float kTopBarHeight = 32.0f;
         static constexpr float kStatusBarHeight = 22.0f;
         static constexpr float kIssuesLabelWidth = 140.0f;

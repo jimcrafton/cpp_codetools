@@ -17,10 +17,6 @@ namespace CodeToolsVsix
 {
     namespace
     {
-        constexpr float kErrorBarHeight = 26.0f;
-        constexpr float kStatusBarHeight = 22.0f;
-        constexpr float kBreadcrumbBarHeight = 22.0f;
-        constexpr const char* kCrumbSeparator = "  \xE2\x80\xBA  ";   // " > " as a single angle quote
 
         // A string property's decoded value in object, or empty.
         std::string stringProperty(const lex::json5::ASTNode* object, const wchar_t* key)

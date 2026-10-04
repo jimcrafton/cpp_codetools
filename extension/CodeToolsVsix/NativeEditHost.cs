@@ -44,9 +44,9 @@ namespace CodeToolsVsix
 
             NativeMethods.NativeEditControl_SetServiceProvider(svcPrv);
 
-            // Lets the Designer edit files open in VS's own text editor (once per process).
-            HostDocumentEditor.EnsureRegistered();
-            HostDocumentOpener.EnsureRegistered();
+            // Hands native everything this host offers it - editing files open in VS's text editor,
+            // opening a file at a line (once per process).
+            HostConnection.EnsureRegistered();
 
             // >>> INTEGRATION POINT <<<
             // To host a different native control, replace this call (and NativeEditControls.dll

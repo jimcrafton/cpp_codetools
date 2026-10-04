@@ -48,6 +48,15 @@ namespace CodeToolsVsix
         void paint(BLContext& ctx) override;
 
     private:
+        // Dip, not Dlu - tick/caret sizing is chrome, not text-relative (see
+        // display-units-plan.md's "Monitor DPI scaling" vs "Font-relative sizing" distinction).
+        static constexpr newui::DisplayValue kTickInset{2.0f, newui::DisplayUnit::Dip};          // an ordinary tick, each side
+        static constexpr newui::DisplayValue kTickHeight{3.0f, newui::DisplayUnit::Dip};
+        static constexpr newui::DisplayValue kCurrentTickInset{0.5f, newui::DisplayUnit::Dip};   // the current match's tick: nearly full width
+        static constexpr newui::DisplayValue kCurrentTickHeight{5.0f, newui::DisplayUnit::Dip};
+        static constexpr newui::DisplayValue kCaretWidth{3.0f, newui::DisplayUnit::Dip};
+        static constexpr newui::DisplayValue kCaretHeight{6.0f, newui::DisplayUnit::Dip};
+
         newui::SyncReturn handleMouseDown(newui::View& sender, const newui::Point& pt, std::uint32_t btnMask,
             std::uint32_t keyMask);
         float yFor(std::size_t line) const;

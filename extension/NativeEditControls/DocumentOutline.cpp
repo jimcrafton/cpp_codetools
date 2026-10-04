@@ -58,12 +58,6 @@ namespace CodeToolsVsix
 
     namespace
     {
-        // Same emerald "valid drop target" color as the canvas' own reparent-target highlight
-        // (SelectionOverlay.cpp's kReparentTargetColor) - kept as its own local copy rather than
-        // shared, matching this project's usual "duplicate a small color constant per file"
-        // precedent (e.g. LayoutEditingPolicy.cpp's own grid-tracker gray) over a cross-file
-        // dependency for one RGB value.
-        const BLRgba32 kDropTargetColor(0x10, 0xB9, 0x81, 0xFF);
 
         // Same priority (disabled beats selected beats normal) items.cpp's
         // own file-local itemTextColor() uses - reimplemented here (not

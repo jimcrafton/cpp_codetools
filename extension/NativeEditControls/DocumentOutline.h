@@ -87,6 +87,13 @@ namespace CodeToolsVsix
     class DocumentOutlineItem : public newui::TreeItem
     {
     public:
+        // Same emerald "valid drop target" color as the canvas' own reparent-target highlight
+        // (SelectionOverlay.cpp's kReparentTargetColor) - kept as its own local copy rather than
+        // shared, matching this project's usual "duplicate a small color constant per file"
+        // precedent (e.g. LayoutEditingPolicy.cpp's own grid-tracker gray) over a cross-file
+        // dependency for one RGB value.
+        static constexpr BLRgba32 kDropTargetColor{0x10, 0xB9, 0x81, 0xFF};
+
         void paint(BLContext& ctx, const newui::Rect& rect, const std::vector<std::size_t>& path,
             newui::TreeController& controller) override;
     };

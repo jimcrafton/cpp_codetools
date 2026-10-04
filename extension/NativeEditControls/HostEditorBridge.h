@@ -8,8 +8,8 @@
 
 #include "DocumentEditService.h"
 
-// The C ABI between DocumentEditService and the managed VS host (see NativeEditControl_SetHostEditor
-// in NativeEditControlApi.h). Requests go out as callbacks tagged with a requestId and are answered
+// The C ABI between DocumentEditService and the managed VS host (see HostServices::getText / applyEdits
+// in HostServices.h). Requests go out as callbacks tagged with a requestId and are answered
 // later through the *Reply exports - never synchronously, since VS's UI thread can be blocked
 // waiting on the edit thread. All text is UTF-16 (the editor's, VS's and .NET's own), and offsets
 // are UTF-16 code unit indices. Strings are never assumed null-terminated; every pointer is only

@@ -32,6 +32,13 @@ namespace CodeToolsVsix
     class MenuColumnView : public newui::SubView
     {
     public:
+        static constexpr float kTextLeft = 28.0f;      // check-mark gutter
+        static constexpr float kShortcutGap = 32.0f;
+        static constexpr float kArrowWidth = 16.0f;
+        static constexpr float kRightPadding = 10.0f;
+        static constexpr float kMinColumnWidth = 140.0f;
+        static inline const char* const kTypeHere = "Type Here";
+
         explicit MenuColumnView(MenuDesigner& designer);
 
         void setMenu(newui::MenuItem* parent, newui::MenuItem* highlighted);
@@ -95,6 +102,8 @@ namespace CodeToolsVsix
     class MenuDesigner
     {
     public:
+        static constexpr float kBarPlaceholderWidth = 80.0f;
+
         explicit MenuDesigner(newui::View* host);
         ~MenuDesigner();
 

@@ -11,11 +11,6 @@ namespace CodeToolsVsix
 {
     namespace
     {
-        // Below this margin, a dimension ruler wouldn't have room to read
-        // (line + label + padding) - skipped rather than drawn cramped.
-        constexpr float kMinRulerMargin = 24.0f;
-        constexpr float kArrowSize = 5.0f;
-        constexpr float kLabelGapPadding = 4.0f;
 
         // A small filled triangle whose tip sits at (tipX, tipY) - exactly
         // where the ruler line meets the guide line it's paired with - and
@@ -27,8 +22,8 @@ namespace CodeToolsVsix
             double perpY = dirX;
             BLPath path;
             path.move_to(tipX, tipY);
-            path.line_to(tipX - dirX * kArrowSize + perpX * kArrowSize * 0.5, tipY - dirY * kArrowSize + perpY * kArrowSize * 0.5);
-            path.line_to(tipX - dirX * kArrowSize - perpX * kArrowSize * 0.5, tipY - dirY * kArrowSize - perpY * kArrowSize * 0.5);
+            path.line_to(tipX - dirX * CanvasWell::kArrowSize + perpX * CanvasWell::kArrowSize * 0.5, tipY - dirY * CanvasWell::kArrowSize + perpY * CanvasWell::kArrowSize * 0.5);
+            path.line_to(tipX - dirX * CanvasWell::kArrowSize - perpX * CanvasWell::kArrowSize * 0.5, tipY - dirY * CanvasWell::kArrowSize - perpY * CanvasWell::kArrowSize * 0.5);
             path.close();
             ctx.set_fill_style(color);
             ctx.fill_path(path);
@@ -57,7 +52,7 @@ namespace CodeToolsVsix
             double textHeight = fontMetrics.ascent + fontMetrics.descent;
 
             double mid = (start + end) * 0.5;
-            double halfGap = textWidth * 0.5 + kLabelGapPadding;
+            double halfGap = textWidth * 0.5 + CanvasWell::kLabelGapPadding;
 
             ctx.set_stroke_style(color);
             ctx.set_stroke_width(1.0);

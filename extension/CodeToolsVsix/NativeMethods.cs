@@ -4,7 +4,7 @@ using System.Runtime.InteropServices;
 namespace CodeToolsVsix
 {
     /// <summary>Mirrors cpptools/diagnostic.h's Severity (cpptools::Severity) exactly - this is
-    /// the type NativeEditControl_SetLogSink's callback receives, since NativeEditControls.dll's
+    /// the type the HostServices logSink callback receives, since NativeEditControls.dll's
     /// Log() (and, through it, cpptools's own logging - see CppEditorControl.cpp's
     /// EnsureCpptoolsLogSinkRegistered) is typed in terms of cpptools::Severity directly rather
     /// than a second, separate severity concept.</summary>
@@ -22,6 +22,22 @@ namespace CodeToolsVsix
     /// marshaled `string` parameter (which would implicitly assume null-termination).</summary>
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
     internal delegate void LogSinkCallback(Severity severity, IntPtr message, UIntPtr messageLength);
+
+    /// <summary>Mirrors HostServices.h's HostServices - everything this host offers the native editors,
+    /// handed over in ONE call (NativeEditControl_SetHost). Each member is a function pointer from
+    /// Marshal.GetFunctionPointerForDelegate (the delegate must stay alive while registered), or
+    /// IntPtr.Zero for a capability this host doesn't provide. Versioned: members are only ever
+    /// APPENDED, in the same order as the native struct, and Size is what this build of the struct
+    /// measures - native reads only that many bytes, so an older host leaves newer members null.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct HostServices
+    {
+        public uint Size;
+        public IntPtr LogSink;        // LogSinkCallback
+        public IntPtr GetText;        // HostGetTextCallback      (with ApplyEdits: files open in VS's editor)
+        public IntPtr ApplyEdits;     // HostApplyEditsCallback
+        public IntPtr OpenLocation;   // HostOpenLocationCallback
+    }
 
     /// <summary>Mirrors NativeEditControlApi.h's DocumentType - which concrete NativeEditor
     /// subclass NativeEditControl_Create should instantiate. VS itself never tells this extension
@@ -133,24 +149,15 @@ namespace CodeToolsVsix
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool NativeEditControl_ExecCommand(IntPtr hwnd, EditorCommand command, uint flags, ref EditorCommandArgs args);
 
-        /// <summary>Registers a sink NativeEditControls.dll relays its own log lines to (see
-        /// Logging.h), in addition to its always-on OutputDebugStringA baseline. sink must be
-        /// kept alive by the caller for as long as it stays registered - see
-        /// OutputWindowLogger.SinkDelegate's own comment on why.</summary>
-        [DllImport("NativeEditControls.dll", EntryPoint = "NativeEditControl_SetLogSink", CallingConvention = CallingConvention.StdCall)]
-        public static extern void NativeEditControl_SetLogSink(LogSinkCallback sink);
+        /// <summary>Connects everything this host offers NativeEditControls.dll in one call - see
+        /// <see cref="HostServices"/> and HostConnection. Copied before this returns; the delegates the
+        /// table's pointers came from must stay alive for as long as they are registered.</summary>
+        [DllImport("NativeEditControls.dll", EntryPoint = "NativeEditControl_SetHost", CallingConvention = CallingConvention.StdCall)]
+        public static extern void NativeEditControl_SetHost(ref HostServices services);
 
-        /// <summary>Connects (or, with nulls, disconnects) the callbacks native uses to read and edit
-        /// a file open in VS's own text editor - see HostDocumentEditor. Both delegates must stay
-        /// alive for as long as they are registered.</summary>
-        [DllImport("NativeEditControls.dll", EntryPoint = "NativeEditControl_SetHostEditor", CallingConvention = CallingConvention.StdCall)]
-        public static extern void NativeEditControl_SetHostEditor(HostGetTextCallback getText, HostApplyEditsCallback applyEdits);
-
-        /// <summary>Connects (or, with null, disconnects) the callback native uses to ask the host to
-        /// open a file in an editor at a line - see HostDocumentOpener. The delegate must stay alive
-        /// for as long as it is registered.</summary>
-        [DllImport("NativeEditControls.dll", EntryPoint = "NativeEditControl_SetHostOpenLocation", CallingConvention = CallingConvention.StdCall)]
-        public static extern void NativeEditControl_SetHostOpenLocation(HostOpenLocationCallback callback);
+        /// <summary>Disconnects everything (a null table).</summary>
+        [DllImport("NativeEditControls.dll", EntryPoint = "NativeEditControl_SetHost", CallingConvention = CallingConvention.StdCall)]
+        public static extern void NativeEditControl_SetHost(IntPtr services);
 
         /// <summary>Answers a HostGetTextCallback request (from any thread). textLength (in chars) is
         /// explicit; text may be null when status is not Ok.</summary>

@@ -16,6 +16,8 @@ namespace CodeToolsVsix
     // element should reuse placeCallout() below rather than hand-rolling its own placement math.
     struct CalloutPlacement
     {
+        static constexpr float kGap = 6.0f;  // clearance between the anchor and the popup's own edge
+
         newui::Rect bounds;
         newui::shapes::TailSide tailSide = newui::shapes::TailSide::Top;
         float tailPosition = 0.5f;

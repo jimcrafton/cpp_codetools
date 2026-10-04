@@ -15,6 +15,8 @@ namespace CodeToolsVsix
     // LayoutParams and all its children, exactly as reloading it from a file would.
     class DesignerClipboard
     {
+        static constexpr char kMagic[] = "codetools-designer-views/1\n";
+
     public:
         // The MIME type the designer's copies are stored under on the system clipboard.
         static const wchar_t* mimeType();

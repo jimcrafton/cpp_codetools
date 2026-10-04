@@ -131,11 +131,6 @@ namespace CodeToolsVsix
             return true;
         }
 
-        // Canvas left around a fragment. A View draws its drop shadow (and focus ring) outside its own
-        // bounds, but the design surface clips to its own - a fragment flush against the edge would lose
-        // them - so it sits this far in from the canvas edge. Design-time only: not saved (below).
-        constexpr float kFragmentCanvasMargin = 24.0f;
-
         // Positions a freshly loaded fragment on the canvas and returns the canvas size it needs (empty
         // if the fragment has no size at all, so the default canvas is kept). A fragment usually has a
         // fixed desiredSize and no saved bounds.
@@ -148,8 +143,8 @@ namespace CodeToolsVsix
             if (size.width <= 0.0f || size.height <= 0.0f) {
                 return newui::Size();
             }
-            fragment.setBounds(newui::Rect(kFragmentCanvasMargin, kFragmentCanvasMargin, size.width, size.height));
-            return newui::Size(size.width + 2.0f * kFragmentCanvasMargin, size.height + 2.0f * kFragmentCanvasMargin);
+            fragment.setBounds(newui::Rect(DesignerEditor::kFragmentCanvasMargin, DesignerEditor::kFragmentCanvasMargin, size.width, size.height));
+            return newui::Size(size.width + 2.0f * DesignerEditor::kFragmentCanvasMargin, size.height + 2.0f * DesignerEditor::kFragmentCanvasMargin);
         }
 
         // A Fragment document's file text: the one root view, exactly as Bundle::writeView() writes it -

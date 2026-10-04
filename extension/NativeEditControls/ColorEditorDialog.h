@@ -126,6 +126,10 @@ namespace CodeToolsVsix
         newui::Button* applyButton() const { return applyBtn_; }
 
     private:
+        static constexpr std::size_t kValueGridSize = 4;
+        static constexpr float kSwatchSize = 32.0f;
+        static constexpr float kSwatchRadius = 6.0f;
+
         // Loads Resources/coloreditordialog.newui (via setName() + Bundle::loadDialog(), see this
         // class's own header comment), finds every named node this class needs, grafts a real
         // ColorPicker into pickerRow in place of its 3 decorative placeholders, and wires every

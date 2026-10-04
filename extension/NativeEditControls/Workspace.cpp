@@ -46,20 +46,17 @@ namespace CodeToolsVsix
         // documented behavior), stays pinned there through every future resize too - a real,
         // reported bug. Real per-class natural sizing would need an actual measurement pass,
         // which doesn't exist in this toolkit at all - a fixed default is the honest v1 answer.
-        constexpr float kNewControlDefaultWidth = Workspace::kNewControlDefaultWidth;
-        constexpr float kNewControlDefaultHeight = Workspace::kNewControlDefaultHeight;
-        constexpr float kNewControlDefaultMargin = 20.0f;
 
         void applyDefaultDesignTimeGeometry(newui::SubView* view)
         {
             view->setVisible(true);
-            view->setBounds(newui::Rect(kNewControlDefaultMargin, kNewControlDefaultMargin,
-                kNewControlDefaultWidth, kNewControlDefaultHeight));
+            view->setBounds(newui::Rect(Workspace::kNewControlDefaultMargin, Workspace::kNewControlDefaultMargin,
+                Workspace::kNewControlDefaultWidth, Workspace::kNewControlDefaultHeight));
             auto params = std::make_unique<newui::AnchorLayoutParams>(newui::Anchor::Left | newui::Anchor::Top);
-            params->setLeftMargin(kNewControlDefaultMargin);
-            params->setTopMargin(kNewControlDefaultMargin);
-            params->setWidth(kNewControlDefaultWidth);
-            params->setHeight(kNewControlDefaultHeight);
+            params->setLeftMargin(Workspace::kNewControlDefaultMargin);
+            params->setTopMargin(Workspace::kNewControlDefaultMargin);
+            params->setWidth(Workspace::kNewControlDefaultWidth);
+            params->setHeight(Workspace::kNewControlDefaultHeight);
             view->setLayoutParams(std::move(params));
         }
 

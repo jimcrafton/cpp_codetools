@@ -7,14 +7,6 @@ namespace CodeToolsVsix
 {
     namespace
     {
-        // Dip, not Dlu - tick/caret sizing is chrome, not text-relative (see
-        // display-units-plan.md's "Monitor DPI scaling" vs "Font-relative sizing" distinction).
-        constexpr newui::DisplayValue kTickInset(2.0f, newui::DisplayUnit::Dip);          // an ordinary tick, each side
-        constexpr newui::DisplayValue kTickHeight(3.0f, newui::DisplayUnit::Dip);
-        constexpr newui::DisplayValue kCurrentTickInset(0.5f, newui::DisplayUnit::Dip);   // the current match's tick: nearly full width
-        constexpr newui::DisplayValue kCurrentTickHeight(5.0f, newui::DisplayUnit::Dip);
-        constexpr newui::DisplayValue kCaretWidth(3.0f, newui::DisplayUnit::Dip);
-        constexpr newui::DisplayValue kCaretHeight(6.0f, newui::DisplayUnit::Dip);
     }
 
     MinimapStrip::MinimapStrip()

@@ -305,6 +305,50 @@ namespace CodeToolsVsix
         newui::Label* pointBlendPowerLabel() const { return pointBlendPowerLabel_; }
 
     private:
+        static constexpr float kDialogWidth = 360.0f;
+        static constexpr float kAngleDialSize = 48.0f;  // 75% of the original 64
+        static constexpr float kAngleDialPadding = 4.0f;
+        static constexpr float kAngleLabelWidth = 44.0f;
+        // pointPage_'s own "Sharpness" row - Gradient::pointBlendPower()'s real range has no
+        // documented hard bounds (graphics.h's own doc comment just says "higher = sharper
+        // transitions"), so this dialog picks a UI-usable one: 0.5 visibly softens the blend
+        // toward a flat average, 8.0 makes it read as near-hard Voronoi cells well before that -
+        // both found by hand in testharness.exe, not derived from any formula.
+        static constexpr float kPointBlendPowerMin = 0.5f;
+        static constexpr float kPointBlendPowerMax = 8.0f;
+        static constexpr float kPointBlendPowerStep = 0.1f;
+        static constexpr float kPointBlendPowerValueWidth = 32.0f;
+        // Tall enough for linearPage_'s own real angle dial (kAngleDialSize) plus a little
+        // breathing room on both sides - Radial/Conic remain empty for now (no shape toggle
+        // built yet); Point's hint label + its own "Sharpness" slider row (2*kRowHeight + 4
+        // spacing = 52) fit comfortably within it too.
+        static constexpr float kPagesHeight = kAngleDialSize + kAngleDialPadding * 2.0f;
+        // 24 (kind) + 96 (preview) + 28 (track) + 130 (selectedItemEditor) + kPagesHeight (pages) +
+        // 24 (presetsLabel) + 32 (presetsRow) + 32 (footer) + 7*8 spacing + 2*12 padding -
+        // recomputed after pagesContainer_ stopped weight-stretching to fill the (until-then-
+        // empty) leftover space between the hex row and Presets, and again after linearPage_ grew
+        // a real angle dial. 480 (back when pages was a plain kRowHeight) clipped the footer live
+        // (the window's own non-client chrome eats into that budget too), so this carries the same
+        // real slack, not just rounding.
+        static constexpr float kDialogHeight = 496.0f + kPagesHeight;
+        static constexpr float kRowHeight = 24.0f;
+        static constexpr float kLabelWidth = 70.0f;
+        static constexpr float kPreviewHeight = 96.0f;
+        static constexpr float kTrackHeight = 28.0f;
+        static constexpr float kColorPickerHeight = 100.0f;
+        static constexpr float kEditorRowSpacing = 6.0f;
+        // colorPicker_ + one row of spacing + the hex row - selectedItemEditor_'s own real
+        // vertical extent. This toolkit has no content-measurement pass (a container never
+        // auto-sizes from its own children) - every fixed-size row in this dialog (previewBox_/
+        // track_/this one) needs an explicit desiredSize(), or FlexLayout resolves its unweighted
+        // main-axis size to 0 on the first layout pass. Missing this on selectedItemEditor_ itself
+        // (colorPicker_'s own desiredSize() alone isn't enough - it's the *container* still
+        // needing one) is exactly the real bug that shipped once live: colorPicker_ was there,
+        // built correctly, and simply never got any height to render into.
+        static constexpr float kSelectedItemEditorHeight = kColorPickerHeight + kEditorRowSpacing + kRowHeight;
+        static constexpr float kPresetSwatchSize = 32.0f;
+        static constexpr float kPresetsRowSpacing = 6.0f;
+
         // Builds the permanent chrome once (contentRoot_, kindControl_, pagesContainer_ and its 4
         // real child pages - linearPage_/radialPage_/conicPage_/pointPage_ - the Cancel/Apply
         // footer) - called only from the constructor. Deliberately never rebuilt: kindControl_'s

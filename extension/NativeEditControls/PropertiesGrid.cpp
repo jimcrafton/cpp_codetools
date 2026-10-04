@@ -481,8 +481,6 @@ namespace CodeToolsVsix
 
     namespace
     {
-        // Prefix of a wired handler's row: a bullet (the UI font has no check mark).
-        const std::string kPickerRowMarker = "\xE2\x80\xA2 ";
     }
 
     void PropertiesGrid::openDelegatePicker()

@@ -6,7 +6,6 @@ namespace CodeToolsVsix
 {
     namespace
     {
-        constexpr float kCalloutGap = 6.0f;  // clearance between the anchor and the popup's own edge
 
         // Kept off the rounded corners (CalloutRoundRect::tailPosition()'s own doc comment - "not
         // clamped - a value outside 0-1 places the tip past the corresponding rounded corner,
@@ -30,8 +29,8 @@ namespace CodeToolsVsix
         // into containerScreenRect - tailOnTop selects which of the two (a popup below has its
         // own tail on its top edge, pointing up at the anchor, and vice versa).
         auto vertical = [&](bool tailOnTop) {
-            float top = tailOnTop ? anchorScreenRect.bottom() + kCalloutGap
-                                   : anchorScreenRect.top() - kCalloutGap - popupSize.height;
+            float top = tailOnTop ? anchorScreenRect.bottom() + CalloutPlacement::kGap
+                                   : anchorScreenRect.top() - CalloutPlacement::kGap - popupSize.height;
             float left = clampToRange(anchorCenterX - popupSize.width * 0.5f,
                 containerScreenRect.left(), containerScreenRect.right() - popupSize.width);
             CalloutPlacement p;
@@ -44,8 +43,8 @@ namespace CodeToolsVsix
         // tailOnLeft selects which of the two (a popup to the right has its own tail on its left
         // edge, pointing left at the anchor, and vice versa).
         auto horizontal = [&](bool tailOnLeft) {
-            float left = tailOnLeft ? anchorScreenRect.right() + kCalloutGap
-                                     : anchorScreenRect.left() - kCalloutGap - popupSize.width;
+            float left = tailOnLeft ? anchorScreenRect.right() + CalloutPlacement::kGap
+                                     : anchorScreenRect.left() - CalloutPlacement::kGap - popupSize.width;
             float top = clampToRange(anchorCenterY - popupSize.height * 0.5f,
                 containerScreenRect.top(), containerScreenRect.bottom() - popupSize.height);
             CalloutPlacement p;
@@ -55,10 +54,10 @@ namespace CodeToolsVsix
             return p;
         };
 
-        bool fitsBelow = anchorScreenRect.bottom() + kCalloutGap + popupSize.height <= containerScreenRect.bottom();
-        bool fitsAbove = anchorScreenRect.top() - kCalloutGap - popupSize.height >= containerScreenRect.top();
-        bool fitsRight = anchorScreenRect.right() + kCalloutGap + popupSize.width <= containerScreenRect.right();
-        bool fitsLeft = anchorScreenRect.left() - kCalloutGap - popupSize.width >= containerScreenRect.left();
+        bool fitsBelow = anchorScreenRect.bottom() + CalloutPlacement::kGap + popupSize.height <= containerScreenRect.bottom();
+        bool fitsAbove = anchorScreenRect.top() - CalloutPlacement::kGap - popupSize.height >= containerScreenRect.top();
+        bool fitsRight = anchorScreenRect.right() + CalloutPlacement::kGap + popupSize.width <= containerScreenRect.right();
+        bool fitsLeft = anchorScreenRect.left() - CalloutPlacement::kGap - popupSize.width >= containerScreenRect.left();
 
         if (fitsBelow) return vertical(true);
         if (fitsAbove) return vertical(false);

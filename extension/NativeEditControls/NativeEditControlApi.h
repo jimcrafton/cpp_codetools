@@ -9,6 +9,7 @@
 
 #include "HostEditorBridge.h"
 #include "HostLocationOpener.h"
+#include "HostServices.h"
 
 
 typedef wil::com_ptr<IServiceProvider> IServiceProviderPtr;
@@ -125,31 +126,18 @@ struct EditorCommandArgs
 NATIVEEDITCONTROL_API BOOL __stdcall NativeEditControl_ExecCommand(
     HWND hwnd, EditorCommand command, uint32_t flags, const EditorCommandArgs* args);
 
-// Registers a sink this DLL relays its own log lines to, in addition to the always-on
-// OutputDebugStringA baseline (see Logging.h) - typically used by the managed host to surface
-// logging in a real UI (e.g. a VS Output window pane) for the case where nothing is attached to
-// catch OutputDebugString. Optional: never calling this just means OutputDebugStringA-only
-// logging. message is never assumed to be null-terminated (see this header's own note on
-// filePath above) - messageLength is authoritative. Pass nullptr to unregister.
-using LogSinkCallback = void(__stdcall*)(cpptools::Severity severity, const wchar_t* message, size_t messageLength);
-NATIVEEDITCONTROL_API void __stdcall NativeEditControl_SetLogSink(LogSinkCallback sink);
+// Connects (or, with nullptr, disconnects) everything the managed host offers this DLL, in one call: the
+// log sink, reading/editing a file open in VS's own text editor, and opening a file at a line. See
+// HostServices.h for the table itself and why it is versioned. The table is copied before this returns;
+// the callbacks it points at must stay valid for as long as they are registered. Calling it again
+// replaces the whole set.
+NATIVEEDITCONTROL_API void __stdcall NativeEditControl_SetHost(const HostServices* services);
 
-// Lets other editors (the Designer) edit a file that is open in VS's own text editor - see
-// DocumentEditService.h. The native side asks through these callbacks and the host answers later
-// through the two Reply exports, from any thread, never synchronously (VS's UI thread can be
-// blocked waiting on the edit thread). Pass nullptr for both to disconnect; requests still
-// waiting then fail. Callback arguments (path, edit text) are only valid during the call - copy
-// what you need before returning. All text is UTF-16 and all offsets are UTF-16 indices. status is EditStatus (DocumentEditService.h): 0 Ok, 1 NotOpen
-// (the file isn't open in VS's native editor - native then falls back to the file on disk),
-// 2 NotFound, 3 VersionMismatch, 4 InvalidEdit, 5 IoError, 6 Rejected.
-NATIVEEDITCONTROL_API void __stdcall NativeEditControl_SetHostEditor(
-    HostGetTextCallback getText, HostApplyEditsCallback applyEdits);
+// How the host answers HostServices::getText / applyEdits requests (see HostEditorBridge.h and
+// DocumentEditService.h): from any thread, never from inside the request callback itself (VS's UI thread
+// can be mid-call into this DLL). Text is UTF-16 and offsets are UTF-16 indices. status is EditStatus
+// (DocumentEditService.h): 0 Ok, 1 NotOpen (the file isn't open in VS's native editor - native then falls
+// back to the file on disk), 2 NotFound, 3 VersionMismatch, 4 InvalidEdit, 5 IoError, 6 Rejected.
 NATIVEEDITCONTROL_API void __stdcall NativeEditControl_HostGetTextReply(
     uint64_t requestId, int32_t status, const wchar_t* text, size_t textLength, uint64_t version);
 NATIVEEDITCONTROL_API void __stdcall NativeEditControl_HostApplyEditsReply(uint64_t requestId, int32_t status);
-
-// Lets the Designer ask the host to open a file in an editor at a line - see HostLocationOpener.h. The
-// callback runs on the edit thread and must return at once (do the work on VS's UI thread); path is
-// valid only during the call, line and column are 1-based and the column is in UTF-16 units. Pass
-// nullptr to disconnect; with none connected the Designer falls back to a status-bar message.
-NATIVEEDITCONTROL_API void __stdcall NativeEditControl_SetHostOpenLocation(HostOpenLocationCallback callback);

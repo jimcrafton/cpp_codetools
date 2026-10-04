@@ -25,6 +25,9 @@ namespace CodeToolsVsix
     class ColorPicker : public newui::SubView
     {
     public:
+        static constexpr float kHueRailWidth = 18.0f;
+        static constexpr float kAlphaRailWidth = 18.0f;
+
         ColorPicker();
 
         typedef newui::Delegate<ColorPicker> ColorChangedDelegate;

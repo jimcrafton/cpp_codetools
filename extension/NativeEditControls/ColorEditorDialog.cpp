@@ -13,9 +13,6 @@ namespace CodeToolsVsix
 {
     namespace
     {
-        constexpr std::size_t kValueGridSize = 4;
-        constexpr float kSwatchSize = 32.0f;
-        constexpr float kSwatchRadius = 6.0f;
 
         float clampf(float value, float lo, float hi)
         {
