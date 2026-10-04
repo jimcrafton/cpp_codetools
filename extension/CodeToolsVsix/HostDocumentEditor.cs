@@ -50,9 +50,11 @@ namespace CodeToolsVsix
     /// (DocumentEditService's registry is consulted first).
     ///
     /// Every request is answered exactly once, and never synchronously from the callback: the
-    /// callbacks run on native's edit thread, which must not wait for VS's UI thread (the UI thread
-    /// can be blocked waiting on the edit thread), so the work hops to the UI thread and replies
-    /// through NativeEditControl_HostGetTextReply / HostApplyEditsReply when done.
+    /// callbacks run on native's edit thread, which must not wait for VS's UI thread: while an export
+    /// is in flight the UI thread sits in RunLoop::postAndWait, which pumps its messages only every
+    /// 100 ms (and re-entrantly), so a synchronous call would stall on that - the work hops to the UI
+    /// thread instead and replies through NativeEditControl_HostGetTextReply / HostApplyEditsReply
+    /// when done.
     /// Text and offsets crossing the boundary are UTF-16, the buffer's own coordinates.</summary>
     internal static class HostDocumentEditor
     {

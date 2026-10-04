@@ -135,7 +135,7 @@
        extension's install folder, not from this project's own build output. There is no separate
        C API/bridge DLL - NativeEditControls.dll calls cpptools::Parser in-process (see
        CppEditorControl.cpp), and hosts a real newui::RootView the same way (see
-       EditThreadHost.cpp).
+       NativeEditor.cpp).
 
        This is done as an imperative Target rather than plain <Content Include> items pointing at
        the CMake build's own output path: a static Content item's Exists() condition is evaluated

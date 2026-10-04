@@ -25,7 +25,7 @@ namespace CodeToolsVsix
     // text appended, specifically so save() only ever writes real source text (see load()'s own
     // comment). Replaces StandInEditControl's hand-rolled Win32 window - see "win32 loop in
     // VSIX.docx" (D:\code\newui) for the hosting architecture this follows: this control's
-    // RootView lives entirely on EditThreadHost's dedicated background thread, never on the
+    // RootView lives entirely on the edit thread (NativeEditManager's dedicated RunLoop thread), never on the
     // caller's (VS's UI) thread.
     //
     // The VS-communication contract itself (windowHandle()/isDirty()/RootView storage/teardown)
@@ -34,7 +34,7 @@ namespace CodeToolsVsix
     // and the load/save/execCommand behavior that goes with them.
     //
     // Every public method here (aside from the constructor, which is only ever called from
-    // EditThreadHost::runAndWait() - see NativeEditControlApi.cpp's own wrappers for where that
+    // NativeEditManager::runOnEditThread() - see NativeEditor.h for where that
     // marshaling actually happens) touches RootView/TextControl state directly with no
     // thread-safety of its own - callers are responsible for only ever reaching this class from
     // the edit thread.
@@ -42,7 +42,7 @@ namespace CodeToolsVsix
     {
     public:
         // Constructs the RootView as a child of hwndParent filling (x, y, width, height). Must
-        // be called on EditThreadHost's own thread. On success, windowHandle() returns the new
+        // be called on the edit thread. On success, windowHandle() returns the new
         // control's real HWND; on failure it stays null (check before use - the constructor
         // itself can't fail loudly, matching this DLL's existing "return null/false, don't
         // throw across the P/Invoke boundary" convention).

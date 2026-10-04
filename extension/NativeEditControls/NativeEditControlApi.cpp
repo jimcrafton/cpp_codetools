@@ -89,7 +89,7 @@ void __stdcall NativeEditControl_SetLogSink(LogSinkCallback sink)
 {
     setManagedLogSink(sink);
 
-    // Called once, from the managed host's own init thread (never EditThreadHost's dedicated
+    // Called once, from the managed host's own init thread (never the edit thread's dedicated
     // one) - so this is always safe to call the sink from directly, unlike log() calls made from
     // CppEditorControl.cpp's dedicated-thread code (see Logging.h's own comment on why those
     // queue instead). This is the actual compiled-in NativeEditControls.dll version (also embedded
@@ -112,6 +112,11 @@ void __stdcall NativeEditControl_SetHostEditor(HostGetTextCallback getText, Host
         hostBridge().setCallbacks(getText, applyEdits);
         documentEditService().setHost(hostBridge().connected() ? &hostBridge() : nullptr);
     });
+}
+
+void __stdcall NativeEditControl_SetHostOpenLocation(HostOpenLocationCallback callback)
+{
+    HostLocationOpener::instance().setCallback(callback);
 }
 
 void __stdcall NativeEditControl_HostGetTextReply(

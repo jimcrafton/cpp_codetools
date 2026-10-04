@@ -8,6 +8,7 @@
 #include <wil/com.h>
 
 #include "HostEditorBridge.h"
+#include "HostLocationOpener.h"
 
 
 typedef wil::com_ptr<IServiceProvider> IServiceProviderPtr;
@@ -39,14 +40,15 @@ typedef wil::com_ptr<IServiceProvider> IServiceProviderPtr;
 // NativeEditManager::createEditor picking one fixed editor type.
 enum class DocumentType : int32_t
 {
-    CppSource = 0,  // CppEditor - source text + cpptools-derived outline.
-    Designer = 1,   // DesignerEditor - placeholder today; a future visual designer surface.
+    UnrecognizedType = 0,
+    CppSource = 1, // CppEditor - source text + cpptools-derived outline.
+    Designer = 2   // DesignerEditor - placeholder today; a future visual designer surface.
 };
 
 // Creates a new CppEditorControl - a real newui::RootView (standalone, no Application/Frame) -
 // as a child of hwndParent, filling (x, y, width, height), hosting the NativeEditor subclass
 // documentType selects (see DocumentType above). The returned HWND lives on this DLL's own
-// dedicated background thread (see EditThreadHost.h, "win32 loop in VSIX.docx" (D:\code\newui)
+// dedicated background thread (see NativeEditManager::startRunLoop(), "win32 loop in VSIX.docx" (D:\code\newui)
 // for the hosting model this follows), not the calling thread - this call blocks until that
 // thread's RootView is actually constructed and ready. Returns the control's HWND, or nullptr on
 // failure.
@@ -145,3 +147,9 @@ NATIVEEDITCONTROL_API void __stdcall NativeEditControl_SetHostEditor(
 NATIVEEDITCONTROL_API void __stdcall NativeEditControl_HostGetTextReply(
     uint64_t requestId, int32_t status, const wchar_t* text, size_t textLength, uint64_t version);
 NATIVEEDITCONTROL_API void __stdcall NativeEditControl_HostApplyEditsReply(uint64_t requestId, int32_t status);
+
+// Lets the Designer ask the host to open a file in an editor at a line - see HostLocationOpener.h. The
+// callback runs on the edit thread and must return at once (do the work on VS's UI thread); path is
+// valid only during the call, line and column are 1-based and the column is in UTF-16 units. Pass
+// nullptr to disconnect; with none connected the Designer falls back to a status-bar message.
+NATIVEEDITCONTROL_API void __stdcall NativeEditControl_SetHostOpenLocation(HostOpenLocationCallback callback);

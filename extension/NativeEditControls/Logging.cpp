@@ -67,7 +67,7 @@ namespace CodeToolsVsix
         // process-wide Win32 mutex (DBWIN_BUFFER_READY/DBWIN_DATA_READY) shared by every
         // OutputDebugString caller on the system, and is a documented real deadlock vector when
         // called from a background thread while the VS UI/STA thread is simultaneously blocked
-        // pumping for something else (exactly EditThreadHost::runAndWait's own nested pump-wait,
+        // pumping for something else (exactly RunLoop::postAndWait's own nested pump-wait (runTillNotified()),
         // itself nested inside VS's own JoinableTaskFactory.Run()) - confirmed as the live cause
         // of the NativeEditControl_Create hang investigated 2026-08-29. The managed-sink path
         // below (IVsOutputWindowPane::OutputStringThreadSafe, via OutputWindowLogger.cs) is VS's

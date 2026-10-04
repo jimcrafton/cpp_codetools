@@ -34,6 +34,12 @@ namespace CodeToolsVsix
         std::size_t excerptIndex() const { return line - firstLine; }
     };
 
+    // clang reports a column as a count of UTF-8 bytes; an editor counts UTF-16 units. Converts the
+    // 1-based byteColumn on the 1-based `line` of headerText (UTF-8) to the 1-based UTF-16 column - the
+    // same number for ASCII, smaller after a multi-byte character. A line that isn't in the text (a stale
+    // diagnostic) leaves the column as it was.
+    std::size_t utf16Column(const std::string& headerText, std::size_t line, std::size_t byteColumn);
+
     // The peeks for issues (in the same order), whose positions are in headerText (UTF-8, LF or CRLF
     // lines). A problem whose line isn't in the text (a stale diagnostic) gets an empty excerpt.
     std::vector<IssuePeek> buildIssuePeeks(const std::vector<cpptools::Diagnostic>& issues,

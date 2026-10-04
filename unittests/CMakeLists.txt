@@ -76,6 +76,7 @@ add_executable(nativeeditcontrols_tests
     test_designer_editor.cpp
     test_document_tabs.cpp
     test_issue_peek.cpp
+    test_host_location_opener.cpp
     test_problem_list.cpp
     test_cpp_editor.cpp
     test_find_engine.cpp
@@ -122,6 +123,7 @@ add_executable(nativeeditcontrols_tests
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/FindEngine.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/DocumentEditService.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/HostEditorBridge.cpp"
+    "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/HostLocationOpener.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/CodegenEditAdapter.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/WiringRequestBuilder.cpp"
     "${CMAKE_SOURCE_DIR}/extension/NativeEditControls/ControllerRef.cpp"

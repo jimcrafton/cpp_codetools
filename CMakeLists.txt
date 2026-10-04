@@ -358,6 +358,8 @@ add_library(NativeEditControls SHARED
     extension/NativeEditControls/DocumentEditService.cpp
     extension/NativeEditControls/HostEditorBridge.h
     extension/NativeEditControls/HostEditorBridge.cpp
+    extension/NativeEditControls/HostLocationOpener.cpp
+    extension/NativeEditControls/HostLocationOpener.h
     extension/NativeEditControls/CodegenEditAdapter.h
     extension/NativeEditControls/CodegenEditAdapter.cpp
     extension/NativeEditControls/WiringRequestBuilder.h
@@ -482,6 +484,7 @@ add_executable(testharness
     extension/NativeEditControls/WiringRequestBuilder.cpp
     extension/NativeEditControls/CodegenEditAdapter.cpp
     extension/NativeEditControls/HostEditorBridge.cpp
+    extension/NativeEditControls/HostLocationOpener.cpp
     extension/NativeEditControls/DocumentEditService.cpp
     extension/NativeEditControls/FindEngine.cpp
     extension/NativeEditControls/FindReplaceController.cpp

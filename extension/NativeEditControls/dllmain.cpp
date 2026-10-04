@@ -10,7 +10,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ulReasonForCall, LPVOID /*lpReserve
         // Captured here, not from NativeEditControl_Create's own hInstance parameter - that's
         // the *host* process's (devenv.exe's) module handle, not this DLL's own, and the
         // dedicated-thread RootView's window class needs the one whose WndProc actually lives in
-        // this DLL. See EditThreadHost.h's own comment.
+        // this DLL. See NativeEditManager::startRunLoop().
         CodeToolsVsix::NativeEditManager::setModuleHandle(reinterpret_cast<HINSTANCE>(hModule));
         break;
 

@@ -113,6 +113,27 @@ TEST(IssuePeek, CrLfLinesAreSplitWithoutTheCarriageReturn) {
     EXPECT_EQ(peeks[0].excerpt[2], "three");
 }
 
+TEST(IssuePeek, ABytesColumnBecomesAUtf16UnitsColumn) {
+    const std::string text = "int a;\n/*\xC3\xA9*/ int b;\n/*\xF0\x9F\x98\x80*/ int c;\n";
+
+    EXPECT_EQ(utf16Column(text, 1, 5), 5u) << "ASCII: the same";
+    // "/*é*/ int b;": 'b' is byte column 12 (é is two bytes) but UTF-16 column 11.
+    EXPECT_EQ(utf16Column(text, 2, 12), 11u);
+    // "/*😀*/ int c;": 'c' is byte column 14 (the emoji is four bytes) but UTF-16 column 12 (a pair).
+    EXPECT_EQ(utf16Column(text, 3, 14), 12u);
+    EXPECT_EQ(utf16Column(text, 2, 1), 1u);
+}
+
+TEST(IssuePeek, AColumnPastTheEndOfItsLineIsClampedToTheEndOfIt) {
+    EXPECT_EQ(utf16Column("ab\ncd\n", 1, 99), 3u) << "one past the last character";
+}
+
+TEST(IssuePeek, ALineThatIsNotThereLeavesTheColumnAlone) {
+    EXPECT_EQ(utf16Column("ab\n", 9, 7), 7u);
+    EXPECT_EQ(utf16Column("ab\n", 0, 7), 7u);
+    EXPECT_EQ(utf16Column("ab\n", 1, 0), 0u);
+}
+
 TEST(IssuePeek, AProblemOnALineThatIsNoLongerThereHasNoExcerpt) {
     const auto peeks = buildIssuePeeks({problem(99, 1, 0, "stale")}, kHeader);
 

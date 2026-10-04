@@ -78,7 +78,7 @@ namespace CodeToolsVsix
     /// CppEditorControl.cpp).</summary>
     internal static class NativeMethods
     {
-        /// <summary>CppEditorControl::Create (via EditThreadHost - see NativeEditor.h's own
+        /// <summary>CppEditorControl::Create (via NativeEditManager::runOnEditThread() - see NativeEditor.h's own
         /// comment), exported by the sibling NativeEditControl native project
         /// (NativeEditControls.dll, deployed alongside this assembly - see the csproj's Target for
         /// NativeEditControls.dll). The returned HWND lives on NativeEditControls.dll's own
@@ -145,6 +145,12 @@ namespace CodeToolsVsix
         /// alive for as long as they are registered.</summary>
         [DllImport("NativeEditControls.dll", EntryPoint = "NativeEditControl_SetHostEditor", CallingConvention = CallingConvention.StdCall)]
         public static extern void NativeEditControl_SetHostEditor(HostGetTextCallback getText, HostApplyEditsCallback applyEdits);
+
+        /// <summary>Connects (or, with null, disconnects) the callback native uses to ask the host to
+        /// open a file in an editor at a line - see HostDocumentOpener. The delegate must stay alive
+        /// for as long as it is registered.</summary>
+        [DllImport("NativeEditControls.dll", EntryPoint = "NativeEditControl_SetHostOpenLocation", CallingConvention = CallingConvention.StdCall)]
+        public static extern void NativeEditControl_SetHostOpenLocation(HostOpenLocationCallback callback);
 
         /// <summary>Answers a HostGetTextCallback request (from any thread). textLength (in chars) is
         /// explicit; text may be null when status is not Ok.</summary>

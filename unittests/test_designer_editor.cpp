@@ -1830,6 +1830,31 @@ TEST_F(DesignerEditorFileFixture, OpeningAProblemHandsTheHeadersPathAndPositionT
     ::DeleteFileA(header.c_str());
 }
 
+TEST_F(DesignerEditorFileFixture, TheHostGetsAUtf16ColumnWhenMultiByteCharactersComeBeforeTheProblem)
+{
+    const std::string header = dir_ + "\\SaveDialogController.h";
+    // The comment's e-acute is two UTF-8 bytes but one UTF-16 unit, so clang's byte column is one too big.
+    { std::ofstream(header, std::ios::binary) << "/*\xC3\xA9*/ #include <bojangle>\n" << kBindingHeader; }
+    writeFile(kBoundDocument);
+    newui::RootView view(nullptr, newui::Rect(0, 0, 10, 10), "designerRoot");
+    CodeToolsVsix::DesignerEditor editor(&view);
+    std::wstring path = filePath();
+    ASSERT_TRUE(editor.load(path.c_str(), path.size()));
+    ASSERT_FALSE(editor.controllerIssues().empty());
+    const cpptools::Diagnostic& issue = editor.controllerIssues()[0];
+    ASSERT_EQ(issue.location.line, 1u);
+
+    std::size_t openedColumn = 0;
+    editor.setOpenLocationHandler([&](const std::wstring&, std::size_t, std::size_t column) {
+        openedColumn = column;
+        return true;
+    });
+    editor.openIssue(0);
+
+    EXPECT_EQ(openedColumn + 1, issue.location.column);
+    ::DeleteFileA(header.c_str());
+}
+
 TEST_F(DesignerEditorFileFixture, WithNoHostToOpenItOpeningAProblemSaysWhereItIs)
 {
     const std::string header = dir_ + "\\SaveDialogController.h";

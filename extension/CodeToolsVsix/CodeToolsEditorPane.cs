@@ -5,6 +5,8 @@ using Microsoft.VisualStudio;
 using Microsoft.VisualStudio.OLE.Interop;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
+using System.Linq;
+
 
 namespace CodeToolsVsix
 {
@@ -152,13 +154,19 @@ namespace CodeToolsVsix
         /// switch in sync with that attribute list.</summary>
         private static DocumentType DocumentTypeFromPath(string filePath)
         {
-            switch (Path.GetExtension(filePath)?.ToLowerInvariant())
+            string cppTypes = ".cpp;.cc;.cxx;.h;.hpp;.hxx";
+            List<string> typesList = cppTypes.Split(';').ToList().Select(ext => ext.Trim().ToLowerInvariant()).ToList();
+
+            if (typesList.FindIndex(ext => ext == Path.GetExtension(filePath).ToLowerInvariant()) != -1)
             {
-                case ".newui":
-                    return DocumentType.Designer;
-                default:
-                    return DocumentType.CppSource;
+                return DocumentType.CppSource;
             }
+            else if (Path.GetExtension(filePath)?.ToLowerInvariant() == ".newui")
+            {
+                return DocumentType.Designer;
+            }
+
+            return DocumentType.UnrecognizedType;
         }
 
         int IVsWindowPane.CreatePaneWindow(IntPtr hwndParent, int x, int y, int cx, int cy, out IntPtr hwnd)

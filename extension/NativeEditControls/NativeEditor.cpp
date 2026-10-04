@@ -8,6 +8,7 @@
 
 #include "CppEditor.h"
 #include "DesignerEditor.h"
+#include "HostLocationOpener.h"
 #include "PropertyEditor.h"
 
 // Defined in the reflectgen-generated .cpp (compiled into the `newui`
@@ -119,9 +120,9 @@ namespace CodeToolsVsix
 
         NativeEditor* result = nullptr;
 
-        result = instance.runLoop()->postAndWait([&]() -> NativeEditor* {
+        result = runOnEditThread([&]() -> NativeEditor* {
 
-            logToDebugOut(L"runloop runAndWait");
+            logToDebugOut(L"edit thread: creating editor");
 
             std::unique_ptr<NativeEditor> editor;
             switch (documentType)
@@ -129,6 +130,12 @@ namespace CodeToolsVsix
             case DocumentType::Designer:
                 editor = std::make_unique<DesignerEditor>(hwndParent, x, y, width, height);
                 static_cast<DesignerEditor*>(editor.get())->installDialogPrompts();
+                // A problem in the controller's header opens it in the host's own editor, at the line
+                // (false when no host is connected: the Designer then reports the position instead).
+                static_cast<DesignerEditor*>(editor.get())->setOpenLocationHandler(
+                    [](const std::wstring& path, std::size_t line, std::size_t column) {
+                        return HostLocationOpener::instance().open(path, line, column);
+                    });
                 break;
             case DocumentType::CppSource:
             default:

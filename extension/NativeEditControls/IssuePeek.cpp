@@ -59,6 +59,27 @@ namespace CodeToolsVsix
         }
     }
 
+    std::size_t utf16Column(const std::string& headerText, std::size_t line, std::size_t byteColumn)
+    {
+        const std::vector<SourceLine> lines = splitLines(headerText);
+        if (line < 1 || line > lines.size() || byteColumn < 1) {
+            return byteColumn;
+        }
+        const std::string& text = lines[line - 1].text;
+        const std::size_t bytes = byteColumn - 1 < text.size() ? byteColumn - 1 : text.size();
+
+        // Each character starts at a lead byte (not a 10xxxxxx continuation); a 4-byte one is a
+        // surrogate pair in UTF-16.
+        std::size_t units = 0;
+        for (std::size_t i = 0; i < bytes; ++i) {
+            const unsigned char byte = static_cast<unsigned char>(text[i]);
+            if ((byte & 0xC0) != 0x80) {
+                units += byte >= 0xF0 ? 2 : 1;
+            }
+        }
+        return units + 1;
+    }
+
     std::vector<IssuePeek> buildIssuePeeks(const std::vector<cpptools::Diagnostic>& issues,
                                            const std::string& headerText)
     {

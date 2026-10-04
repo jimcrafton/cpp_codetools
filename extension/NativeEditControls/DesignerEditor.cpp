@@ -1937,7 +1937,9 @@ namespace CodeToolsVsix
         const cpptools::Diagnostic& issue = controllerIssues_[index];
         const std::filesystem::path headerPath =
             std::filesystem::path(utf8ToWide(document_->filePath())).parent_path() / std::filesystem::u8path(controllerRef_->header);
-        if (openLocationHandler_ && openLocationHandler_(headerPath.wstring(), issue.location.line, issue.location.column)) {
+        // The host counts UTF-16 columns; clang counted UTF-8 bytes.
+        const std::size_t column = utf16Column(controllerHeaderText_, issue.location.line, issue.location.column);
+        if (openLocationHandler_ && openLocationHandler_(headerPath.wstring(), issue.location.line, column)) {
             return;
         }
         // Nothing here can open a file at a line: say where it is.

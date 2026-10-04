@@ -36,8 +36,8 @@ namespace CodeToolsVsix
     // its own concern; this only owns the pieces that are genuinely about being a
     // newui::RootView-hosted control VS can create/destroy/ask about, not what's inside it.
     //
-    // Every public method here is only ever called from EditThreadHost::runAndWait() - see
-    // NativeEditControlApi.cpp's own wrappers for where that marshaling actually happens - so,
+    // Every public method here is only ever called through NativeEditManager::runOnEditThread() - see
+    // its wrappers below for where that marshaling actually happens - so,
     // like CppEditorControl, this has no thread-safety of its own; callers are responsible for
     // only ever reaching an instance from the edit thread.
     class NativeEditor
@@ -152,6 +152,24 @@ namespace CodeToolsVsix
 
         static newui::RunLoop* runLoop() { return instance().runLoop_; }
 
+        // Runs func on the edit thread and waits for its result (RunLoop::postAndWait). While it waits,
+        // the calling thread - VS's UI thread - wakes every 100 ms to pump its own messages
+        // (RunLoop::runTillNotified), so it is not hard-blocked but it is re-entrant. Afterwards, back on
+        // the calling thread, delivers the log lines the edit thread queued (Logging.h's log()): the
+        // managed log sink may only be called from a thread the CLR knows, and nothing else flushes them.
+        template <typename Func>
+        static auto runOnEditThread(Func&& func) {
+            using Result = decltype(func());
+            if constexpr (std::is_void_v<Result>) {
+                instance().runLoop()->postAndWait(std::forward<Func>(func));
+                flushQueuedLogs();
+            } else {
+                Result result = instance().runLoop()->postAndWait(std::forward<Func>(func));
+                flushQueuedLogs();
+                return result;
+            }
+        }
+
         static NativeEditor* createEditor(HWND hwndParent, int x, int y, int width, int height, DocumentType documentType);
 
         // contentHost: where the editor's own content children get added -
@@ -168,7 +186,7 @@ namespace CodeToolsVsix
 		static bool closeEditor(HWND hwnd) {
 			auto& instance = NativeEditManager::instance();
 
-            bool result = instance.runLoop()->postAndWait([&]() -> bool {
+            bool result = runOnEditThread([&]() -> bool {
                 auto it = instance.controlMap_.find(hwnd);
                 if (it != instance.controlMap_.end()) {
                     instance.controlMap_.erase(it);
@@ -186,7 +204,7 @@ namespace CodeToolsVsix
         static bool loadFileForEditor(HWND hwnd, const wchar_t* filePath, size_t filePathLength) {
             auto& instance = NativeEditManager::instance();
 
-            bool result = instance.runLoop()->postAndWait([&]() -> bool {
+            bool result = runOnEditThread([&]() -> bool {
                 auto it = instance.controlMap_.find(hwnd);
                 if (it != instance.controlMap_.end()) {
                     return it->second->load(filePath, filePathLength);
@@ -204,7 +222,7 @@ namespace CodeToolsVsix
         static bool saveFileForEditor(HWND hwnd, const wchar_t* filePath, size_t filePathLength) {
             auto& instance = NativeEditManager::instance();
 
-            bool result = instance.runLoop()->postAndWait([&]() -> bool {
+            bool result = runOnEditThread([&]() -> bool {
                 auto it = instance.controlMap_.find(hwnd);
                 if (it != instance.controlMap_.end()) {
                     return it->second->save(filePath, filePathLength);
@@ -222,7 +240,7 @@ namespace CodeToolsVsix
         static bool isEditorDirty(HWND hwnd) {
             auto& instance = NativeEditManager::instance();
 
-            bool result = instance.runLoop()->postAndWait([&]() -> bool {
+            bool result = runOnEditThread([&]() -> bool {
                 auto it = instance.controlMap_.find(hwnd);
                 if (it != instance.controlMap_.end()) {
                     return it->second->isDirty();
@@ -240,7 +258,7 @@ namespace CodeToolsVsix
         static bool execCmdForEditor(HWND hwnd, EditorCommand command, uint32_t flags, const EditorCommandArgs* args) {
             auto& instance = NativeEditManager::instance();
 
-            bool result = instance.runLoop()->postAndWait([&]() -> bool {
+            bool result = runOnEditThread([&]() -> bool {
                 auto it = instance.controlMap_.find(hwnd);
                 if (it != instance.controlMap_.end()) {
                     return it->second->execCommand(command, flags, args);

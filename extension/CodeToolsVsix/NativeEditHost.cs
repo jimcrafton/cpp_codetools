@@ -16,7 +16,7 @@ namespace CodeToolsVsix
     /// owns its own file I/O and, for C/C++ source, its own call into cpptools::Parser, entirely
     /// on the native side (see CppEditorControl.cpp). That's deliberate: it's what let the
     /// native document model become a real newui::RootView/TextControl (see
-    /// EditThreadHost.cpp/CppEditorControl.cpp) behind the same four calls, with this class - and
+    /// NativeEditor.cpp/CppEditor.cpp) behind the same four calls, with this class - and
     /// everything above it - never needing to represent that model in managed code.
     /// </summary>
     internal sealed class NativeEditHost : IDisposable
@@ -46,6 +46,7 @@ namespace CodeToolsVsix
 
             // Lets the Designer edit files open in VS's own text editor (once per process).
             HostDocumentEditor.EnsureRegistered();
+            HostDocumentOpener.EnsureRegistered();
 
             // >>> INTEGRATION POINT <<<
             // To host a different native control, replace this call (and NativeEditControls.dll
@@ -65,7 +66,7 @@ namespace CodeToolsVsix
             // Confirms codetools++ specifically is what handled this file (not a same-purposed,
             // unrelated extension registered for the same file types - confirmed live, 2026-08-29,
             // that this can happen silently otherwise). Logged from here (managed code, this
-            // call's own thread), not from native code on EditThreadHost's dedicated thread - see
+            // call's own thread), not from native code on the edit thread - see
             // OutputWindowLogger.Initialize()'s own comment on why that's the unsafe direction.
             //OutputWindowLogger.LogFromManaged($"codetools++ NativeEditControl_Create: hwnd=0x{_hwnd.ToInt64():X} size={width}x{height}");
 
