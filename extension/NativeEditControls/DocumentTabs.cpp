@@ -155,6 +155,7 @@ namespace CodeToolsVsix
             return nullptr;
         }
         refreshTitles();
+        notifyActiveSource();
         return raw;
     }
 
@@ -213,6 +214,7 @@ namespace CodeToolsVsix
             delete page;
         }
         syncWindows();
+        notifyActiveSource();
         return true;
     }
 
@@ -243,7 +245,15 @@ namespace CodeToolsVsix
     newui::SyncReturn DocumentTabs::handleTabChanged(newui::TabControl&, std::size_t)
     {
         syncWindows();
+        notifyActiveSource();
         return newui::SyncReturn::Handled;
+    }
+
+    void DocumentTabs::notifyActiveSource()
+    {
+        if (!activeSourceHandler_ || tabs_.empty()) return;
+        const std::optional<DocumentType> type = activeType();
+        if (type.has_value() && *type == DocumentType::CppSource) activeSourceHandler_(activePath());
     }
 
     void DocumentTabs::syncWindows()

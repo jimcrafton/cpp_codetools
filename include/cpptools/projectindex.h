@@ -109,6 +109,10 @@ public:
     bool hasFile(const std::string& path) const;
     std::vector<IndexedSymbol> symbolsIn(const std::string& path) const;
     std::vector<IncludeEdge> includesOf(const std::string& path) const;
+    // USR -> how often `path`'s own code refers to it (IndexedFile::references); empty for a file not indexed.
+    std::map<std::string, std::uint32_t> referencesOf(const std::string& path) const;
+    // USR -> the files that declare it, once each (normalized paths); the whole index in one pass.
+    std::map<std::string, std::vector<std::string>> declaringFiles() const;
 
     // How many errors and warnings the last parse of `path` reported in that file; zeros for a file not indexed.
     struct Problems {

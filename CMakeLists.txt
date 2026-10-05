@@ -231,8 +231,10 @@ add_library(cpptools STATIC
     src/log.cpp
     src/delegatebindings.cpp
     src/projectindex.cpp
+    src/includeanalysis.cpp
     include/cpptools/delegatebindings.h
     include/cpptools/projectindex.h
+    include/cpptools/includeanalysis.h
     include/cpptools/symbol.h
     include/cpptools/compileflags.h
     include/cpptools/diagnostic.h
@@ -280,6 +282,21 @@ target_include_directories(cpptools_codegen PUBLIC include)
 target_include_directories(cpptools_codegen PRIVATE ${LLVM_INCLUDE_DIRS})
 target_compile_definitions(cpptools_codegen PRIVATE ${LLVM_DEFINITIONS})
 target_link_libraries(cpptools_codegen PUBLIC clangTooling clangASTMatchers)
+
+# cpptools_analysis - preprocessor and template analysis for the explorer's Analysis view (macro
+# expansions, inactive #if regions, template instantiation lists), on Clang's own C++ libraries like
+# cpptools_codegen above and with the same plain-std-types public headers, so consumers need no Clang headers.
+add_library(cpptools_analysis STATIC
+    src/analysis/macroanalysis.cpp
+    src/analysis/templateanalysis.cpp
+    src/analysis/analysistool.h
+    include/cpptools_analysis/macroanalysis.h
+    include/cpptools_analysis/templateanalysis.h)
+
+target_include_directories(cpptools_analysis PUBLIC include)
+target_include_directories(cpptools_analysis PRIVATE ${LLVM_INCLUDE_DIRS})
+target_compile_definitions(cpptools_analysis PRIVATE ${LLVM_DEFINITIONS})
+target_link_libraries(cpptools_analysis PUBLIC clangTooling)
 
 # lex - lossless lexing/parsing, semantic diff and syntax highlighting (JSON5 and C++ lexing),
 # brought over from lexer-base. Standard library only, so the editors can highlight without
@@ -406,6 +423,7 @@ add_library(nativeeditcontrols_core OBJECT
     extension/NativeEditControls/Settings.cpp
     extension/NativeEditControls/ExplorerModel.cpp
     extension/NativeEditControls/ExplorerItem.cpp
+    extension/NativeEditControls/ExplorerAnalysis.cpp
     extension/NativeEditControls/WorkspaceInfo.cpp
     extension/NativeEditControls/NativeToolWindow.cpp
     extension/NativeEditControls/ProjectExplorer.cpp
@@ -420,7 +438,7 @@ target_compile_definitions(nativeeditcontrols_core PUBLIC
 
 set(VSEXT_INCLUDES "C:/Program Files/Microsoft Visual Studio/18/Community/VSSDK/VisualStudioIntegration/Common/Inc")
 target_include_directories(nativeeditcontrols_core PUBLIC include ${VSEXT_INCLUDES})
-target_link_libraries(nativeeditcontrols_core PUBLIC cpptools cpptools_codegen cmakemodel newui lex user32.lib gdi32.lib comdlg32.lib)
+target_link_libraries(nativeeditcontrols_core PUBLIC cpptools cpptools_codegen cpptools_analysis cmakemodel newui lex user32.lib gdi32.lib comdlg32.lib)
 add_dependencies(nativeeditcontrols_core cpptools_version)
 
 add_library(NativeEditControls SHARED

@@ -210,13 +210,169 @@ TEST_F(ProjectExplorerTest, AConfiguredButUndescribedBuildGetsAQueryAndAnExplana
         << "so its next configure writes the reply";
 }
 
-TEST_F(ProjectExplorerTest, AnalysisSaysItIsNotAvailableYet) {
+TEST_F(ProjectExplorerTest, AnalysisIncludesRanksHeadersByWhatTheyRebuildAndHintsAtUnneededIncludes) {
+    write("unused.h", "#pragma once\ninline int unusedFn() { return 0; }\n");
+    write("user.cpp", "#include \"a.h\"\n#include \"unused.h\"\nint main() { shapes::Circle c; (void)c; return 0; }\n");
+    explorer_->setBackground(false);
     explorer_->setRoot(dir_.generic_string());
+    explorer_->waitForIndexing();
     explorer_->setMode(ExplorerMode::Analysis);
 
-    const auto shown = rows();
-    ASSERT_EQ(shown.size(), 1u);
-    EXPECT_NE(shown[0].find("not available yet"), std::string::npos);
+    const auto groups = rows();
+    ASSERT_EQ(groups.size(), 2u);
+    EXPECT_TRUE(hasRow(groups, "Most expensive headers"));
+    EXPECT_TRUE(hasRow(groups, "Includes that may be unneeded"));
+    const auto headers = rows({ 0 });
+    ASSERT_GE(headers.size(), 2u);
+    EXPECT_TRUE(hasRow({ headers[0] }, "a.h")) << "included by b.cpp and user.cpp: first";
+    EXPECT_EQ(headers[0], "a.h   2") << "the translation units it reaches: b.cpp and user.cpp";
+    const auto includers = rows({ 0, 0 });
+    EXPECT_EQ(includers.size(), 2u);
+    const auto hints = rows({ 1 });
+    ASSERT_EQ(hints.size(), 1u);
+    EXPECT_NE(hints[0].find("user.cpp"), std::string::npos);
+    EXPECT_NE(hints[0].find("unused.h"), std::string::npos);
+}
+
+TEST_F(ProjectExplorerTest, AnalysisIncludesPerFileOpensOntoWhatAFileIncludes) {
+    explorer_->setBackground(false);
+    explorer_->setRoot(dir_.generic_string());
+    explorer_->waitForIndexing();
+    explorer_->setMode(ExplorerMode::Analysis);
+    explorer_->setIncludeView(IncludeView::PerFile);
+
+    const auto files = rows();
+    ASSERT_TRUE(hasRow(files, "b.cpp"));
+    std::size_t at = 0;
+    while (files[at].compare(0, 5, "b.cpp") != 0) ++at;
+    const auto includes = rows({ at });
+    ASSERT_EQ(includes.size(), 1u);
+    EXPECT_EQ(includes[0].compare(0, 3, "a.h"), 0) << includes[0];
+
+    explorer_->setFilter(L"a.h");
+    EXPECT_EQ(rows().size(), 1u) << "only the file whose path matches";
+}
+
+TEST_F(ProjectExplorerTest, AnalysisMacrosListsTheMacrosOfTheActiveFileFirst) {
+    write("macros.cpp",
+        "#define MIN(a, b) ((a) < (b) ? (a) : (b))\n"
+        "#define MAX(a, b) ((a) > (b) ? (a) : (b))\n"
+        "#define CLAMP(v, lo, hi) MAX((lo), MIN((v), (hi)))\n"
+        "#define FEATURE 0\n"
+        "int i = 0, j = 1;\n"
+        "int w = CLAMP(i, 0, 9);\n"
+        "int m = MAX(i++, j);\n"
+        "#if FEATURE\n"
+        "int off;\n"
+        "#endif\n");
+    explorer_->setBackground(false);
+    explorer_->setRoot(dir_.generic_string());
+    explorer_->waitForIndexing();
+    explorer_->setMode(ExplorerMode::Analysis);
+    explorer_->setAnalysisTab(AnalysisTab::Macros);
+    explorer_->setActiveFile((dir_ / "macros.cpp").generic_string());
+
+    const auto groups = rows();
+    ASSERT_EQ(groups.size(), 3u) << "the macros, the inactive regions, the arguments evaluated twice";
+    EXPECT_TRUE(hasRow(groups, "Macros used in macros.cpp"));
+    EXPECT_TRUE(hasRow(groups, "Inactive regions"));
+    EXPECT_TRUE(hasRow(groups, "Evaluated more than once"));
+
+    const auto macros = rows({ 0 });
+    ASSERT_GE(macros.size(), 4u);
+    EXPECT_NE(macros[0].find("CLAMP"), std::string::npos) << "first met: " << macros[0];
+    EXPECT_NE(macros[0].find("1 use · 3 levels"), std::string::npos) << macros[0];
+    EXPECT_NE(macros[1].find("MAX"), std::string::npos) << macros[1];
+    bool sawMin = false;
+    for (const std::string& row : macros) sawMin = sawMin || (row.compare(0, 3, "MIN") == 0 && row.find("via CLAMP") != std::string::npos);
+    EXPECT_TRUE(sawMin) << "MIN is only met inside CLAMP";
+    const auto uses = rows({ 0, 1 });
+    ASSERT_EQ(uses.size(), 1u);
+    EXPECT_NE(uses[0].find("MAX(i++, j)"), std::string::npos) << uses[0];
+
+    ExplorerTreeModel* model = explorer_->model();
+    EXPECT_EQ(model->nodeAt({ 0, 1, 0 })->line, 7u) << "a use opens its file at its line";
+    EXPECT_EQ(model->nodeAt({ 0, 1, 0 })->path, (dir_ / "macros.cpp").generic_string());
+    EXPECT_NE(rows({ 1 })[0].find("#if FEATURE"), std::string::npos);
+}
+
+TEST_F(ProjectExplorerTest, SelectingAUseShowsItsExpansionStepsInTheDetailPane) {
+    write("macros.cpp",
+        "#define MIN(a, b) ((a) < (b) ? (a) : (b))\n"
+        "#define MAX(a, b) ((a) > (b) ? (a) : (b))\n"
+        "#define CLAMP(v, lo, hi) MAX((lo), MIN((v), (hi)))\n"
+        "int w = CLAMP(width, 0, 9);\n");
+    explorer_->setBackground(false);
+    explorer_->setRoot(dir_.generic_string());
+    explorer_->waitForIndexing();
+    explorer_->setMode(ExplorerMode::Analysis);
+    explorer_->setAnalysisTab(AnalysisTab::Macros);
+    explorer_->setActiveFile((dir_ / "macros.cpp").generic_string());
+
+    EXPECT_FALSE(explorer_->cardHost()->isVisible()) << "nothing selected";
+    explorer_->treeView()->setSelectedPath(std::vector<std::size_t>{ 0, 0, 0 });   // the CLAMP use
+    EXPECT_TRUE(explorer_->cardHost()->isVisible());
+    ASSERT_EQ(explorer_->cardStepsControl()->selectedIndex(), 3u) << "Source, CLAMP, MAX, MIN: the last is selected";
+    EXPECT_NE(explorer_->cardText()->model().text().find(L"width"), std::wstring::npos);
+    EXPECT_EQ(explorer_->cardText()->model().text().find(L"MIN"), std::wstring::npos) << "fully expanded";
+
+    explorer_->cardStepsControl()->setSelectedIndex(0);
+    EXPECT_EQ(explorer_->cardText()->model().text(), L"CLAMP(width, 0, 9)");
+
+    explorer_->treeView()->clearSelection();
+    EXPECT_FALSE(explorer_->cardHost()->isVisible());
+}
+
+TEST_F(ProjectExplorerTest, AnalysisMacrosCanCoverTheWholeFolder) {
+    write("one.cpp", "#define ONE 1\nint a = ONE;\n");
+    write("two.cpp", "#define TWO 2\nint b = TWO; int c = TWO;\n");
+    write("docs/other.cpp", "#define ELSEWHERE 3\nint d = ELSEWHERE;\n");
+    explorer_->setBackground(false);
+    explorer_->setRoot(dir_.generic_string());
+    explorer_->waitForIndexing();
+    explorer_->setMode(ExplorerMode::Analysis);
+    explorer_->setAnalysisTab(AnalysisTab::Macros);
+    explorer_->setActiveFile((dir_ / "one.cpp").generic_string());
+    EXPECT_TRUE(hasRow(rows(), "Macros used in one.cpp"));
+
+    explorer_->setMacroScope(MacroScope::Folder);
+    const auto macros = rows({ 0 });
+    EXPECT_TRUE(hasRow(rows(), "Macros used in this folder"));
+    ASSERT_EQ(macros.size(), 2u) << "ONE and TWO; ELSEWHERE is in another folder";
+    EXPECT_EQ(macros[0].compare(0, 3, "TWO"), 0) << "two uses first";
+    EXPECT_NE(rows({ 0, 0 })[0].find("two.cpp:"), std::string::npos) << "uses name their file";
+}
+
+TEST_F(ProjectExplorerTest, AnalysisMacrosWithNoActiveFileAsksForOne) {
+    explorer_->setBackground(false);
+    explorer_->setRoot(dir_.generic_string());
+    explorer_->waitForIndexing();
+    explorer_->setMode(ExplorerMode::Analysis);
+    explorer_->setAnalysisTab(AnalysisTab::Macros);
+    ASSERT_EQ(rows().size(), 1u);
+    EXPECT_NE(rows()[0].find("Open a C++ file"), std::string::npos);
+
+    explorer_->setActiveFile((dir_ / "b.cpp").generic_string());
+    EXPECT_NE(rows({ 0 })[0].find("No macros"), std::string::npos);
+}
+
+TEST_F(ProjectExplorerTest, AnalysisTemplatesSaysWhatItNeeds) {
+    explorer_->setRoot(dir_.generic_string());
+    explorer_->setMode(ExplorerMode::Analysis);
+    explorer_->setAnalysisTab(AnalysisTab::Templates);
+    ASSERT_EQ(rows().size(), 1u);
+    EXPECT_NE(rows()[0].find("Clang AST library"), std::string::npos);
+}
+
+TEST_F(ProjectExplorerTest, TheAnalysisSubTabsShowOnlyWhileAnalysisIsTheMode) {
+    EXPECT_FALSE(explorer_->analysisControl()->parent()->isVisible());
+    explorer_->setMode(ExplorerMode::Analysis);
+    EXPECT_TRUE(explorer_->analysisControl()->parent()->isVisible());
+    EXPECT_TRUE(explorer_->includeViewControl()->parent()->isVisible()) << "Includes is the first sub-tab";
+    explorer_->setAnalysisTab(AnalysisTab::Macros);
+    EXPECT_FALSE(explorer_->includeViewControl()->parent()->isVisible());
+    explorer_->setMode(ExplorerMode::Symbols);
+    EXPECT_FALSE(explorer_->analysisControl()->parent()->isVisible());
 }
 
 TEST_F(ProjectExplorerTest, TheModeControlSwitchesTheView) {
@@ -419,6 +575,98 @@ TEST_F(ProjectExplorerTest, AHeaderNothingIncludesIsMarkedUnreferenced) {
     };
     EXPECT_EQ(badgeOf("orphan.h"), ExplorerNode::Badge::Unreferenced);
     EXPECT_EQ(badgeOf("used.h"), ExplorerNode::Badge::None);
+}
+
+namespace {
+
+// A CMake reply for a build under dir/build whose source dir is dir itself: core (b.cpp, in the root list) and
+// app (tools/main.cpp plus the extra source, in tools/CMakeLists.txt).
+void writeReplyFor(const fs::path& dir, const std::string& appExtraSource) {
+    const fs::path reply = dir / "build" / ".cmake" / "api" / "v1" / "reply";
+    fs::create_directories(reply);
+    const std::string root = dir.generic_string();
+    auto put = [&](const std::string& name, const std::string& text) { std::ofstream(reply / name, std::ios::binary) << text; };
+    put("index-2026-10-04T00-00-00-0000.json",
+        R"({"cmake":{"version":{"string":"4.3.1"},"generator":{"multiConfig":false,"name":"Ninja"}},)"
+        R"("objects":[{"kind":"codemodel","version":{"major":2,"minor":10},"jsonFile":"codemodel-v2-1.json"}],"reply":{}})");
+    put("codemodel-v2-1.json",
+        R"({"kind":"codemodel","version":{"major":2,"minor":10},"paths":{"source":")" + root + R"(","build":")" + root + R"(/build"},)"
+        R"("configurations":[{"name":"Debug","directories":[{"source":".","build":"."},{"source":"tools","build":"tools"}],)"
+        R"("projects":[{"name":"proj","directoryIndexes":[0,1]}],"targets":[)"
+        R"({"name":"app","id":"app::@1","directoryIndex":1,"projectIndex":0,"jsonFile":"target-app-Debug.json"},)"
+        R"({"name":"core","id":"core::@1","directoryIndex":0,"projectIndex":0,"jsonFile":"target-core-Debug.json"}]}]})");
+    put("target-app-Debug.json",
+        R"({"name":"app","id":"app::@1","type":"EXECUTABLE","nameOnDisk":"app.exe","artifacts":[{"path":"tools/app.exe"}],"backtrace":1,)"
+        R"("backtraceGraph":{"files":["tools/CMakeLists.txt"],"commands":["add_executable"],"nodes":[{"file":0},{"command":0,"file":0,"line":2,"parent":0}]},)"
+        R"("sources":[{"path":"tools/main.cpp","compileGroupIndex":0,"sourceGroupIndex":0,"backtrace":1},)"
+        R"({"path":"tools/)" + appExtraSource + R"(","compileGroupIndex":0,"sourceGroupIndex":0,"backtrace":1}],)"
+        R"("sourceGroups":[{"name":"Source Files","sourceIndexes":[0,1]}],)"
+        R"("compileGroups":[{"language":"CXX","sourceIndexes":[0,1]}]})");
+    put("target-core-Debug.json",
+        R"({"name":"core","id":"core::@1","type":"STATIC_LIBRARY","nameOnDisk":"core.lib","artifacts":[{"path":"core.lib"}],"backtrace":1,)"
+        R"("backtraceGraph":{"files":["CMakeLists.txt"],"commands":["add_library"],"nodes":[{"file":0},{"command":0,"file":0,"line":2,"parent":0}]},)"
+        R"("sources":[{"path":"b.cpp","compileGroupIndex":0,"sourceGroupIndex":0,"backtrace":1}],)"
+        R"("sourceGroups":[{"name":"Source Files","sourceIndexes":[0]}],)"
+        R"("compileGroups":[{"language":"CXX","sourceIndexes":[0]}]})");
+}
+
+}  // namespace
+
+TEST_F(ProjectExplorerTest, ACMakeListsWhoseTargetNamesAMissingSourceIsMarkedAndSoIsItsFolder) {
+    write("CMakeLists.txt", "add_library(core b.cpp)\nadd_subdirectory(tools)\n");
+    write("tools/CMakeLists.txt", "add_executable(app main.cpp ghost.cpp)\n");
+    write("tools/main.cpp", "int main() { return 0; }\n");   // ghost.cpp is never written
+    writeReplyFor(dir_, "ghost.cpp");
+    explorer_->setBackground(false);
+    explorer_->setRoot(dir_.generic_string());
+    explorer_->waitForIndexing();
+    explorer_->setMode(ExplorerMode::Files);
+
+    ExplorerTreeModel* model = explorer_->model();
+    auto badgeIn = [&](const std::vector<std::size_t>& parent, const std::string& prefix) {
+        for (std::size_t i = 0; i < model->childCount(parent); ++i) {
+            std::vector<std::size_t> path = parent;
+            path.push_back(i);
+            const ExplorerNode* node = model->nodeAt(path);
+            if (node != nullptr && node->text.compare(0, prefix.size(), prefix) == 0) return std::make_pair(true, node->badge);
+        }
+        return std::make_pair(false, ExplorerNode::Badge::None);
+    };
+    auto indexOf = [&](const std::string& prefix) -> std::size_t {
+        for (std::size_t i = 0; i < model->childCount({}); ++i) {
+            const ExplorerNode* node = model->nodeAt({ i });
+            if (node != nullptr && node->text.compare(0, prefix.size(), prefix) == 0) return i;
+        }
+        return std::size_t(-1);
+    };
+
+    const std::size_t tools = indexOf("tools");
+    ASSERT_NE(tools, std::size_t(-1));
+    EXPECT_EQ(model->nodeAt({ tools })->badge, ExplorerNode::Badge::Error) << "the folder holding the broken list";
+    const auto toolsList = badgeIn({ tools }, "CMakeLists.txt");
+    ASSERT_TRUE(toolsList.first);
+    EXPECT_EQ(toolsList.second, ExplorerNode::Badge::Error);
+    EXPECT_EQ(badgeIn({ tools }, "main.cpp").second, ExplorerNode::Badge::None) << "the source that exists is fine";
+    EXPECT_EQ(badgeIn({}, "CMakeLists.txt").second, ExplorerNode::Badge::None) << "core's sources are all there";
+}
+
+TEST_F(ProjectExplorerTest, ACMakeListsWhoseSourcesAllExistIsNotMarked) {
+    write("CMakeLists.txt", "add_library(core b.cpp)\nadd_subdirectory(tools)\n");
+    write("tools/CMakeLists.txt", "add_executable(app main.cpp extra.cpp)\n");
+    write("tools/main.cpp", "int main() { return 0; }\n");
+    write("tools/extra.cpp", "int extra() { return 0; }\n");
+    writeReplyFor(dir_, "extra.cpp");
+    explorer_->setBackground(false);
+    explorer_->setRoot(dir_.generic_string());
+    explorer_->waitForIndexing();
+    explorer_->setMode(ExplorerMode::Files);
+
+    ExplorerTreeModel* model = explorer_->model();
+    for (std::size_t i = 0; i < model->childCount({}); ++i) {
+        const ExplorerNode* node = model->nodeAt({ i });
+        ASSERT_NE(node, nullptr);
+        EXPECT_NE(node->badge, ExplorerNode::Badge::Error) << node->text;
+    }
 }
 
 // Run by name (--gtest_also_run_disabled_tests): this repo's own files that reported errors, indexed with the flags the

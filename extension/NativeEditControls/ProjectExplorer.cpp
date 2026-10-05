@@ -11,6 +11,7 @@
 #include <cmakemodel/fileapi.h>
 #include <cmakemodel/model.h>
 #include <cpptools/compileflags.h>
+#include <cpptools/includeanalysis.h>
 #include <cpptools/projectindex.h>
 
 #include <newui/bundle.h>
@@ -23,6 +24,8 @@
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <set>
 
 namespace fs = std::filesystem;
@@ -238,9 +241,13 @@ namespace CodeToolsVsix
         filter_ = dynamic_cast<newui::TextField*>(sub->findView("filterInput"));
         infoButton_ = dynamic_cast<newui::Button*>(sub->findView("infoButton"));
         auto* modeHost = dynamic_cast<newui::SubView*>(sub->findView("modeHost"));
+        auto* analysisHost = dynamic_cast<newui::SubView*>(sub->findView("analysisHost"));
+        auto* includeViewHost = dynamic_cast<newui::SubView*>(sub->findView("includeViewHost"));
+        auto* macroScopeHost = dynamic_cast<newui::SubView*>(sub->findView("macroScopeHost"));
+        auto* cardHost = dynamic_cast<newui::SubView*>(sub->findView("cardHost"));
         auto* treeHost = dynamic_cast<newui::SubView*>(sub->findView("treeHost"));
         if (rootName_ == nullptr || rootPath_ == nullptr || status_ == nullptr || filter_ == nullptr || infoButton_ == nullptr ||
-            modeHost == nullptr || treeHost == nullptr) {
+            modeHost == nullptr || analysisHost == nullptr || includeViewHost == nullptr || macroScopeHost == nullptr || cardHost == nullptr || treeHost == nullptr) {
             logToDebugOut(L"ProjectExplorer: explorer.newui is missing a named view");
             view_ = nullptr;
             return;
@@ -253,6 +260,55 @@ namespace CodeToolsVsix
         modeControl_->setSegments({ "Files", "Symbols", "Products", "Analysis" });
         modeControl_->setDesiredSize(modeControl_->naturalSize());   // it never sizes itself
         modeHost->addChild(modeControl_);
+
+        // Analysis's sub-tabs, and Includes' two views; each row shows only when it applies.
+        analysisControl_ = new newui::SegmentedControl();
+        analysisControl_->setName("analysisTabs");
+        analysisControl_->setVisible(true);
+        analysisControl_->setSegments({ "Includes", "Macros", "Templates" });
+        analysisControl_->setDesiredSize(analysisControl_->naturalSize());
+        analysisHost->addChild(analysisControl_);
+        includeViewControl_ = new newui::SegmentedControl();
+        includeViewControl_->setName("includeViews");
+        includeViewControl_->setVisible(true);
+        includeViewControl_->setSegments({ "Impact", "Per file" });
+        includeViewControl_->setDesiredSize(includeViewControl_->naturalSize());
+        includeViewHost->addChild(includeViewControl_);
+        macroScopeControl_ = new newui::SegmentedControl();
+        macroScopeControl_->setName("macroScope");
+        macroScopeControl_->setVisible(true);
+        macroScopeControl_->setSegments({ "This file", "Folder" });
+        macroScopeControl_->setDesiredSize(macroScopeControl_->naturalSize());
+        macroScopeHost->addChild(macroScopeControl_);
+        macroScopeHost_ = macroScopeHost;
+
+        // The detail pane under the tree: what the selected row has to say (an expansion's steps).
+        cardTitle_ = new newui::Label();
+        cardTitle_->setName("cardTitle");
+        cardTitle_->setVisible(true);
+        cardTitle_->setDesiredSize(newui::Size(1.0f, 20.0f));
+        cardHost->addChild(cardTitle_);
+        cardSteps_ = new newui::SegmentedControl();
+        cardSteps_->setName("cardSteps");
+        cardSteps_->setVisible(false);
+        cardSteps_->setSegments({ "0" });
+        cardSteps_->setDesiredSize(cardSteps_->naturalSize());
+        cardHost->addChild(cardSteps_);
+        cardText_ = new newui::TextControl();
+        cardText_->setName("cardText");
+        cardText_->setVisible(true);
+        cardText_->inputTraits().setReadOnly(true);
+        cardText_->setLayoutParams(std::make_unique<newui::FlexLayoutParams>(1.0f));
+        cardHost->addChild(cardText_);
+        cardWarning_ = new newui::Label();
+        cardWarning_->setName("cardWarning");
+        cardWarning_->setVisible(false);
+        cardWarning_->setDesiredSize(newui::Size(1.0f, 32.0f));
+        cardHost->addChild(cardWarning_);
+        cardHost_ = cardHost;
+
+        analysisHost_ = analysisHost;
+        includeViewHost_ = includeViewHost;
 
         // A thin progress bar above the tree: sweeps while CMake is read, fills while files are indexed.
         progress_ = new newui::Progress();
@@ -277,6 +333,11 @@ namespace CodeToolsVsix
         scroll->addChild(tree_);
 
         modeConnection_ = modeControl_->onSelectionChanged.add(this, &ProjectExplorer::handleModeChanged);
+        analysisConnection_ = analysisControl_->onSelectionChanged.add(this, &ProjectExplorer::handleAnalysisTabChanged);
+        includeViewConnection_ = includeViewControl_->onSelectionChanged.add(this, &ProjectExplorer::handleIncludeViewChanged);
+        macroScopeConnection_ = macroScopeControl_->onSelectionChanged.add(this, &ProjectExplorer::handleMacroScopeChanged);
+        cardStepConnection_ = cardSteps_->onSelectionChanged.add(this, &ProjectExplorer::handleCardStepChanged);
+        tree_->onSelectionChanged.add(this, &ProjectExplorer::handleSelectionChanged);
         tree_->onMouseDblClick.add(this, &ProjectExplorer::handleDoubleClick);
         infoButton_->onCheckedChanged.add(this, &ProjectExplorer::handleInfoToggled);
         filter_->model().onChanged.add([this, alive = alive_](newui::Model&) {
@@ -286,6 +347,7 @@ namespace CodeToolsVsix
 
         mode_ = modeFromName(Settings::instance().getString(Settings::kExplorerDefaultView));
         modeControl_->setSelectedIndex(static_cast<std::size_t>(mode_));
+        showAnalysisControls();
         setRoot(std::string());
     }
 
@@ -300,6 +362,11 @@ namespace CodeToolsVsix
         if (modeControl_ != nullptr) {
             modeControl_->onSelectionChanged.remove(modeConnection_);
         }
+        if (analysisControl_ != nullptr) analysisControl_->onSelectionChanged.remove(analysisConnection_);
+        if (includeViewControl_ != nullptr) includeViewControl_->onSelectionChanged.remove(includeViewConnection_);
+        if (macroScopeControl_ != nullptr) macroScopeControl_->onSelectionChanged.remove(macroScopeConnection_);
+        if (cardSteps_ != nullptr) cardSteps_->onSelectionChanged.remove(cardStepConnection_);
+        stopMacroWork();
     }
 
     std::wstring ProjectExplorer::filter() const
@@ -351,6 +418,7 @@ namespace CodeToolsVsix
         cmake_.reset();
         products_ = std::make_shared<FileProducts>();
         problems_.reset();
+        includeGraph_.reset();
         WorkspaceInfo::instance().setCompileSettings(nullptr);   // the last folder's targets say nothing about this one
         buildDir_.clear();
         note_.clear();
@@ -371,7 +439,46 @@ namespace CodeToolsVsix
     {
         mode_ = mode;
         if (modeControl_ != nullptr) modeControl_->setSelectedIndex(static_cast<std::size_t>(mode));
+        showAnalysisControls();
         rebuild();
+    }
+
+    void ProjectExplorer::setAnalysisTab(AnalysisTab tab)
+    {
+        analysisTab_ = tab;
+        if (analysisControl_ != nullptr) analysisControl_->setSelectedIndex(static_cast<std::size_t>(tab));
+        showAnalysisControls();
+        rebuild();
+    }
+
+    void ProjectExplorer::setIncludeView(IncludeView view)
+    {
+        includeView_ = view;
+        if (includeViewControl_ != nullptr) includeViewControl_->setSelectedIndex(static_cast<std::size_t>(view));
+        rebuild();
+    }
+
+    void ProjectExplorer::showAnalysisControls()
+    {
+        const bool analysis = mode_ == ExplorerMode::Analysis;
+        if (analysisHost_ != nullptr) analysisHost_->setVisible(analysis);
+        if (includeViewHost_ != nullptr) includeViewHost_->setVisible(analysis && analysisTab_ == AnalysisTab::Includes);
+        if (macroScopeHost_ != nullptr) macroScopeHost_->setVisible(analysis && analysisTab_ == AnalysisTab::Macros);
+    }
+
+    newui::SyncReturn ProjectExplorer::handleAnalysisTabChanged(newui::SegmentedControl& sender)
+    {
+        analysisTab_ = static_cast<AnalysisTab>(sender.selectedIndex());
+        showAnalysisControls();
+        if (!showInfo_) rebuild();
+        return newui::SyncReturn::Handled;
+    }
+
+    newui::SyncReturn ProjectExplorer::handleIncludeViewChanged(newui::SegmentedControl& sender)
+    {
+        includeView_ = static_cast<IncludeView>(sender.selectedIndex());
+        if (!showInfo_) rebuild();
+        return newui::SyncReturn::Handled;
     }
 
     void ProjectExplorer::setFilter(const std::wstring& text)
@@ -388,6 +495,7 @@ namespace CodeToolsVsix
     newui::SyncReturn ProjectExplorer::handleModeChanged(newui::SegmentedControl& sender)
     {
         mode_ = static_cast<ExplorerMode>(sender.selectedIndex());
+        showAnalysisControls();
         if (showInfo_) {
             setInfoShown(false);   // rebuilds
         } else {
@@ -431,6 +539,7 @@ namespace CodeToolsVsix
     void ProjectExplorer::rebuild()
     {
         if (model_ == nullptr) return;
+        showCard(nullptr);   // the rows it described are about to go
         if (showInfo_ && !root_.empty()) {
             model_->setRoot(buildStatsTree(stats_));
             for (std::size_t i = 0; i < 4; ++i) tree_->controller().setExpanded({ i }, true);   // its groups, open
@@ -472,10 +581,185 @@ namespace CodeToolsVsix
                 }
                 break;
             case ExplorerMode::Analysis:
-                top = buildMessageTree("Include, macro and template analysis are not available yet.");
+                top = buildAnalysisTree(text);
                 break;
         }
         model_->setRoot(std::move(top));
+    }
+
+    void ProjectExplorer::setActiveFile(const std::string& path)
+    {
+        const std::string normalized = path.empty() ? std::string() : cpptools::ProjectIndex::normalizePath(path);
+        if (normalized == activeFile_) return;
+        activeFile_ = normalized;
+        if (mode_ == ExplorerMode::Analysis && analysisTab_ == AnalysisTab::Macros && !showInfo_) rebuild();
+    }
+
+    void ProjectExplorer::setMacroScope(MacroScope scope)
+    {
+        macroScope_ = scope;
+        if (macroScopeControl_ != nullptr) macroScopeControl_->setSelectedIndex(static_cast<std::size_t>(scope));
+        if (mode_ == ExplorerMode::Analysis && analysisTab_ == AnalysisTab::Macros && !showInfo_) rebuild();
+    }
+
+    newui::SyncReturn ProjectExplorer::handleMacroScopeChanged(newui::SegmentedControl& sender)
+    {
+        macroScope_ = static_cast<MacroScope>(sender.selectedIndex());
+        if (!showInfo_) rebuild();
+        return newui::SyncReturn::Handled;
+    }
+
+    newui::SyncReturn ProjectExplorer::handleSelectionChanged(newui::TreeView&)
+    {
+        const std::optional<std::vector<std::size_t>> selected = tree_->selectedPath();
+        const ExplorerNode* node = selected.has_value() && model_ != nullptr ? model_->nodeAt(*selected) : nullptr;
+        showCard(node != nullptr ? node->card : nullptr);
+        return newui::SyncReturn::Handled;
+    }
+
+    newui::SyncReturn ProjectExplorer::handleCardStepChanged(newui::SegmentedControl& sender)
+    {
+        showCardStep(sender.selectedIndex());
+        return newui::SyncReturn::Handled;
+    }
+
+    void ProjectExplorer::showCard(const std::shared_ptr<const ExplorerCard>& card)
+    {
+        card_ = card;
+        if (cardHost_ == nullptr) return;
+        cardHost_->setVisible(card != nullptr);
+        if (card == nullptr) return;
+
+        cardTitle_->setText(card->title);
+        std::string warnings;
+        for (const std::string& warning : card->warnings) warnings += (warnings.empty() ? "" : "  ") + warning;
+        cardWarning_->setText(warnings);
+        cardWarning_->setVisible(!warnings.empty());
+
+        cardSteps_->setVisible(!card->steps.empty());
+        if (card->steps.empty()) {
+            showCardStep(0);
+            return;
+        }
+        std::vector<std::string> labels;
+        for (const auto& step : card->steps) labels.push_back(step.first);
+        cardSteps_->setSegments(labels);
+        cardSteps_->setDesiredSize(cardSteps_->naturalSize());
+        cardSteps_->setSelectedIndex(labels.size() - 1);   // what it became first
+        showCardStep(labels.size() - 1);
+    }
+
+    void ProjectExplorer::showCardStep(std::size_t index)
+    {
+        if (cardText_ == nullptr) return;
+        std::string text;
+        if (card_ != nullptr && index < card_->steps.size()) text = card_->steps[index].second;
+        cardText_->inputTraits().setReadOnly(false);   // read-only also stops this program from setting it
+        cardText_->setText(utf8ToWide(text));
+        cardText_->inputTraits().setReadOnly(true);
+    }
+
+    void ProjectExplorer::stopMacroWork()
+    {
+        if (macroCancel_ != nullptr) macroCancel_->store(true);
+        if (macroThread_.joinable()) macroThread_.join();
+        macroRunningKey_.clear();
+    }
+
+    bool ProjectExplorer::requestMacros(const std::string& key, const std::vector<std::string>& files)
+    {
+        if (macroRunningKey_ == key) return false;
+        stopMacroWork();
+
+        struct Job
+        {
+            std::string path;
+            std::vector<std::string> args;
+        };
+        std::vector<Job> jobs;
+        for (const std::string& file : files) jobs.push_back(Job{ file, WorkspaceInfo::instance().compileFlagsFor(file).args });
+        auto result = std::make_shared<std::vector<MacroFile>>();
+        auto cancel = std::make_shared<std::atomic<bool>>(false);
+        macroCancel_ = cancel;
+        auto run = [jobs, result, cancel]() {   // each file as the editor would parse it: its flags, its text on disk
+            for (const Job& job : jobs) {
+                if (cancel->load()) return;
+                std::ifstream in(job.path, std::ios::binary);
+                const std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+                MacroFile file;
+                file.path = job.path;
+                file.analysis = cpptools_analysis::analyzeMacros(content, job.path, job.args);
+                result->push_back(std::move(file));
+            }
+        };
+
+        newui::RunLoop& current = newui::RunLoop::current();
+        newui::RunLoop* loop = current ? &current : nullptr;
+        if (!background_ || loop == nullptr) {
+            run();
+            macroKey_ = key;
+            macroResult_ = result;
+            return true;
+        }
+        macroRunningKey_ = key;
+        macroThread_ = std::thread([this, run, loop, cancel, key, result, alive = alive_]() {
+            run();
+            if (cancel->load()) return;
+            loop->post([this, alive, key, result, cancel]() {
+                if (!alive->alive.load() || cancel->load()) return;
+                macroKey_ = key;
+                macroResult_ = result;
+                macroRunningKey_.clear();
+                rebuild();
+            });
+        });
+        return false;
+    }
+
+    ExplorerNode ProjectExplorer::buildMacroView(const std::string& filter)
+    {
+        if (!stats_.complete) return buildMessageTree("Reading the project; macros appear when indexing is done.");
+        const bool folder = macroScope_ == MacroScope::Folder;
+        std::string target = activeFile_;
+        if (folder) target = activeFile_.empty() ? cpptools::ProjectIndex::normalizePath(root_) : fs::path(activeFile_).parent_path().generic_string();
+        if (target.empty()) return buildMessageTree("Open a C++ file in the editor to see its macros.");
+
+        std::vector<std::string> files;
+        std::string key = std::string(folder ? "folder:" : "file:") + lowered(target) + "|" +
+                          std::to_string(WorkspaceInfo::instance().compileSettingsVersion());
+        if (folder) {
+            for (const std::string& file : index_->files()) {
+                if (lowered(fs::path(file).parent_path().generic_string()) == lowered(target)) files.push_back(file);
+            }
+        } else {
+            files.push_back(target);
+            std::error_code ec;
+            const auto stamp = fs::last_write_time(target, ec);
+            key += "|" + std::to_string(ec ? 0 : stamp.time_since_epoch().count());
+        }
+        if (files.empty()) return buildMessageTree("No C++ file is indexed in this folder.");
+
+        if ((macroKey_ != key || macroResult_ == nullptr) && !requestMacros(key, files)) {
+            return buildMessageTree("Analyzing " + fs::path(target).filename().string() + "...");
+        }
+        return buildMacroTree(*macroResult_, root_, folder, filter);
+    }
+
+    ExplorerNode ProjectExplorer::buildAnalysisTree(const std::string& filter)
+    {
+        if (root_.empty()) return buildMessageTree("Open a folder or solution.");
+        switch (analysisTab_) {
+            case AnalysisTab::Includes:
+                if (!stats_.complete) return buildMessageTree("Reading the project; includes appear when indexing is done.");
+                if (includeGraph_ == nullptr) includeGraph_ = std::make_shared<const cpptools::IncludeGraph>(*index_);
+                return includeView_ == IncludeView::Impact ? buildIncludeImpactTree(includeGraph_, root_, filter)
+                                                           : buildIncludeFileTree(includeGraph_, root_, filter);
+            case AnalysisTab::Macros:
+                return buildMacroView(filter);
+            case AnalysisTab::Templates:
+                return buildMessageTree("Template instantiation analysis needs the Clang AST library, which is not built yet.");
+        }
+        return ExplorerNode();
     }
 
     bool ProjectExplorer::activate(const std::vector<std::size_t>& path)
@@ -549,6 +833,7 @@ namespace CodeToolsVsix
             setStatus(text);
         }
         if (found->final) {
+            includeGraph_.reset();   // the index is complete: the next Analysis view reads it afresh
             collectProblems();
             rebuild();
         }

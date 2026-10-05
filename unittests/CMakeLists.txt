@@ -12,6 +12,7 @@ add_executable(cpptools_tests
     test_parser.cpp
     test_compileflags.cpp
     test_projectindex.cpp
+    test_includeanalysis.cpp
 )
 
 target_compile_definitions(cpptools_tests PRIVATE CPPTOOLS_TEST_REPO_ROOT="${CMAKE_SOURCE_DIR}")
@@ -50,6 +51,13 @@ target_link_libraries(cpptools_codegen_tests PRIVATE cpptools_codegen cpptools G
 target_compile_definitions(cpptools_codegen_tests PRIVATE
     CODEGEN_TEST_NEWUI_INCLUDES="${newui_SOURCE_DIR}/include|${newui_BINARY_DIR}/include|${newui_SOURCE_DIR}/3rdparty/json5/include|${newui_SOURCE_DIR}/3rdparty/blend2d")
 cpptools_copy_libclang_dll(cpptools_codegen_tests)
+
+# cpptools_analysis's tests: macros and templates, on in-memory files.
+add_executable(cpptools_analysis_tests
+    test_macroanalysis.cpp
+    test_templateanalysis.cpp
+)
+target_link_libraries(cpptools_analysis_tests PRIVATE cpptools_analysis GTest::gtest_main Threads::Threads)
 
 # The lex library's checks (from lexer-base) - their CHECK macro reports through GoogleTest, see
 # lex/test_util.h.

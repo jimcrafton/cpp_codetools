@@ -542,6 +542,24 @@ std::vector<IncludeEdge> ProjectIndex::includesOf(const std::string& path) const
     return it == impl_->files.end() ? std::vector<IncludeEdge>() : it->second.includes;
 }
 
+std::map<std::string, std::uint32_t> ProjectIndex::referencesOf(const std::string& path) const {
+    std::lock_guard<std::mutex> lock(impl_->mutex);
+    auto it = impl_->files.find(keyOf(normalizePath(path)));
+    return it == impl_->files.end() ? std::map<std::string, std::uint32_t>() : it->second.references;
+}
+
+std::map<std::string, std::vector<std::string>> ProjectIndex::declaringFiles() const {
+    std::map<std::string, std::vector<std::string>> found;
+    std::lock_guard<std::mutex> lock(impl_->mutex);
+    for (const auto& entry : impl_->files) {
+        for (const IndexedSymbol& symbol : entry.second.symbols) {
+            std::vector<std::string>& files = found[symbol.usr];
+            if (std::find(files.begin(), files.end(), entry.second.path) == files.end()) files.push_back(entry.second.path);
+        }
+    }
+    return found;
+}
+
 std::vector<IndexedSymbol> ProjectIndex::findClasses(const std::string& filter) const {
     const std::string needle = lowered(filter);
     std::map<std::string, IndexedSymbol> byUsr;

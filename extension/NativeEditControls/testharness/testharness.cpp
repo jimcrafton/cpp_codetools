@@ -27,6 +27,7 @@
 #include "../DocumentTabs.h"
 #include "../NativeEditor.h"
 #include "../ProjectExplorer.h"
+#include "../TextEncoding.h"
 
 #include <commdlg.h>
 #include <cstdio>
@@ -214,6 +215,11 @@ int main(int argc, char** argv)
         }
         tabs->refreshTitles();
     };
+
+    // The explorer's Macros view follows the C++ file in the selected tab.
+    tabs->setActiveSourceHandler([&explorer](const std::wstring& path) {
+        if (explorer) explorer->setActiveFile(wideToUtf8(path));
+    });
 
     // What a row of the explorer opens: a tab, at the line when the row names one. A .newui file is a design.
     explorer->setOpenHandler([&tabs](const std::string& path, std::size_t line) {

@@ -7,6 +7,7 @@
 #include <newui/segmentedcontrol.h>
 
 #include <atomic>
+#include <mutex>
 #include <cstddef>
 #include <functional>
 #include <map>
@@ -15,10 +16,11 @@
 #include <thread>
 #include <vector>
 
+#include "ExplorerAnalysis.h"
 #include "ExplorerModel.h"
 
 namespace cmakemodel { struct Model; }
-namespace cpptools { class ProjectIndex; }
+namespace cpptools { class ProjectIndex; class IncludeGraph; }
 
 namespace CodeToolsVsix
 {
@@ -61,6 +63,19 @@ namespace CodeToolsVsix
         void setMode(ExplorerMode mode);
         ExplorerMode mode() const { return mode_; }
 
+        // Analysis's sub-tab, and the Includes tab's two ways of looking: by cost, or file by file.
+        void setAnalysisTab(AnalysisTab tab);
+        AnalysisTab analysisTab() const { return analysisTab_; }
+        void setIncludeView(IncludeView view);
+        IncludeView includeView() const { return includeView_; }
+
+        // The file the user is working in; Macros shows its macros. "" - none open.
+        void setActiveFile(const std::string& path);
+        const std::string& activeFile() const { return activeFile_; }
+        // What Macros covers: the active file, or every file in its folder (the project folder with none open).
+        void setMacroScope(MacroScope scope);
+        MacroScope macroScope() const { return macroScope_; }
+
         void setFilter(const std::wstring& text);
         std::wstring filter() const;
 
@@ -86,6 +101,12 @@ namespace CodeToolsVsix
         ExplorerTreeModel* model() const { return model_; }
         newui::TreeView* treeView() const { return tree_; }
         newui::SegmentedControl* modeControl() const { return modeControl_; }
+        newui::SegmentedControl* analysisControl() const { return analysisControl_; }
+        newui::SegmentedControl* includeViewControl() const { return includeViewControl_; }
+        newui::SegmentedControl* macroScopeControl() const { return macroScopeControl_; }
+        newui::SegmentedControl* cardStepsControl() const { return cardSteps_; }
+        newui::View* cardHost() const { return cardHost_; }
+        newui::TextControl* cardText() const { return cardText_; }
         newui::TextField* filterField() const { return filter_; }
         const cpptools::ProjectIndex& index() const { return *index_; }
         const cmakemodel::Model* cmake() const { return cmake_.get(); }
@@ -97,9 +118,23 @@ namespace CodeToolsVsix
         struct FileProblems;
 
         newui::SyncReturn handleModeChanged(newui::SegmentedControl& sender);
+        newui::SyncReturn handleAnalysisTabChanged(newui::SegmentedControl& sender);
+        newui::SyncReturn handleIncludeViewChanged(newui::SegmentedControl& sender);
+        newui::SyncReturn handleMacroScopeChanged(newui::SegmentedControl& sender);
+        newui::SyncReturn handleSelectionChanged(newui::TreeView& sender);
+        newui::SyncReturn handleCardStepChanged(newui::SegmentedControl& sender);
+        void showCard(const std::shared_ptr<const ExplorerCard>& card);
+        void showCardStep(std::size_t index);
+        // Starts analyzing the files for `key` on a worker (or here, with no run loop); rebuild() runs when it is done.
+        // True when the result is already there (no worker: it ran here).
+        bool requestMacros(const std::string& key, const std::vector<std::string>& files);
+        ExplorerNode buildMacroView(const std::string& filter);
+        void stopMacroWork();
+        void showAnalysisControls();   // the sub-tab rows only while Analysis is the mode
         newui::SyncReturn handleInfoToggled(newui::Button& sender);
         newui::SyncReturn handleDoubleClick(newui::View& sender, const newui::Point& pt, std::uint32_t buttons, std::uint32_t keys);
 
+        ExplorerNode buildAnalysisTree(const std::string& filter);
         void rebuild();
         void scheduleRebuild();
         void setStatus(const std::string& text);
@@ -117,6 +152,18 @@ namespace CodeToolsVsix
         newui::Label* status_ = nullptr;
         newui::TextField* filter_ = nullptr;
         newui::SegmentedControl* modeControl_ = nullptr;
+        newui::SegmentedControl* analysisControl_ = nullptr;
+        newui::SegmentedControl* includeViewControl_ = nullptr;
+        newui::SegmentedControl* macroScopeControl_ = nullptr;
+        newui::View* macroScopeHost_ = nullptr;
+        newui::View* cardHost_ = nullptr;
+        newui::Label* cardTitle_ = nullptr;
+        newui::SegmentedControl* cardSteps_ = nullptr;
+        newui::TextControl* cardText_ = nullptr;
+        newui::Label* cardWarning_ = nullptr;
+        std::shared_ptr<const ExplorerCard> card_;
+        newui::View* analysisHost_ = nullptr;
+        newui::View* includeViewHost_ = nullptr;
         newui::TreeView* tree_ = nullptr;
         newui::Button* infoButton_ = nullptr;
         bool showInfo_ = false;
@@ -128,6 +175,16 @@ namespace CodeToolsVsix
 
         std::string root_;
         ExplorerMode mode_ = ExplorerMode::Symbols;
+        AnalysisTab analysisTab_ = AnalysisTab::Includes;
+        IncludeView includeView_ = IncludeView::Impact;
+        std::string activeFile_;
+        MacroScope macroScope_ = MacroScope::ActiveFile;
+        std::shared_ptr<std::vector<MacroFile>> macroResult_;   // the analysis of what macroKey_ names
+        std::string macroKey_;
+        std::string macroRunningKey_;
+        std::shared_ptr<std::atomic<bool>> macroCancel_;
+        std::thread macroThread_;
+        std::shared_ptr<const cpptools::IncludeGraph> includeGraph_;   // built when Analysis first needs it; dropped when the index changes
         OpenHandler open_;
 
         std::shared_ptr<cpptools::ProjectIndex> index_;
@@ -144,5 +201,9 @@ namespace CodeToolsVsix
         newui::RunLoop::TimerHandle filterTimer_ = newui::RunLoop::kInvalidTimerHandle;
         newui::RunLoop* loop_ = nullptr;
         newui::Connection modeConnection_;
+        newui::Connection analysisConnection_;
+        newui::Connection includeViewConnection_;
+        newui::Connection macroScopeConnection_;
+        newui::Connection cardStepConnection_;
     };
 }

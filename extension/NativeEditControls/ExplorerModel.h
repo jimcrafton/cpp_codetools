@@ -8,7 +8,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace cmakemodel { struct Model; }
@@ -16,6 +18,29 @@ namespace cpptools { class ProjectIndex; }
 
 namespace CodeToolsVsix
 {
+    // What the detail pane shows under the tree for the selected row: a title, a headline, the steps of an expansion
+    // (each a label and the text after that step), warnings, and sections of lines.
+    struct ExplorerCard
+    {
+        struct Line
+        {
+            std::string text;
+            std::string detail;
+        };
+        struct Section
+        {
+            std::string heading;
+            std::vector<Line> lines;
+        };
+
+        std::string title;
+        std::string headline;                // "87"
+        std::string headlineDetail;          // "of 412 translation units include this header"
+        std::vector<std::pair<std::string, std::string>> steps;   // label, text
+        std::vector<std::string> warnings;
+        std::vector<Section> sections;
+    };
+
     // What the project explorer's tree shows, for any of its views: a tree of rows, each with what a
     // double-click should open. Plain data, built by the functions below from the file system, the
     // project index or the CMake model - none of which this knows about.
@@ -50,6 +75,11 @@ namespace CodeToolsVsix
         // In a pane too narrow for every column the leftmost go first, unless this says the first ones matter most
         // (a folder's file count over its subfolder count): then the rightmost go first.
         bool dropRightFirst = false;
+        // A heat bar between the name and the cells (0..1), or negative for none. The name then takes a fixed
+        // column so the bars line up down the tree; barTone colors it (Accent low, Warn middle, Bad high).
+        float bar = -1.0f;
+        Tone barTone = Tone::Accent;
+        std::shared_ptr<const ExplorerCard> card;   // what the detail pane shows while this row is selected; null for none
         std::string path;        // what a double-click opens; empty for nothing
         std::size_t line = 0;    // 1-based; 0 = open the file without moving the caret
         std::string search;      // lower case text a filter is matched against (a qualified name, a path)
@@ -73,6 +103,10 @@ namespace CodeToolsVsix
         void setRoot(ExplorerNode root);
 
         std::size_t childCount(const std::vector<std::size_t>& path) const override;
+        // Whether a row shows an expand glyph. A row whose children are found when it is opened has them without
+        // anything being run, so painting a screenful of rows does not load every one. (Hides the base class's, which
+        // counts the children; callers holding an ExplorerTreeModel get this one.)
+        bool hasChildren(const std::vector<std::size_t>& path) const;
         std::any value(const std::any& key) override;
 
         // The node a tree path names, or null if it no longer exists. Loads a lazy folder on the way.

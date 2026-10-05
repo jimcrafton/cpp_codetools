@@ -359,6 +359,17 @@ namespace CodeToolsVsix
         return current;
     }
 
+    bool ExplorerTreeModel::hasChildren(const std::vector<std::size_t>& path) const
+    {
+        const ExplorerNode* current = &root_;
+        for (std::size_t index : path) {
+            ensureLoaded(*current);
+            if (index >= current->children.size()) return false;
+            current = &current->children[index];
+        }
+        return (!current->loaded && current->loader) || !current->children.empty();
+    }
+
     std::size_t ExplorerTreeModel::childCount(const std::vector<std::size_t>& path) const
     {
         const ExplorerNode* node = nodeAt(path);

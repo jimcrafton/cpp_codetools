@@ -60,6 +60,11 @@ namespace CodeToolsVsix
         // after anything that can change that (a save, an edit's dirty flag turning on).
         void refreshTitles();
 
+        // Called with the path of a C++ source whenever it becomes the selected tab (opened, switched to, or what is left
+        // after a close); a designer tab does not call it. What the explorer's Macros view follows.
+        using ActiveSourceHandler = std::function<void(const std::wstring& path)>;
+        void setActiveSourceHandler(ActiveSourceHandler handler) { activeSourceHandler_ = std::move(handler); }
+
         newui::TabControl* tabControl() const { return tabControl_; }
 
         // Where a tab's label and dirty marker come from - exposed for tests.
@@ -76,8 +81,10 @@ namespace CodeToolsVsix
 
         newui::SyncReturn handleTabChanged(newui::TabControl& sender, std::size_t index);
         void syncWindows();
+        void notifyActiveSource();
 
         EditorFactory factory_;
+        ActiveSourceHandler activeSourceHandler_;
         newui::TabControl* tabControl_ = nullptr;
         std::vector<Tab> tabs_;   // index-aligned with tabControl_'s tabs
     };

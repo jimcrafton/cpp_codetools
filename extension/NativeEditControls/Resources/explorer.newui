@@ -65,6 +65,60 @@
       desiredSizeOverride: true
     },
     {
+      type: "SubView",
+      visible: false,
+      name: "analysisHost",
+      layout: {
+        type: "FlexLayout",
+        orientation: "Vertical",
+        spacing: 0,
+        padding: 0,
+        crossAxisAlignment: "Stretch"
+      },
+      desiredSize: {
+        type: "Size",
+        width: 200,
+        height: 28
+      },
+      desiredSizeOverride: true
+    },
+    {
+      type: "SubView",
+      visible: false,
+      name: "includeViewHost",
+      layout: {
+        type: "FlexLayout",
+        orientation: "Vertical",
+        spacing: 0,
+        padding: 0,
+        crossAxisAlignment: "Stretch"
+      },
+      desiredSize: {
+        type: "Size",
+        width: 200,
+        height: 28
+      },
+      desiredSizeOverride: true
+    },
+    {
+      type: "SubView",
+      visible: false,
+      name: "macroScopeHost",
+      layout: {
+        type: "FlexLayout",
+        orientation: "Vertical",
+        spacing: 4,
+        padding: 0,
+        crossAxisAlignment: "Stretch"
+      },
+      desiredSize: {
+        type: "Size",
+        width: 200,
+        height: 28
+      },
+      desiredSizeOverride: true
+    },
+    {
       type: "TextField",
       name: "filterInput",
       placeholder: "Filter...",
@@ -186,6 +240,24 @@
         type: "FlexLayoutParams",
         weight: 1.0
       }
+    },
+    {
+      type: "SubView",
+      visible: false,
+      name: "cardHost",
+      layout: {
+        type: "FlexLayout",
+        orientation: "Vertical",
+        spacing: 4,
+        padding: 0,
+        crossAxisAlignment: "Stretch"
+      },
+      desiredSize: {
+        type: "Size",
+        width: 200,
+        height: 190
+      },
+      desiredSizeOverride: true
     },
     {
       type: "Label",

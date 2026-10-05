@@ -130,7 +130,7 @@ namespace CodeToolsVsix
         const bool selected = isSelected();
         const double centerY = row.top() + row.size().height * 0.5;
         const double right = row.left() + row.size().width;
-        const BLRgba32 nameColor = toneColor(Tone::Normal, selected);
+        const BLRgba32 nameColor = toneColor(node->badge == ExplorerNode::Badge::Unreferenced ? Tone::Muted : Tone::Normal, selected);
 
         ctx.save();
         const double indent = double(newui::treeDepthOf(path)) * newui::kTreeIndentWidth;
@@ -176,13 +176,33 @@ namespace CodeToolsVsix
         const double limit = shownCells == 0 ? right : cellsLeft - kNameGap;
         ctx.clip_to_rect(BLRect(x, row.top(), std::max(0.0, limit - x), row.size().height));
 
-        const std::string name = fitText(*font, node->text, limit - x);
-        drawText(ctx, *font, x, row, name, nameColor);
-        if (!node->detail.empty() && name == node->text) {   // a shortened name leaves no room for its detail
-            const double detailX = x + textWidth(*font, name) + kNameGap;
-            const double room = limit - detailX;
-            if (room >= kMinDetailWidth) {   // what does not fit ends in an ellipsis, like the name
-                drawText(ctx, *font, detailX, row, fitText(*font, node->detail, room), toneColor(node->detailTone, selected));
+        if (node->bar >= 0.0f) {
+            // a heat bar row: the name in its own column, then the bar out to the cells
+            const double nameLimit = std::min(limit, x + double(kBarNameWidth));
+            drawText(ctx, *font, x, row, fitText(*font, node->text, nameLimit - x), nameColor);
+            const double barLeft = x + double(kBarNameWidth) + 8.0;
+            const double barRight = limit - 4.0;
+            if (barRight - barLeft >= double(kMinBarWidth)) {
+                const double top = centerY - double(kBarHeight) * 0.5;
+                BLRgba32 track = toneColor(Tone::Muted, false);
+                track.value = (track.value & 0x00FFFFFFu) | 0x40000000u;
+                ctx.set_fill_style(track);
+                ctx.fill_round_rect(BLRoundRect(barLeft, top, barRight - barLeft, double(kBarHeight), 4.0, 4.0));
+                const double filled = (barRight - barLeft) * double(std::min(node->bar, 1.0f));
+                if (filled > 0.0) {
+                    ctx.set_fill_style(toneColor(node->barTone, false));
+                    ctx.fill_round_rect(BLRoundRect(barLeft, top, std::max(filled, double(kBarHeight)), double(kBarHeight), 4.0, 4.0));
+                }
+            }
+        } else {
+            const std::string name = fitText(*font, node->text, limit - x);
+            drawText(ctx, *font, x, row, name, nameColor);
+            if (!node->detail.empty() && name == node->text) {   // a shortened name leaves no room for its detail
+                const double detailX = x + textWidth(*font, name) + kNameGap;
+                const double room = limit - detailX;
+                if (room >= kMinDetailWidth) {   // what does not fit ends in an ellipsis, like the name
+                    drawText(ctx, *font, detailX, row, fitText(*font, node->detail, room), toneColor(node->detailTone, selected));
+                }
             }
         }
         ctx.restore_clipping();
