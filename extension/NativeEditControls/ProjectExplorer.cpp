@@ -10,6 +10,7 @@
 
 #include <cmakemodel/fileapi.h>
 #include <cmakemodel/model.h>
+#include <cpptools/compileflags.h>
 #include <cpptools/projectindex.h>
 
 #include <newui/bundle.h>
@@ -57,6 +58,7 @@ namespace CodeToolsVsix
         bool final = false;
         // The progress bar: kKeep leaves it, kBusy sweeps (no known end), 0..1 is a fraction.
         std::shared_ptr<ProjectStats> stats;   // a snapshot, when this carries new numbers
+        std::shared_ptr<const cmakemodel::CompileSettingsIndex> settings;   // how each file is compiled, once known
         static constexpr float kKeep = -3.0f;
         static constexpr float kBusy = -2.0f;
         float progress = kKeep;
@@ -349,6 +351,7 @@ namespace CodeToolsVsix
         cmake_.reset();
         products_ = std::make_shared<FileProducts>();
         problems_.reset();
+        WorkspaceInfo::instance().setCompileSettings(nullptr);   // the last folder's targets say nothing about this one
         buildDir_.clear();
         note_.clear();
         stats_ = ProjectStats();
@@ -525,6 +528,9 @@ namespace CodeToolsVsix
             rebuild();
         }
 
+        if (found->settings != nullptr) {
+            WorkspaceInfo::instance().setCompileSettings(found->settings);   // the open editors take their flags from it too
+        }
         if (found->stats != nullptr) {
             stats_ = *found->stats;
             if (showInfo_) rebuild();
@@ -553,19 +559,53 @@ namespace CodeToolsVsix
         using Badge = ExplorerNode::Badge;
         auto problems = std::make_shared<FileProblems>();
         const std::string rootKey = lowered(cpptools::ProjectIndex::normalizePath(root_));
-        for (const std::string& file : index_->files()) {
-            const cpptools::ProjectIndex::Problems found = index_->problemsIn(file);
-            if (found.errors == 0 && found.warnings == 0 && found.unresolvedIncludes == 0) continue;
-            // A header libclang cannot find leaves its names undeclared, and every use of one is another error, so
-            // a file with an unresolved include is only a warning: the cause is the flags, not the code.
-            const Badge badge = found.errors > 0 && found.unresolvedIncludes == 0 ? Badge::Error : Badge::Warning;
-            std::string key = lowered(cpptools::ProjectIndex::normalizePath(file));
-            while (key.size() >= rootKey.size()) {   // the file, then each folder up to the root
+        // Marks a file and each folder above it up to the root with the worst badge seen.
+        auto mark = [&](std::string key, Badge badge) {
+            while (key.size() >= rootKey.size()) {
                 Badge& slot = problems->worst[key];
                 if (badge == Badge::Error || slot == Badge::None) slot = badge;
                 const std::size_t slash = key.find_last_of('/');
                 if (slash == std::string::npos) break;
                 key.resize(slash);
+            }
+        };
+        const std::vector<std::string> files = index_->files();
+        std::set<std::string> included;   // every file some indexed file includes
+        for (const std::string& file : files) {
+            for (const cpptools::IncludeEdge& edge : index_->includesOf(file)) {
+                included.insert(lowered(cpptools::ProjectIndex::normalizePath(edge.included)));
+            }
+        }
+        for (const std::string& file : files) {
+            const cpptools::ProjectIndex::Problems found = index_->problemsIn(file);
+            const std::string key = lowered(cpptools::ProjectIndex::normalizePath(file));
+            if (found.errors == 0 && found.warnings == 0 && found.unresolvedIncludes == 0) {
+                // a header nothing includes; only the file is marked, a folder of them is not a problem
+                const std::string ext = extensionOf(file);
+                if ((ext == ".h" || ext == ".hpp" || ext == ".hxx") && included.count(key) == 0) {
+                    problems->worst[key] = Badge::Unreferenced;
+                }
+                continue;
+            }
+            // A header libclang cannot find leaves its names undeclared, and every use of one is another error, so
+            // a file with an unresolved include is only a warning: the cause is the flags, not the code.
+            mark(key, found.errors > 0 && found.unresolvedIncludes == 0 ? Badge::Error : Badge::Warning);
+        }
+
+        // CMake's side: a CMakeLists.txt whose target names a source that is not on disk.
+        if (cmake_ != nullptr) {
+            std::error_code ec;
+            for (const cmakemodel::Target& target : cmake_->targets) {
+                if (target.kind == cmakemodel::ProductKind::Generated || target.kind == cmakemodel::ProductKind::Input) continue;
+                if (isExternalTarget(target, *cmake_)) continue;
+                for (const cmakemodel::SourceFile& source : target.sources) {
+                    if (source.generated) continue;
+                    const std::string path = isAbsolute(source.path) ? source.path : cmake_->sourceDir + "/" + source.path;
+                    if (fs::exists(path, ec)) continue;
+                    const std::string list = cmake_->sourceDir + (target.directory.empty() || target.directory == "." ? "" : "/" + target.directory) + "/CMakeLists.txt";
+                    mark(lowered(cpptools::ProjectIndex::normalizePath(list)), Badge::Error);
+                    break;
+                }
             }
         }
         problems_ = std::move(problems);
@@ -679,6 +719,18 @@ namespace CodeToolsVsix
             const std::vector<std::string> files = filesToIndex(root, first->model.get());
             stats.filesToIndex = files.size();
             index->setRoots({ root });
+            if (first->model != nullptr) {
+                // What the build really compiles a file with: its target's include folders and definitions, added to the
+                // flags found the usual way (compile_commands.json), which may not cover a target (it did not cover
+                // the tests, the codegen library, or the generated headers) and so miss a -D or a -I.
+                auto settings = std::make_shared<const cmakemodel::CompileSettingsIndex>(*first->model);
+                index->setFlagsProvider([settings](const std::string& file) { return compileFlagsWithBuild(file, settings.get()).args; });
+                // Also handed to the editors, so their squiggles agree with this index. A delivery of its own: `first`
+                // went to the UI thread already, and is not to be written to from here.
+                auto flagsSource = std::make_shared<Found>();
+                flagsSource->settings = settings;
+                deliver(flagsSource);
+            }
             const std::string cache = cachePathFor(root);
             {
                 const Clock::time_point start = Clock::now();
@@ -712,6 +764,13 @@ namespace CodeToolsVsix
             stats.symbols = symbols;
             for (const std::string& file : index->files()) {
                 const cpptools::ProjectIndex::Problems found = index->problemsIn(file);
+                if (found.errors > 0 || found.warnings > 0 || found.unresolvedIncludes > 0) {
+                    ProblemFile problem{ file, found.errors, found.warnings, found.unresolvedIncludes, {} };
+                    for (const cpptools::IndexedDiagnostic& sample : found.samples) {
+                        problem.samples.push_back({ sample.file, sample.line, sample.message });
+                    }
+                    stats.problemFiles.push_back(std::move(problem));
+                }
                 if (found.unresolvedIncludes > 0) {   // its other errors are most likely knock-on, so they count here
                     ++stats.filesWithUnresolvedIncludes;
                     stats.unresolvedIncludes += found.unresolvedIncludes;

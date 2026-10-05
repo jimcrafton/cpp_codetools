@@ -138,6 +138,7 @@ namespace CodeToolsVsix
                         child.cells = { lines > 0 ? countText(lines) + (lines == 1 ? " line" : " lines") : std::string(), sizeText(bytes) };
                         child.cellTones = { lines >= 2000 ? ExplorerNode::Tone::Warn : ExplorerNode::Tone::Muted,
                                             bytes >= 1024 * 1024 ? ExplorerNode::Tone::Warn : ExplorerNode::Tone::Muted };
+                        child.cellWidth = 68.0f;   // "1,268 lines" and "47.8 KB" with room to spare: names matter more
                     }
                     child.badge = badge ? badge(full, false) : ExplorerNode::Badge::None;
                     if (child.badge == ExplorerNode::Badge::None && extra == "not built") child.badge = ExplorerNode::Badge::NotBuilt;
@@ -664,6 +665,19 @@ namespace CodeToolsVsix
             }
         }
 
+        // `path` below `root` (either slash, any case), or `path` unchanged when it is elsewhere.
+        std::string relativeTo(std::string root, std::string path)
+        {
+            std::replace(root.begin(), root.end(), '\\', '/');
+            std::replace(path.begin(), path.end(), '\\', '/');
+            while (!root.empty() && root.back() == '/') root.pop_back();
+            if (!root.empty() && path.size() > root.size() + 1 && path[root.size()] == '/' &&
+                lowered(path.substr(0, root.size())) == lowered(root)) {
+                return path.substr(root.size() + 1);
+            }
+            return path;
+        }
+
         void addNote(ExplorerNode& parent, const std::string& text, const std::string& detail = std::string())
         {
             ExplorerNode note;
@@ -806,6 +820,7 @@ namespace CodeToolsVsix
             addCells(folders, folder->name,
                 { countText(folder->files) + " files", sizeText(folder->bytes), countText(folder->folders) + " folders" },
                 { Tone::Normal, shareTone(folder->bytes, totalBytes), Tone::Muted }, ExplorerNode::Kind::Folder);
+            folders.children.back().dropRightFirst = true;   // files and size matter more than the subfolder count
         }
         if (stats.scan.rootFiles > 0) {
             addCells(folders, "(files in the root)", { countText(stats.scan.rootFiles) + " files", sizeText(stats.scan.rootBytes), "" },
@@ -819,10 +834,60 @@ namespace CodeToolsVsix
         addCells(index, "Read this time", { countText(stats.parsed) }, { stats.parsed > 0 ? Tone::Accent : Tone::Muted });
         addCells(index, "Up to date in the cache", { countText(stats.upToDate) }, { Tone::Good });
         if (stats.failed > 0) addCells(index, "Could not be read", { countText(stats.failed) }, { Tone::Bad });
+        // The files behind a count, most problems first, each a row that opens the file.
+        auto addFiles = [&](ExplorerNode& row, ExplorerNode::Badge badge, Tone tone, const std::string& noun,
+                            const std::function<bool(const ProblemFile&)>& wanted,
+                            const std::function<std::uint32_t(const ProblemFile&)>& count) {
+            std::vector<const ProblemFile*> matching;
+            for (const ProblemFile& file : stats.problemFiles) {
+                if (wanted(file)) matching.push_back(&file);
+            }
+            std::stable_sort(matching.begin(), matching.end(), [&](const ProblemFile* a, const ProblemFile* b) {
+                return count(*a) != count(*b) ? count(*a) > count(*b) : lowered(a->path) < lowered(b->path);
+            });
+            const std::size_t kMostShown = 300;   // a whole project of failures is a flags problem, not a list to read
+            for (std::size_t i = 0; i < matching.size() && i < kMostShown; ++i) {
+                ExplorerNode file;
+                file.kind = ExplorerNode::Kind::File;
+                file.text = relativeTo(stats.root, matching[i]->path);
+                file.path = matching[i]->path;
+                file.search = lowered(file.text);
+                file.badge = badge;
+                const std::uint32_t n = count(*matching[i]);
+                file.detail = std::to_string(n) + " " + noun + (n == 1 ? "" : "s");
+                file.detailTone = tone;
+                // what the compiler actually said: each message opens its file at the line
+                for (const ProblemSample& sample : matching[i]->samples) {
+                    ExplorerNode said;
+                    said.kind = ExplorerNode::Kind::Note;
+                    said.text = sample.message;
+                    said.detail = (sample.file.empty() || sample.file == matching[i]->path ? std::string() : relativeTo(stats.root, sample.file) + " ") +
+                                  "line " + std::to_string(sample.line);
+                    said.path = sample.file.empty() ? matching[i]->path : sample.file;
+                    said.line = sample.line;
+                    said.search = lowered(said.text);
+                    file.children.push_back(std::move(said));
+                }
+                row.children.push_back(std::move(file));
+            }
+            if (matching.size() > kMostShown) {
+                addNote(row, "and " + countText(matching.size() - kMostShown) + " more");
+            }
+        };
+
         addCells(index, "Files with errors", { countText(stats.filesWithErrors) }, { stats.filesWithErrors > 0 ? Tone::Bad : Tone::Muted });
+        addFiles(index.children.back(), ExplorerNode::Badge::Error, Tone::Bad, "error",
+                 [](const ProblemFile& f) { return f.unresolvedIncludes == 0 && f.errors > 0; },
+                 [](const ProblemFile& f) { return f.errors; });
         addCells(index, "Files with warnings", { countText(stats.filesWithWarnings) }, { stats.filesWithWarnings > 0 ? Tone::Warn : Tone::Muted });
+        addFiles(index.children.back(), ExplorerNode::Badge::Warning, Tone::Warn, "warning",
+                 [](const ProblemFile& f) { return f.unresolvedIncludes == 0 && f.errors == 0 && f.warnings > 0; },
+                 [](const ProblemFile& f) { return f.warnings; });
         addCells(index, "Files with unresolved includes", { countText(stats.filesWithUnresolvedIncludes) },
                  { stats.filesWithUnresolvedIncludes > 0 ? Tone::Warn : Tone::Muted });
+        addFiles(index.children.back(), ExplorerNode::Badge::Warning, Tone::Warn, "unresolved include",
+                 [](const ProblemFile& f) { return f.unresolvedIncludes > 0; },
+                 [](const ProblemFile& f) { return f.unresolvedIncludes; });
         if (stats.filesWithUnresolvedIncludes > 0) {
             index.children.back().detail = countText(stats.unresolvedIncludes) + " includes";
             // a lot of these means the compile flags are missing, not that the code is wrong

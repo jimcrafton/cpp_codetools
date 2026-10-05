@@ -4,7 +4,10 @@
 // CMakeLists line that created each. Read from the CMake File API (fileapi.h); no CMake is run here.
 // Std library only (plus lex's JSON parser in the reader).
 
+#include <cstddef>
+#include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace cmakemodel
@@ -104,6 +107,34 @@ namespace cmakemodel
         // The target's own sources plus those of the OBJECT libraries it links (SourceFile::via names
         // the library), headers included, in the order CMake lists them.
         std::vector<SourceFile> allSources(const Target& target) const;
+    };
+
+    // The preprocessor settings a source is compiled with: those of the target that owns it.
+    struct CompileSettings
+    {
+        std::string target;
+        std::vector<std::string> includeDirs;
+        std::vector<std::string> definitions;
+
+        // "-I<dir>" and "-D<definition>" for each, ready to add to a parse command line.
+        std::vector<std::string> toArgs() const;
+    };
+
+    // Finds the CompileSettings of a file. A source is found by the target that lists it. A header no target lists
+    // (most are not) falls back to the target with one of its parent folders on its include path, the most specific
+    // folder winning: that is how the header is meant to be reached. Keeps no reference to the model.
+    class CompileSettingsIndex
+    {
+    public:
+        explicit CompileSettingsIndex(const Model& model);
+
+        // Null when no target claims the file.
+        const CompileSettings* find(const std::string& path) const;
+
+    private:
+        std::vector<CompileSettings> settings_;
+        std::map<std::string, std::size_t> bySource_;                        // canonical path -> settings_ index
+        std::vector<std::pair<std::string, std::size_t>> includeRoots_;      // canonical include folder -> settings_ index
     };
 
     const char* toString(TargetType type);

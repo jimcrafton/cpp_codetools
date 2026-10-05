@@ -403,6 +403,58 @@ TEST(SessionOccurrencesTest, DoesNotMatchAnUnrelatedIdentifierWithTheSameSpellin
     EXPECT_EQ(occurrences.size(), 2u);   // the declaration and the read in "= count", not "recount"
 }
 
+// ---- Session::renameConflict: a rename onto a name already taken -------------------------------
+
+TEST(SessionRenameConflictTest, RenamingAMethodOntoAnotherMembersNameIsAClash) {
+    cpptools::Session session;
+    const std::string code = "struct C { int onA() { return 0; } int onB() { return 1; } int f; };\n";
+    session.update("rc.cpp", code);
+    const std::size_t onB = code.find("onB");
+    EXPECT_NE(session.renameConflict(onB, "f").find("already exists"), std::string::npos) << "a field with that name";
+    EXPECT_EQ(session.renameConflict(onB, "onC"), "");
+    EXPECT_EQ(session.renameConflict(onB, "onB"), "") << "renaming to its own name is no clash";
+}
+
+TEST(SessionRenameConflictTest, MethodsMayShareANameAsOverloads) {
+    cpptools::Session session;
+    const std::string code = "struct C { int a(int); int b(); };\n";
+    session.update("rc.cpp", code);
+    EXPECT_EQ(session.renameConflict(code.find("b()"), "a"), "");
+}
+
+TEST(SessionRenameConflictTest, AFunctionTakingAFieldsNameIsAClashAndTheMessageNamesTheClass) {
+    cpptools::Session session;
+    const std::string code = "struct Widget { int width; int g(); };\n";
+    session.update("rc.cpp", code);
+    const std::string message = session.renameConflict(code.find("g()"), "width");
+    EXPECT_NE(message.find("Widget"), std::string::npos) << message;
+}
+
+TEST(SessionRenameConflictTest, GlobalsClashWithOtherGlobals) {
+    cpptools::Session session;
+    const std::string code = "int count = 0;\nint total = 0;\n";
+    session.update("rc.cpp", code);
+    EXPECT_NE(session.renameConflict(code.find("total"), "count"), "");
+    EXPECT_EQ(session.renameConflict(code.find("total"), "sum"), "");
+}
+
+TEST(SessionRenameConflictTest, ANameThatIsNotAnIdentifierIsRefused) {
+    cpptools::Session session;
+    const std::string code = "int count = 0;\n";
+    session.update("rc.cpp", code);
+    EXPECT_NE(session.renameConflict(code.find("count"), ""), "");
+    EXPECT_NE(session.renameConflict(code.find("count"), "a b"), "");
+    EXPECT_NE(session.renameConflict(code.find("count"), "9lives"), "");
+    EXPECT_EQ(session.renameConflict(code.find("count"), "_ok9"), "");
+}
+
+TEST(SessionRenameConflictTest, NothingToSayWhenTheOffsetIsNotOnASymbol) {
+    cpptools::Session session;
+    const std::string code = "int count = 0;\n";
+    session.update("rc.cpp", code);
+    EXPECT_EQ(session.renameConflict(code.find('='), "count2"), "");
+}
+
 TEST(SessionOccurrencesTest, EmptyBeforeAnyUpdate) {
     cpptools::Session session;
     EXPECT_TRUE(session.findOccurrences(0).empty());

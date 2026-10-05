@@ -50,6 +50,9 @@ namespace CodeToolsVsix
     // Empty when offset isn't on a renamable symbol. May reparse (block) - called only from the
     // Rename button, never on every keystroke like the highlight passes are.
     using RenameProvider = std::function<std::vector<RenameRange>(const std::wstring& text, std::size_t offset)>;
+    // Asked just before a rename replaces anything, with the new name: a message (shown in the bar, and nothing is
+    // renamed) when it would clash or isn't a name; empty when fine. Runs right after the provider, on the same text.
+    using RenameChecker = std::function<std::string(const std::wstring& text, std::size_t offset, const std::wstring& newName)>;
 
     // Find / Replace and Go to line for a code editor: two overlay views (Resources/findbar.newui and
     // gotoline.newui) added to host, over the editor. See design/find_replace/design-notes.md for the
@@ -127,6 +130,7 @@ namespace CodeToolsVsix
 
         // Enables the Rename button (hidden until this is called) and what it asks when clicked.
         void setRenameProvider(RenameProvider provider);
+        void setRenameChecker(RenameChecker checker);
         // Renames the symbol at the current match (or the caret, if none) to the Replace field's
         // text: every occurrence the provider finds, as one undo step. 0 (and a message in the bar)
         // when there is no provider or no renamable symbol there.
@@ -201,6 +205,7 @@ namespace CodeToolsVsix
         int busy_ = 0;       // >0 while this class edits the text, so the edit isn't answered with a re-search
         bool moving_ = false;   // moveClearOfCurrentMatch() is running (a move can cause a scroll event)
         RenameProvider renameProvider_;
+        RenameChecker renameChecker_;
         std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
     };
 }

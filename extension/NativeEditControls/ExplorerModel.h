@@ -46,6 +46,10 @@ namespace CodeToolsVsix
         // is the rightmost), so numbers line up down the tree. cellTones[i] colors cells[i].
         std::vector<std::string> cells;
         std::vector<Tone> cellTones;
+        float cellWidth = 0.0f;   // each column's width in pixels; 0: the item's default
+        // In a pane too narrow for every column the leftmost go first, unless this says the first ones matter most
+        // (a folder's file count over its subfolder count): then the rightmost go first.
+        bool dropRightFirst = false;
         std::string path;        // what a double-click opens; empty for nothing
         std::size_t line = 0;    // 1-based; 0 = open the file without moving the caret
         std::string search;      // lower case text a filter is matched against (a qualified name, a path)
@@ -150,6 +154,24 @@ namespace CodeToolsVsix
     FolderScan scanProjectFolders(const std::string& root, const ScanProgress& progress = {},
                                   const std::atomic<bool>* cancel = nullptr, unsigned threads = 0);
 
+    // One diagnostic as the compiler said it, kept as an example of why a file has its problems.
+    struct ProblemSample
+    {
+        std::string file;   // where it was reported: the file itself, or a header it includes
+        std::uint32_t line = 0;
+        std::string message;
+    };
+
+    // One indexed file with something to report: how many errors, warnings and unresolved includes it has.
+    struct ProblemFile
+    {
+        std::string path;   // absolute, forward slashes
+        std::uint32_t errors = 0;
+        std::uint32_t warnings = 0;
+        std::uint32_t unresolvedIncludes = 0;
+        std::vector<ProblemSample> samples;   // the first few, in the order reported
+    };
+
     // Everything the info view reports. Times are milliseconds; 0 for a step that did not run.
     struct ProjectStats
     {
@@ -176,6 +198,7 @@ namespace CodeToolsVsix
         std::size_t filesWithWarnings = 0;   // with no errors
         std::size_t filesWithUnresolvedIncludes = 0;   // "file not found": usually the compile flags, not the code
         std::size_t unresolvedIncludes = 0;
+        std::vector<ProblemFile> problemFiles;   // every indexed file with an error, a warning or an unresolved include
         unsigned indexThreads = 0;
         bool complete = false;         // every step has run
     };

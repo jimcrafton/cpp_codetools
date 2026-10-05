@@ -15,6 +15,12 @@
 #include <set>
 #include <thread>
 
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#endif
+
 namespace cpptools {
 
 namespace fs = std::filesystem;
@@ -222,6 +228,26 @@ void collectInclusion(CXFile included, CXSourceLocation* stack, unsigned length,
     context->extract->file->includes.push_back(std::move(edge));
 }
 
+constexpr std::size_t kSampleDiagnostics = 3;   // diagnostics kept per file, as examples
+
+// Indexing is background work: while one of these is alive the calling thread runs below the normal priority, so
+// a handful of heavy parses (a file pulling in all of LLVM's headers) cannot take the cores a UI thread needs.
+class BelowNormalPriority {
+public:
+#ifdef _WIN32
+    BelowNormalPriority() : thread_(::GetCurrentThread()), previous_(::GetThreadPriority(thread_)) {
+        ::SetThreadPriority(thread_, THREAD_PRIORITY_BELOW_NORMAL);
+    }
+    ~BelowNormalPriority() { ::SetThreadPriority(thread_, previous_); }
+    BelowNormalPriority(const BelowNormalPriority&) = delete;
+    BelowNormalPriority& operator=(const BelowNormalPriority&) = delete;
+
+private:
+    HANDLE thread_;
+    int previous_;
+#endif
+};
+
 // Parses one file and reads everything the index keeps from it.
 IndexedFile indexOne(CXIndex index, const std::string& path, const std::vector<std::string>& args,
                      const Roots& roots, const std::string* content) {
@@ -256,27 +282,38 @@ IndexedFile indexOne(CXIndex index, const std::string& path, const std::vector<s
     InclusionContext inclusions{ &context };
     clang_getInclusions(unit, &collectInclusion, &inclusions);
 
-    // Only the diagnostics located in this file itself: a header's own problems belong to the header's entry.
+    // Errors and warnings are counted for this file when they are located in it (a header's own problems belong to
+    // the header's entry). A "file not found" is the exception: it counts for this file wherever in its includes it
+    // happened, because it leaves names undeclared in everything that includes the file, so the errors it causes
+    // show up here, not at the include.
     const unsigned diagnosticCount = clang_getNumDiagnostics(unit);
     for (unsigned i = 0; i < diagnosticCount; ++i) {
         CXDiagnostic diagnostic = clang_getDiagnostic(unit, i);
         const CXDiagnosticSeverity severity = clang_getDiagnosticSeverity(diagnostic);
         if (severity == CXDiagnostic_Warning || severity == CXDiagnostic_Error || severity == CXDiagnostic_Fatal) {
+            const std::string message = toStdString(clang_getDiagnosticSpelling(diagnostic));
+            const bool notFound = severity != CXDiagnostic_Warning && message.find("file not found") != std::string::npos;
+
             CXFile where = nullptr;
-            clang_getSpellingLocation(clang_getDiagnosticLocation(diagnostic), &where, nullptr, nullptr, nullptr);
+            unsigned line = 0;
+            clang_getSpellingLocation(clang_getDiagnosticLocation(diagnostic), &where, &line, nullptr, nullptr);
+            std::string whereName;
             if (where != nullptr) {
                 CXString name = clang_getFileName(where);
-                const char* text = clang_getCString(name);
-                if (text != nullptr && keyOf(ProjectIndex::normalizePath(text)) == keyOf(path)) {
-                    if (severity == CXDiagnostic_Warning) {
-                        ++file.warnings;
-                    } else {
-                        // "'x.h' file not found": the include path is missing, which is the flags' problem, not the code's
-                        const std::string message = toStdString(clang_getDiagnosticSpelling(diagnostic));
-                        if (message.find("file not found") != std::string::npos) ++file.unresolvedIncludes; else ++file.errors;
-                    }
-                }
+                if (const char* text = clang_getCString(name)) whereName = ProjectIndex::normalizePath(text);
                 clang_disposeString(name);
+            }
+
+            bool counted = false;
+            if (notFound) {
+                ++file.unresolvedIncludes;   // the include path is missing: the flags' problem, not the code's
+                counted = true;
+            } else if (!whereName.empty() && keyOf(whereName) == keyOf(path)) {
+                if (severity == CXDiagnostic_Warning) ++file.warnings; else ++file.errors;
+                counted = true;
+            }
+            if (counted && file.samples.size() < kSampleDiagnostics) {
+                file.samples.push_back({ whereName, line, message });
             }
         }
         clang_disposeDiagnostic(diagnostic);
@@ -289,7 +326,7 @@ IndexedFile indexOne(CXIndex index, const std::string& path, const std::vector<s
 // --- persistence helpers -------------------------------------------------------------------------
 
 constexpr char kMagic[8] = { 'C', 'P', 'T', 'O', 'O', 'L', 'I', 'X' };
-constexpr std::uint32_t kFormatVersion = 3;   // 2: per-file error and warning counts; 3: and unresolved includes
+constexpr std::uint32_t kFormatVersion = 5;   // 2: per-file error and warning counts; 3: and unresolved includes; 4: those counted through headers; 5: sample diagnostics
 
 void put(std::ostream& out, std::uint64_t value) { out.write(reinterpret_cast<const char*>(&value), sizeof value); }
 void put(std::ostream& out, const std::string& text) {
@@ -383,6 +420,7 @@ IndexProgress ProjectIndex::indexFiles(const std::vector<std::string>& requested
     std::mutex reportMutex;
 
     auto worker = [&]() {
+        BelowNormalPriority yieldToTheUi;
         ClangIndex index;
         for (;;) {
             const std::size_t at = next.fetch_add(1);
@@ -493,6 +531,7 @@ ProjectIndex::Problems ProjectIndex::problemsIn(const std::string& path) const {
         problems.errors = it->second.errors;
         problems.warnings = it->second.warnings;
         problems.unresolvedIncludes = it->second.unresolvedIncludes;
+        problems.samples = it->second.samples;
     }
     return problems;
 }
@@ -603,6 +642,12 @@ bool ProjectIndex::save(const std::string& cachePath) const {
         put(out, static_cast<std::uint64_t>(file.errors));
         put(out, static_cast<std::uint64_t>(file.warnings));
         put(out, static_cast<std::uint64_t>(file.unresolvedIncludes));
+        put(out, static_cast<std::uint64_t>(file.samples.size()));
+        for (const IndexedDiagnostic& sample : file.samples) {
+            put(out, sample.file);
+            put(out, static_cast<std::uint64_t>(sample.line));
+            put(out, sample.message);
+        }
         put(out, static_cast<std::uint64_t>(file.symbols.size()));
         for (const IndexedSymbol& s : file.symbols) {
             put(out, s.usr);
@@ -656,6 +701,14 @@ bool ProjectIndex::load(const std::string& cachePath) {
         file.errors = static_cast<std::uint32_t>(reader.number());
         file.warnings = static_cast<std::uint32_t>(reader.number());
         file.unresolvedIncludes = static_cast<std::uint32_t>(reader.number());
+        const std::uint64_t samples = reader.number();
+        for (std::uint64_t i = 0; i < samples && reader.good; ++i) {
+            IndexedDiagnostic sample;
+            sample.file = reader.text();
+            sample.line = static_cast<std::uint32_t>(reader.number());
+            sample.message = reader.text();
+            file.samples.push_back(std::move(sample));
+        }
         const std::uint64_t symbols = reader.number();
         for (std::uint64_t i = 0; i < symbols && reader.good; ++i) {
             IndexedSymbol s;

@@ -378,6 +378,9 @@ namespace CodeToolsVsix
         find_->setRenameProvider([document = document_](const std::wstring& text, std::size_t offset) {
             return renameOccurrencesAt(text, offset, document);
         });
+        find_->setRenameChecker([document = document_](const std::wstring& text, std::size_t offset, const std::wstring& newName) {
+            return document->session().renameConflict(wideToUtf8(text.substr(0, offset)).size(), wideToUtf8(newName));
+        });
         keyConnection_ = root->onKeyDown.add(this, &CppEditor::handleKeyDown);
 
         // The status row's arrows move the caret the way Go to line does; its problem ticks go on the

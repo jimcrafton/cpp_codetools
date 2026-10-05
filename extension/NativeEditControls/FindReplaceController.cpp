@@ -931,6 +931,11 @@ namespace CodeToolsVsix
         }
     }
 
+    void FindReplaceController::setRenameChecker(RenameChecker checker)
+    {
+        renameChecker_ = std::move(checker);
+    }
+
     std::size_t FindReplaceController::renameCurrent()
     {
         if (!renameProvider_) {
@@ -944,6 +949,13 @@ namespace CodeToolsVsix
         }
 
         const std::wstring replacement = replaceInput_->text();
+        if (renameChecker_) {
+            const std::string problem = renameChecker_(text_->text(), offset, replacement);
+            if (!problem.empty()) {
+                count_->setText(problem);
+                return 0;
+            }
+        }
         auto* history = dynamic_cast<newui::text::HistoryTextModel*>(&text_->model());
         if (history != nullptr) {
             history->beginGroup();

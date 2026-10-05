@@ -155,23 +155,41 @@ namespace CodeToolsVsix
 
         // Cells fill the right edge, so the name and its detail get what is left of the left side. A column whose
         // cell is empty on this row (no line count on a text file) gives its room back to the name.
+        const double cellWidth = node->cellWidth > 0.0f ? double(node->cellWidth) : double(kCellWidth);
+        // If the whole name does not fit beside every column, columns go: by default the leftmost first (a size matters
+        // more than a line count), or the rightmost first when the row says its first columns matter most. Always one
+        // stays. The ones that stay sit at the right edge.
+        const double nameWidth = textWidth(*font, node->text);
         std::size_t firstShown = 0;
-        while (firstShown < node->cells.size() && node->cells[firstShown].empty()) ++firstShown;
-        const std::size_t shownCells = node->cells.size() - firstShown;
-        const double cellsLeft = right - kEdgePad - kCellWidth * double(shownCells);
+        std::size_t endShown = node->cells.size();
+        if (node->dropRightFirst) {
+            while (endShown > 1 && x + nameWidth > right - kEdgePad - cellWidth * double(endShown) - kNameGap) --endShown;
+        } else {
+            while (firstShown < endShown && node->cells[firstShown].empty()) ++firstShown;
+            while (firstShown + 1 < endShown &&
+                   x + nameWidth > right - kEdgePad - cellWidth * double(endShown - firstShown) - kNameGap) {
+                ++firstShown;
+            }
+        }
+        const std::size_t shownCells = endShown - firstShown;
+        const double cellsLeft = right - kEdgePad - cellWidth * double(shownCells);
         const double limit = shownCells == 0 ? right : cellsLeft - kNameGap;
         ctx.clip_to_rect(BLRect(x, row.top(), std::max(0.0, limit - x), row.size().height));
 
         const std::string name = fitText(*font, node->text, limit - x);
         drawText(ctx, *font, x, row, name, nameColor);
         if (!node->detail.empty() && name == node->text) {   // a shortened name leaves no room for its detail
-            drawText(ctx, *font, x + textWidth(*font, name) + kNameGap, row, node->detail, toneColor(node->detailTone, selected));
+            const double detailX = x + textWidth(*font, name) + kNameGap;
+            const double room = limit - detailX;
+            if (room >= kMinDetailWidth) {   // what does not fit ends in an ellipsis, like the name
+                drawText(ctx, *font, detailX, row, fitText(*font, node->detail, room), toneColor(node->detailTone, selected));
+            }
         }
         ctx.restore_clipping();
 
-        for (std::size_t i = 0; i < node->cells.size(); ++i) {
+        for (std::size_t i = firstShown; i < endShown; ++i) {
             const Tone tone = i < node->cellTones.size() ? node->cellTones[i] : Tone::Normal;
-            const double cellRight = right - kEdgePad - kCellWidth * double(node->cells.size() - 1 - i);
+            const double cellRight = right - kEdgePad - cellWidth * double(endShown - 1 - i);
             drawText(ctx, *font, cellRight - textWidth(*font, node->cells[i]), row, node->cells[i], toneColor(tone, selected));
         }
         ctx.restore();

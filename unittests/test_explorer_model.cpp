@@ -473,7 +473,7 @@ TEST_F(ExplorerModelTest, FileRowsKeepTheirSizeAndShowLinesForCppAndCMakeWhateve
     EXPECT_EQ(a->detail, "product") << "the product label stays beside the name";
     ASSERT_EQ(a->cells.size(), 2u);
     EXPECT_EQ(a->cells[0], "3 lines");
-    EXPECT_EQ(a->cells[1], "20 B") << "and no longer replaces the size";
+    EXPECT_EQ(a->cells[1], "21 B") << "and no longer replaces the size";
     EXPECT_EQ(find("b.h")->cells[0], "2 lines") << "a last line with no newline still counts";
     EXPECT_EQ(find("empty.cpp")->cells[0], "") << "nothing to count";
     EXPECT_EQ(find("CMakeLists.txt")->cells[0], "1 line");
@@ -510,12 +510,60 @@ TEST(ExplorerStats, TheInfoTreeListsFoldersLargestFirstWithTheirCounts) {
     EXPECT_EQ(folders.children[0].cells[1], "40.0 MB");
     EXPECT_EQ(folders.children[0].cells[2], "30 folders");
     EXPECT_EQ(folders.children[0].cellTones[1], ExplorerNode::Tone::Bad) << "nearly all of the project's bytes";
+    EXPECT_TRUE(folders.children[0].dropRightFirst) << "in a narrow pane the subfolder count goes before the file count";
     EXPECT_EQ(folders.children[1].cellTones[1], ExplorerNode::Tone::Normal);
     EXPECT_EQ(folders.children[1].text, "small");
     EXPECT_EQ(folders.children[2].text, "build");
     EXPECT_NE(folders.children[2].detail.find("not shown"), std::string::npos);
     EXPECT_EQ(tree.children[2].text, "Index");
     EXPECT_EQ(tree.children[3].text, "CMake");
+
+    // each count opens onto the files behind it: most problems first, relative to the root, each with its badge
+    ProjectStats listed;
+    listed.root = "D:\\code\\proj";
+    listed.filesWithErrors = 2;
+    listed.filesWithWarnings = 1;
+    listed.filesWithUnresolvedIncludes = 1;
+    listed.problemFiles = {
+        { "D:/code/proj/src/b.cpp", 1, 0, 0, {} },
+        { "D:/code/proj/src/a.cpp", 3, 0, 0, { { "D:/code/proj/src/a.cpp", 12, "unknown type name 'Foo'" }, { "D:/code/proj/src/a.cpp", 30, "expected ';'" } } },
+        { "D:/code/proj/c.cpp", 0, 2, 0, {} },
+        { "D:/code/proj/d.cpp", 5, 0, 4, { { "D:/code/proj/include/x.h", 3, "'y.h' file not found" } } },   // its errors are knock-on: listed as unresolved only
+        { "E:/elsewhere/e.cpp", 0, 0, 0, {} },   // nothing to report: not listed
+    };
+    const ExplorerNode listing = buildStatsTree(listed);
+    auto rowNamed = [&](const std::string& name) -> const ExplorerNode* {
+        for (const ExplorerNode& r : listing.children[2].children) if (r.text == name) return &r;
+        return nullptr;
+    };
+    const ExplorerNode* errorRow = rowNamed("Files with errors");
+    ASSERT_NE(errorRow, nullptr);
+    ASSERT_EQ(errorRow->children.size(), 2u);
+    EXPECT_EQ(errorRow->children[0].text, "src/a.cpp") << "most errors first, relative to the root";
+    EXPECT_EQ(errorRow->children[0].detail, "3 errors");
+    EXPECT_EQ(errorRow->children[1].detail, "1 error");
+    EXPECT_EQ(errorRow->children[0].path, "D:/code/proj/src/a.cpp") << "a double-click opens it";
+    EXPECT_EQ(errorRow->children[0].badge, ExplorerNode::Badge::Error);
+
+    // under a file, what the compiler said, each opening its file at the line
+    ASSERT_EQ(errorRow->children[0].children.size(), 2u);
+    EXPECT_EQ(errorRow->children[0].children[0].text, "unknown type name 'Foo'");
+    EXPECT_EQ(errorRow->children[0].children[0].detail, "line 12");
+    EXPECT_EQ(errorRow->children[0].children[0].path, "D:/code/proj/src/a.cpp");
+    EXPECT_EQ(errorRow->children[0].children[0].line, 12u);
+    EXPECT_TRUE(errorRow->children[1].children.empty());
+    EXPECT_EQ(explorerIconFor(errorRow->children[0]).name, "badged/source-error");
+    ASSERT_EQ(rowNamed("Files with warnings")->children.size(), 1u);
+    EXPECT_EQ(rowNamed("Files with warnings")->children[0].detail, "2 warnings");
+    const ExplorerNode* unresolvedRow = rowNamed("Files with unresolved includes");
+    ASSERT_NE(unresolvedRow, nullptr);
+    ASSERT_EQ(unresolvedRow->children.size(), 1u);
+    EXPECT_EQ(unresolvedRow->children[0].text, "d.cpp");
+    EXPECT_EQ(unresolvedRow->children[0].detail, "4 unresolved includes");
+    EXPECT_EQ(unresolvedRow->children[0].badge, ExplorerNode::Badge::Warning);
+    ASSERT_EQ(unresolvedRow->children[0].children.size(), 1u);
+    EXPECT_EQ(unresolvedRow->children[0].children[0].detail, "include/x.h line 3") << "a message from a header names the header";
+    EXPECT_EQ(unresolvedRow->children[0].children[0].path, "D:/code/proj/include/x.h");
 
     // unresolved includes get a row of their own, in a warning tone, with a pointer to the likely cause
     ProjectStats flags;

@@ -226,11 +226,11 @@ TEST(DocumentTabs, RefreshingTitlesFollowsTheEditorsDirtyFlag) {
 
 TEST(DocumentTabs, ASaveAsInsideTheEditorMovesTheTabToTheNewFile) {
     Harness h;
-    auto* editor = static_cast<FakeEditor*>(h.tabs->open(L"C:\proj\s1.newui", DocumentType::Designer));
+    auto* editor = static_cast<FakeEditor*>(h.tabs->open(L"C:\\proj\\s1.newui", DocumentType::Designer));
     ASSERT_NE(editor, nullptr);
 
-    editor->saveAs(L"C:\proj\new1.newui");
+    editor->saveAs(L"C:\\proj\\new1.newui");
 
-    EXPECT_EQ(h.tabs->activePath(), L"C:\proj\new1.newui");
+    EXPECT_EQ(h.tabs->activePath(), L"C:\\proj\\new1.newui");
     EXPECT_EQ(h.tabs->count(), 1u);
 }

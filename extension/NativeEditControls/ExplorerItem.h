@@ -20,6 +20,7 @@ namespace CodeToolsVsix
         static constexpr float kCellWidth = 84.0f;   // one cell column
         static constexpr float kEdgePad = 8.0f;      // between the last column and the row's right edge
         static constexpr float kNameGap = 12.0f;     // between a name and its detail, or the first column
+        static constexpr float kMinDetailWidth = 24.0f;   // less room than this and the detail is left out
 
         void paint(BLContext& ctx, const newui::Rect& rect, const std::vector<std::size_t>& path,
                    newui::TreeController& controller) override;

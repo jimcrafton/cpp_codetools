@@ -28,6 +28,33 @@ bool hasName(const std::vector<const Target*>& targets, const std::string& name)
 
 }
 
+TEST(CMakeModel, CompileSettingsComeFromTheTargetThatOwnsTheFile) {
+    const Model model = loadFixture();
+    const CompileSettingsIndex settings(model);
+
+    const CompileSettings* app = settings.find("C:/proj/tools/main.cpp");
+    ASSERT_NE(app, nullptr);
+    EXPECT_EQ(app->target, "app");
+    EXPECT_EQ(app->definitions, (std::vector<std::string>{ "WIN32", "UNICODE" }));
+    EXPECT_EQ(app->toArgs(), (std::vector<std::string>{ "-IC:/proj/include", "-DWIN32", "-DUNICODE" }));
+
+    const CompileSettings* core = settings.find("c:\\proj\\SRC\\a.cpp");
+    ASSERT_NE(core, nullptr) << "any slash, any case";
+    EXPECT_EQ(core->target, "core");
+
+    const CompileSettings* header = settings.find("C:/proj/include/a.h");
+    ASSERT_NE(header, nullptr);
+    EXPECT_EQ(header->target, "core") << "a header a target lists";
+
+    // a header nobody lists is reached through an include folder: the target that has it on its path
+    const CompileSettings* unlisted = settings.find("C:/proj/include/deep/other.h");
+    ASSERT_NE(unlisted, nullptr);
+    EXPECT_FALSE(unlisted->includeDirs.empty());
+
+    EXPECT_EQ(settings.find("C:/elsewhere/x.cpp"), nullptr) << "no target claims it";
+    EXPECT_EQ(settings.find("C:/proj/include"), nullptr) << "the folder itself is not a file under it";
+}
+
 TEST(CMakeModel, ATargetFileMissingFromTheReplyIsSkippedNotFatal) {
     namespace fs = std::filesystem;
     const fs::path copy = fs::temp_directory_path() / "cmakemodel_missing_target";

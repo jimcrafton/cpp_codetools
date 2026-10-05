@@ -1,5 +1,6 @@
 #include "CppDiagnostics.h"
 #include "TextEncoding.h"
+#include "WorkspaceInfo.h"
 
 #include <lex/cpp_lexer.h>
 
@@ -205,10 +206,13 @@ namespace CodeToolsVsix
     cpptools::CompileFlags CppDocument::flags() const
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        if (!flagsValid_) {
+        // Looked up again when what the explorer read from CMake changed since (it arrives after the build tree is read).
+        const unsigned settingsVersion = WorkspaceInfo::instance().compileSettingsVersion();
+        if (!flagsValid_ || flagsSettingsVersion_ != settingsVersion) {
             flags_ = path_.empty() ? cpptools::CompileFlags{ cpptools::defaultCompileArgs(), std::string() }
-                                   : cpptools::compileFlagsFor(path_);
+                                   : WorkspaceInfo::instance().compileFlagsFor(path_);
             flagsValid_ = true;
+            flagsSettingsVersion_ = settingsVersion;
         }
         return flags_;
     }

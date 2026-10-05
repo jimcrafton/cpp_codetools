@@ -385,6 +385,25 @@ TEST(FindReplaceController, RenameCurrentWithNoRenamableSymbolShowsAMessageAndCh
     EXPECT_EQ(f.countLabel(), "No renamable symbol there");
 }
 
+TEST(FindReplaceController, RenameCurrentChangesNothingAndShowsTheCheckersMessageWhenTheNameClashes)
+{
+    Fixture f(L"int count = 0;");
+    f.find->setRenameProvider([](const std::wstring&, std::size_t) { return std::vector<RenameRange>{ { 4u, 5u } }; });
+    f.find->setRenameChecker([](const std::wstring&, std::size_t, const std::wstring& name) {
+        return name == L"taken" ? std::string("\"taken\" already exists in C") : std::string();
+    });
+    f.find->showReplace();
+    f.control<newui::TextField>(f.find->findBar(), "replaceInput")->setText(L"taken");
+
+    EXPECT_EQ(f.find->renameCurrent(), 0u);
+    EXPECT_EQ(f.text->text(), L"int count = 0;");
+    EXPECT_EQ(f.countLabel(), "\"taken\" already exists in C");
+
+    f.control<newui::TextField>(f.find->findBar(), "replaceInput")->setText(L"free");
+    EXPECT_EQ(f.find->renameCurrent(), 1u);
+    EXPECT_EQ(f.text->text(), L"int free = 0;");
+}
+
 TEST(FindReplaceController, MatchesAreHighlightedAndTheCurrentOneIsMarked)
 {
     Fixture f(L"ab ab ab");

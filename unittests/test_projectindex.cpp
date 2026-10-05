@@ -388,15 +388,45 @@ TEST(ProjectIndexRepository, DISABLED_TimesIndexingTheWholeProject) {
     EXPECT_EQ(warm.parsed, 0u);
 }
 
+// Run by name (--gtest_also_run_disabled_tests): what libclang says about this repo's own test files, with the same flags
+// the explorer uses. Prints to stdout.
+TEST(ProjectIndexRepo, DISABLED_PrintsWhyTheRepoTestsReportErrors) {
+    const std::string root = CPPTOOLS_TEST_REPO_ROOT;
+    ProjectIndex index;
+    index.setRoots({ root });
+    std::vector<std::string> files;
+    for (const char* name : { "test_explorer_model.cpp", "test_cmakemodel.cpp", "test_projectindex.cpp", "lex/cmake_lexer_tests.cpp",
+                              "lex/cmake_parser_tests.cpp", "test_controllerwiring_newui.cpp", "test_delegatebindings.cpp",
+                              "test_editor_file_kinds.cpp", "test_project_explorer.cpp" }) {
+        files.push_back(root + "/unittests/" + name);
+    }
+    index.indexFiles(files, {}, 1);
+    for (const std::string& file : files) {
+        const ProjectIndex::Problems problems = index.problemsIn(file);
+        std::printf("%s: %u errors, %u warnings, %u unresolved\n", file.c_str(), problems.errors, problems.warnings, problems.unresolvedIncludes);
+        for (const IndexedDiagnostic& sample : problems.samples) {
+            std::printf("    %s:%u  %s\n", sample.file.c_str(), sample.line, sample.message.c_str());
+        }
+    }
+}
+
 TEST_F(ProjectIndexTest, CountsTheErrorsAndWarningsEachFileReportsInItself) {
     write("bad.cpp", "int broken() { return missing_name; }\n");                       // an error in this file
     write("warn.cpp", "int fine() { int unused; return 0; }\n");                       // -Wall: an unused variable
     write("hdr_user.cpp", "#include \"bad_header.h\"\nint ok() { return 1; }\n");      // the problem is in the header
     write("bad_header.h", "int header_broken() { return also_missing; }\n");
     write("noinc.cpp", "#include \"does_not_exist.h\"\nint fine2() { return 2; }\n");   // only a missing include
+    write("mid.h", "#include \"gone_for_good.h\"\n");                                    // the missing header is in a header...
+    write("outer.cpp", "#include \"mid.h\"\nGoneType value;\n");                         // ...and this file's errors follow from it
     ProjectIndex local;
     local.setFlagsProvider([](const std::string&) { return std::vector<std::string>{ "-x", "c++", "-std=c++17", "-Wall" }; });
-    local.indexFiles({ path("bad.cpp"), path("warn.cpp"), path("hdr_user.cpp"), path("bad_header.h"), path("a.h"), path("noinc.cpp") }, {}, 1);
+    local.indexFiles({ path("bad.cpp"), path("warn.cpp"), path("hdr_user.cpp"), path("bad_header.h"), path("a.h"), path("noinc.cpp"),
+                       path("mid.h"), path("outer.cpp") }, {}, 1);
+
+    // a missing header inside a header counts for every file that includes it, not just the header
+    EXPECT_GE(local.problemsIn(path("outer.cpp")).unresolvedIncludes, 1u);
+    EXPECT_GE(local.problemsIn(path("mid.h")).unresolvedIncludes, 1u);
+    EXPECT_EQ(local.problemsIn(path("hdr_user.cpp")).unresolvedIncludes, 0u) << "an ordinary error in a header is not a missing one";
 
     // a header that cannot be found is the flags' problem, not an error in the code
     EXPECT_EQ(local.problemsIn(path("noinc.cpp")).errors, 0u);
@@ -412,6 +442,17 @@ TEST_F(ProjectIndexTest, CountsTheErrorsAndWarningsEachFileReportsInItself) {
     EXPECT_EQ(local.problemsIn(path("a.h")).errors, 0u);
     EXPECT_EQ(local.problemsIn(path("not_indexed.cpp")).errors, 0u);
 
+    // an example of what the compiler said is kept, with its line
+    const ProjectIndex::Problems bad = local.problemsIn(path("bad.cpp"));
+    ASSERT_FALSE(bad.samples.empty());
+    EXPECT_EQ(bad.samples[0].line, 1u);
+    EXPECT_NE(bad.samples[0].message.find("missing_name"), std::string::npos) << bad.samples[0].message;
+    EXPECT_LE(bad.samples.size(), 3u) << "only the first few";
+    const ProjectIndex::Problems outer = local.problemsIn(path("outer.cpp"));
+    ASSERT_FALSE(outer.samples.empty());
+    EXPECT_NE(outer.samples[0].message.find("file not found"), std::string::npos) << "the include that is missing, reported in mid.h";
+    EXPECT_NE(outer.samples[0].file.find("mid.h"), std::string::npos);
+
     // and they survive the cache
     const std::string cache = path("problems.bin");
     ASSERT_TRUE(local.save(cache));
@@ -420,4 +461,7 @@ TEST_F(ProjectIndexTest, CountsTheErrorsAndWarningsEachFileReportsInItself) {
     EXPECT_EQ(loaded.problemsIn(path("bad.cpp")).errors, local.problemsIn(path("bad.cpp")).errors);
     EXPECT_EQ(loaded.problemsIn(path("warn.cpp")).warnings, local.problemsIn(path("warn.cpp")).warnings);
     EXPECT_EQ(loaded.problemsIn(path("noinc.cpp")).unresolvedIncludes, local.problemsIn(path("noinc.cpp")).unresolvedIncludes);
+    ASSERT_EQ(loaded.problemsIn(path("bad.cpp")).samples.size(), bad.samples.size());
+    EXPECT_EQ(loaded.problemsIn(path("bad.cpp")).samples[0].message, bad.samples[0].message);
+    EXPECT_EQ(loaded.problemsIn(path("bad.cpp")).samples[0].line, bad.samples[0].line);
 }

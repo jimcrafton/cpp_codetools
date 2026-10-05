@@ -173,6 +173,31 @@ TEST(ControllerWiring, WiringTheSameEventTwiceIsRefusedNotDuplicated) {
     EXPECT_TRUE(again.edits.empty());
 }
 
+// A real controller header: its includes can't be found when it is parsed on its own, and neither can its base class.
+TEST(ControllerWiring, AnExistingHandlerIsFoundEvenWhenTheHeadersIncludesAndBaseClassDoNotResolve) {
+    const std::string content =
+        "#include <newui/rootcontroller.h>\n"
+        "#include <bojangle>\n"
+        "class S1Controller : public newui::RootController {\n"
+        "private:\n"
+        "    newui::Button* button2_ = nullptr;\n"
+        "\n"
+        "private:\n"
+        "    newui::SyncReturn onButton2Click(newui::Control& sender) {\n"
+        "        return newui::SyncReturn::Handled;\n"
+        "    }\n"
+        "};\n";
+    ControllerWiringRequest r;
+    r.className = "S1Controller";
+    r.viewName = "button2";
+    r.viewType = "newui::Button";
+    r.delegateName = "onClick";
+    r.senderType = "newui::Control";
+    const ControllerWiringPlan plan = planControllerDelegateWiring(content, r);
+    EXPECT_EQ(plan.status, ControllerWiringStatus::HandlerExists);
+    EXPECT_TRUE(plan.edits.empty());
+}
+
 TEST(ControllerWiring, AnAlreadyDeclaredFieldIsNotDeclaredAgain) {
     const std::string content = std::string(kPreamble) +
         "class SaveDialogController : public newui::RootController {\n"

@@ -103,6 +103,12 @@ public:
     // been called yet. May be called from any thread; serialized with update() like it.
     std::vector<Occurrence> findOccurrences(std::size_t offset) const;
 
+    // Why renaming the symbol at byte `offset` to `newName` would go wrong: not a valid identifier, or the
+    // scope the symbol is declared in already has something else by that name (functions may share a name).
+    // Empty when the rename is fine, or the offset isn't on a renamable symbol. Locals and parameters are
+    // not checked against their function's other names.
+    std::string renameConflict(std::size_t offset, const std::string& newName) const;
+
 private:
     mutable std::mutex mutex_;
     ClangIndex index_;

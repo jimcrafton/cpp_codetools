@@ -1,6 +1,7 @@
 #include <cmakemodel/model.h>
 
 #include <algorithm>
+#include <cctype>
 
 namespace cmakemodel
 {
@@ -57,6 +58,65 @@ namespace cmakemodel
             }
         }
         return all;
+    }
+
+    namespace
+    {
+        // Lower case, forward slashes: one spelling for a path however CMake or a caller wrote it.
+        std::string canonical(std::string path)
+        {
+            std::replace(path.begin(), path.end(), '\\', '/');
+            std::transform(path.begin(), path.end(), path.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            return path;
+        }
+
+        bool isAbsolutePath(const std::string& path)
+        {
+            return (path.size() > 1 && path[1] == ':') || (!path.empty() && (path[0] == '/' || path[0] == '\\'));
+        }
+    }
+
+    std::vector<std::string> CompileSettings::toArgs() const
+    {
+        std::vector<std::string> args;
+        for (const std::string& dir : includeDirs) args.push_back("-I" + dir);
+        for (const std::string& definition : definitions) args.push_back("-D" + definition);
+        return args;
+    }
+
+    CompileSettingsIndex::CompileSettingsIndex(const Model& model)
+    {
+        for (const Target& target : model.targets) {
+            if (target.type == TargetType::Utility || target.type == TargetType::Unknown) continue;   // ALL_BUILD, ZERO_CHECK...
+            const std::size_t at = settings_.size();
+            settings_.push_back({ target.name, target.includeDirs, target.definitions });
+            for (const SourceFile& source : target.sources) {
+                const std::string full = isAbsolutePath(source.path) ? source.path : model.sourceDir + "/" + source.path;
+                bySource_.emplace(canonical(full), at);   // the first target to list a file keeps it
+            }
+            for (std::string dir : target.includeDirs) {
+                std::replace(dir.begin(), dir.end(), '\\', '/');
+                while (!dir.empty() && dir.back() == '/') dir.pop_back();
+                if (!dir.empty()) includeRoots_.emplace_back(canonical(dir), at);
+            }
+        }
+    }
+
+    const CompileSettings* CompileSettingsIndex::find(const std::string& path) const
+    {
+        const std::string key = canonical(path);
+        auto source = bySource_.find(key);
+        if (source != bySource_.end()) return &settings_[source->second];
+
+        // not listed by any target: the target whose include path reaches it, by the most specific folder
+        const std::pair<std::string, std::size_t>* best = nullptr;
+        for (const auto& root : includeRoots_) {
+            if (key.size() > root.first.size() + 1 && key.compare(0, root.first.size(), root.first) == 0 && key[root.first.size()] == '/' &&
+                (best == nullptr || root.first.size() > best->first.size())) {
+                best = &root;
+            }
+        }
+        return best != nullptr ? &settings_[best->second] : nullptr;
     }
 
     const char* toString(TargetType type)

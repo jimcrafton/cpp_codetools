@@ -37,6 +37,13 @@ struct IncludeEdge {
 
 // Everything the index knows about one file: what it declares, what it includes, and what its own code
 // refers to. Plain data, so it can be saved and compared.
+// One diagnostic kept as an example of why a file has the errors, warnings or unresolved includes it has.
+struct IndexedDiagnostic {
+    std::string file;            // where libclang placed it (a header, for a "file not found" inside one)
+    std::uint32_t line = 0;      // 1-based
+    std::string message;
+};
+
 struct IndexedFile {
     std::string path;            // normalized: absolute, forward slashes
     std::int64_t modified = 0;   // last write time when it was parsed
@@ -49,6 +56,7 @@ struct IndexedFile {
     std::uint32_t errors = 0;
     std::uint32_t warnings = 0;
     std::uint32_t unresolvedIncludes = 0;
+    std::vector<IndexedDiagnostic> samples;   // the first few of those, in the order libclang reported them
     std::vector<IndexedSymbol> symbols;
     std::vector<IncludeEdge> includes;
     // USR -> how often this file's own code refers to it. Only declarations inside the project roots.
@@ -103,7 +111,12 @@ public:
     std::vector<IncludeEdge> includesOf(const std::string& path) const;
 
     // How many errors and warnings the last parse of `path` reported in that file; zeros for a file not indexed.
-    struct Problems { std::uint32_t errors = 0; std::uint32_t warnings = 0; std::uint32_t unresolvedIncludes = 0; };
+    struct Problems {
+        std::uint32_t errors = 0;
+        std::uint32_t warnings = 0;
+        std::uint32_t unresolvedIncludes = 0;
+        std::vector<IndexedDiagnostic> samples;
+    };
     Problems problemsIn(const std::string& path) const;
 
     // Classes, structs and class templates that have a definition somewhere, once per USR, whose

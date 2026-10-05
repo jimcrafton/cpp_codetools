@@ -1,4 +1,5 @@
 #include "DesignerEditor.h"
+#include "WorkspaceInfo.h"
 #include "ComponentEditor.h"
 #include "DesignerClipboard.h"
 #include "NewControllerDialog.h"
@@ -2138,7 +2139,7 @@ namespace CodeToolsVsix
                 auto verify = [bindings, className, headerPath, text = wideToUtf8(snapshot.text)]() {
                     Verified verified;
                     verified.results = verifyBindings(bindings, className, text,
-                                                      cpptools::compileFlagsFor(headerPath.u8string()).args,
+                                                      WorkspaceInfo::instance().compileFlagsFor(headerPath.u8string()).args,
                                                       &verified.diagnostics);
                     verified.headerText = text;
                     return verified;

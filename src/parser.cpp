@@ -5,6 +5,7 @@
 #include <clang-c/Index.h>
 
 #include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <memory>
 #include <sstream>
@@ -330,37 +331,116 @@ std::size_t Session::reparseCount() const {
     return reparses_;
 }
 
+namespace {
+
+// The declaration the symbol spelled at byte `offset` stands for, or a null cursor when the offset isn't on a renamable one.
+CXCursor renamableTargetAt(CXTranslationUnit unit, const std::string& path, std::size_t offset) {
+    const CXCursor none = clang_getNullCursor();
+    CXFile file = clang_getFile(unit, path.c_str());
+    if (file == nullptr) {
+        return none;
+    }
+    CXSourceLocation location = clang_getLocationForOffset(unit, file, static_cast<unsigned>(offset));
+    CXCursor cursor = clang_getCursor(unit, location);
+    if (clang_Cursor_isNull(cursor) || clang_isInvalid(clang_getCursorKind(cursor))) {
+        return none;
+    }
+    // clang_getCursor snaps to the cursor whose EXTENT contains the location, which for a
+    // declaration is the whole "int count = 0;" - so also require offset be within the symbol's
+    // own spelling name range (just "count"), not merely somewhere inside its declaration.
+    CXSourceRange ownName = clang_Cursor_getSpellingNameRange(cursor, 0, 0);
+    CXFile ownFile = nullptr;
+    unsigned ownStart = 0;
+    unsigned ownEnd = 0;
+    clang_getSpellingLocation(clang_getRangeStart(ownName), &ownFile, nullptr, nullptr, &ownStart);
+    clang_getSpellingLocation(clang_getRangeEnd(ownName), nullptr, nullptr, nullptr, &ownEnd);
+    if (ownFile == nullptr || offset < ownStart || offset >= ownEnd) {
+        return none;
+    }
+    CXCursor referenced = resolveReferenced(cursor);
+    if (clang_Cursor_isNull(referenced) || !isRenamableCursorKind(clang_getCursorKind(referenced))) {
+        return none;
+    }
+    return referenced;
+}
+
+bool isFunctionLike(CXCursorKind kind) {
+    return kind == CXCursor_FunctionDecl || kind == CXCursor_CXXMethod || kind == CXCursor_FunctionTemplate ||
+           kind == CXCursor_Constructor || kind == CXCursor_Destructor;
+}
+
+struct ConflictContext {
+    CXCursor target;   // canonical
+    std::string name;
+    bool targetIsFunction;
+    bool found;
+};
+
+CXChildVisitResult visitForConflict(CXCursor cursor, CXCursor /*parent*/, CXClientData clientData) {
+    auto* context = static_cast<ConflictContext*>(clientData);
+    if (toStdString(clang_getCursorSpelling(cursor)) != context->name) {
+        return CXChildVisit_Continue;
+    }
+    if (clang_equalCursors(clang_getCanonicalCursor(cursor), context->target)) {
+        return CXChildVisit_Continue;
+    }
+    // Functions may share a name (overloads); anything else with the name is a clash.
+    if (context->targetIsFunction && isFunctionLike(clang_getCursorKind(cursor))) {
+        return CXChildVisit_Continue;
+    }
+    context->found = true;
+    return CXChildVisit_Break;
+}
+
+} // namespace
+
+std::string Session::renameConflict(std::size_t offset, const std::string& newName) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!unit_) {
+        return std::string();
+    }
+    const bool validName = !newName.empty() && (std::isalpha(static_cast<unsigned char>(newName[0])) || newName[0] == '_') &&
+                           std::all_of(newName.begin(), newName.end(), [](char c) {
+                               return std::isalnum(static_cast<unsigned char>(c)) || c == '_';
+                           });
+    if (!validName) {
+        return "\"" + newName + "\" is not a valid name";
+    }
+    const CXCursor target = renamableTargetAt(unit_.get(), path_, offset);
+    if (clang_Cursor_isNull(target)) {
+        return std::string();
+    }
+    const CXCursorKind kind = clang_getCursorKind(target);
+    // Names in the scope the symbol is declared in. A local or a parameter lives in a function body whose
+    // nested scopes can't be told apart here, so those are not checked.
+    if (kind == CXCursor_VarDecl || kind == CXCursor_ParmDecl) {
+        CXCursor parent = clang_getCursorSemanticParent(target);
+        const CXCursorKind parentKind = clang_getCursorKind(parent);
+        if (isFunctionLike(parentKind)) {
+            return std::string();
+        }
+    }
+    const CXCursor scope = clang_getCursorSemanticParent(target);
+    if (clang_Cursor_isNull(scope) || clang_isInvalid(clang_getCursorKind(scope))) {
+        return std::string();
+    }
+    ConflictContext context{ clang_getCanonicalCursor(target), newName, isFunctionLike(kind), false };
+    clang_visitChildren(scope, &visitForConflict, &context);
+    if (context.found) {
+        const std::string scopeName = toStdString(clang_getCursorSpelling(scope));
+        return "\"" + newName + "\" already exists" + (scopeName.empty() ? std::string() : " in " + scopeName);
+    }
+    return std::string();
+}
+
 std::vector<Occurrence> Session::findOccurrences(std::size_t offset) const {
     std::lock_guard<std::mutex> lock(mutex_);
     std::vector<Occurrence> result;
     if (!unit_) {
         return result;
     }
-    CXFile file = clang_getFile(unit_.get(), path_.c_str());
-    if (file == nullptr) {
-        return result;
-    }
-    CXSourceLocation location = clang_getLocationForOffset(unit_.get(), file, static_cast<unsigned>(offset));
-    CXCursor cursor = clang_getCursor(unit_.get(), location);
-    if (clang_Cursor_isNull(cursor) || clang_isInvalid(clang_getCursorKind(cursor))) {
-        return result;
-    }
-    // clang_getCursor snaps to the cursor whose EXTENT contains the location, which for a
-    // declaration is the whole "int count = 0;" - so also require offset be within the symbol's
-    // own spelling name range (just "count"), not merely somewhere inside its declaration.
-    {
-        CXSourceRange ownName = clang_Cursor_getSpellingNameRange(cursor, 0, 0);
-        CXFile ownFile = nullptr;
-        unsigned ownStart = 0;
-        unsigned ownEnd = 0;
-        clang_getSpellingLocation(clang_getRangeStart(ownName), &ownFile, nullptr, nullptr, &ownStart);
-        clang_getSpellingLocation(clang_getRangeEnd(ownName), nullptr, nullptr, nullptr, &ownEnd);
-        if (ownFile == nullptr || offset < ownStart || offset >= ownEnd) {
-            return result;
-        }
-    }
-    CXCursor referenced = resolveReferenced(cursor);
-    if (clang_Cursor_isNull(referenced) || !isRenamableCursorKind(clang_getCursorKind(referenced))) {
+    const CXCursor referenced = renamableTargetAt(unit_.get(), path_, offset);
+    if (clang_Cursor_isNull(referenced)) {
         return result;
     }
 

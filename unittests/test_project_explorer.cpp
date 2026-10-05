@@ -3,18 +3,27 @@
 // are exercised, not synthetic mouse or keyboard input. Indexing runs on the test's own thread
 // (setBackground(false)) since there is no run loop to deliver a background result.
 
+#include "../extension/NativeEditControls/CppDiagnostics.h"
 #include "../extension/NativeEditControls/ProjectExplorer.h"
 #include "../extension/NativeEditControls/WorkspaceInfo.h"
+
+#include <cmakemodel/fileapi.h>
+#include <cmakemodel/model.h>
+#include <cpptools/compileflags.h>
+#include <cpptools/projectindex.h>
 
 #include <newui/layout.h>
 #include <newui/rootview.h>
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <any>
 #include <chrono>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <string>
 
 using namespace CodeToolsVsix;
@@ -314,6 +323,58 @@ TEST(WorkspaceInfoTest, AChangeIsAnnouncedOnceAndOnlyWhenSomethingChanged) {
     EXPECT_EQ(heard, 3) << "a listener that disconnected is not called";
 }
 
+namespace {
+
+bool hasArg(const cpptools::CompileFlags& flags, const std::string& arg) {
+    return std::find(flags.args.begin(), flags.args.end(), arg) != flags.args.end();
+}
+
+std::shared_ptr<const cmakemodel::CompileSettingsIndex> fixtureSettings() {
+    static const cmakemodel::LoadResult loaded = cmakemodel::loadFileApi(std::string(EXPLORER_TEST_FIXTURES) + "/ninja", "");
+    return loaded.ok() ? std::make_shared<const cmakemodel::CompileSettingsIndex>(loaded.model) : nullptr;
+}
+
+}  // namespace
+
+TEST(WorkspaceInfoTest, TheBuildsOwnIncludesAndDefinitionsAreAddedToAFilesFlags) {
+    auto settings = fixtureSettings();
+    ASSERT_NE(settings, nullptr);
+
+    WorkspaceInfo info;
+    const std::string file = "C:/proj/tools/main.cpp";   // the fixture's `app`: -IC:/proj/include, WIN32, UNICODE
+    EXPECT_EQ(info.compileSettingsVersion(), 0u);
+    EXPECT_FALSE(hasArg(info.compileFlagsFor(file), "-DWIN32")) << "nothing known yet";
+
+    info.setCompileSettings(settings);
+    EXPECT_EQ(info.compileSettingsVersion(), 1u);
+    const cpptools::CompileFlags flags = info.compileFlagsFor(file);
+    EXPECT_TRUE(hasArg(flags, "-DWIN32"));
+    EXPECT_TRUE(hasArg(flags, "-DUNICODE"));
+    EXPECT_TRUE(hasArg(flags, "-IC:/proj/include"));
+    EXPECT_NE(flags.origin.find("CMake target app"), std::string::npos) << flags.origin;
+    EXPECT_FALSE(hasArg(info.compileFlagsFor("C:/elsewhere/x.cpp"), "-DWIN32")) << "a file no target claims is left as it was";
+
+    info.setCompileSettings(nullptr);
+    EXPECT_EQ(info.compileSettingsVersion(), 2u);
+    EXPECT_FALSE(hasArg(info.compileFlagsFor(file), "-DWIN32"));
+}
+
+TEST(WorkspaceInfoTest, AnEditorsCachedFlagsAreLookedUpAgainWhenTheBuildSettingsChange) {
+    auto settings = fixtureSettings();
+    ASSERT_NE(settings, nullptr);
+
+    auto document = std::make_shared<CppDocument>();
+    document->setPath("C:/proj/tools/main.cpp");
+    EXPECT_FALSE(hasArg(document->flags(), "-DWIN32"));
+
+    WorkspaceInfo::instance().setCompileSettings(settings);   // the explorer finished reading CMake
+    EXPECT_TRUE(hasArg(document->flags(), "-DWIN32")) << "the cached flags noticed";
+    EXPECT_NE(document->flags().origin.find("CMake target app"), std::string::npos);
+
+    WorkspaceInfo::instance().setCompileSettings(nullptr);   // leave the shared instance as found
+    EXPECT_FALSE(hasArg(document->flags(), "-DWIN32"));
+}
+
 TEST_F(ProjectExplorerTest, AMissingHeaderAndItsKnockOnErrorsAreOnlyAWarningOnTheFile) {
     write("broken.cpp", "#include \"does_not_exist.h\"\nMissingType value;\n");   // the second line fails because of the first
     write("really_broken.cpp", "int f() { return undeclared_name; }\n");           // an error of its own
@@ -337,6 +398,88 @@ TEST_F(ProjectExplorerTest, AMissingHeaderAndItsKnockOnErrorsAreOnlyAWarningOnTh
     const ProjectStats& stats = explorer_->stats();
     EXPECT_EQ(stats.filesWithUnresolvedIncludes, 1u);
     EXPECT_EQ(stats.filesWithErrors, 1u) << "the knock-on error is counted with the include, not as an error";
+}
+
+TEST_F(ProjectExplorerTest, AHeaderNothingIncludesIsMarkedUnreferenced) {
+    write("orphan.h", "int orphan();\n");
+    write("used.h", "int used();\n");
+    write("user_of_used.cpp", "#include \"used.h\"\nint g() { return used(); }\n");
+    explorer_->setBackground(false);
+    explorer_->setRoot(dir_.generic_string());
+    explorer_->waitForIndexing();
+    explorer_->setMode(ExplorerMode::Files);
+
+    ExplorerTreeModel* model = explorer_->model();
+    auto badgeOf = [&](const std::string& name) {
+        for (std::size_t i = 0; i < model->childCount({}); ++i) {
+            const ExplorerNode* node = model->nodeAt({ i });
+            if (node != nullptr && node->text == name) return node->badge;
+        }
+        return ExplorerNode::Badge::None;
+    };
+    EXPECT_EQ(badgeOf("orphan.h"), ExplorerNode::Badge::Unreferenced);
+    EXPECT_EQ(badgeOf("used.h"), ExplorerNode::Badge::None);
+}
+
+// Run by name (--gtest_also_run_disabled_tests): this repo's own files that reported errors, indexed with the flags the
+// explorer now builds from the real build/ tree. Prints to stdout.
+TEST(ProjectExplorerRepo, DISABLED_TheRepoFilesThatNeededTheBuildsFlags) {
+    const fs::path repo = fs::path(EXPLORER_TEST_FIXTURES).parent_path().parent_path().parent_path();
+    const cmakemodel::LoadResult loaded = cmakemodel::loadFileApi((repo / "build").generic_string(), "Debug");
+    if (!loaded.ok()) GTEST_SKIP() << loaded.error;
+    auto settings = std::make_shared<cmakemodel::CompileSettingsIndex>(loaded.model);
+
+    auto provider = [settings](const std::string& file) {
+        std::vector<std::string> args = cpptools::compileFlagsFor(file).args;
+        if (const cmakemodel::CompileSettings* found = settings->find(file)) {
+            for (std::string& extra : found->toArgs()) args.push_back(std::move(extra));
+        }
+        return args;
+    };
+    const std::vector<std::string> names = {
+        "unittests/test_explorer_model.cpp", "unittests/test_cmakemodel.cpp", "unittests/test_projectindex.cpp",
+        "unittests/lex/cmake_lexer_tests.cpp", "unittests/test_delegatebindings.cpp", "unittests/test_editor_file_kinds.cpp",
+        "src/codegen/methodinsertion.cpp", "src/codegen/accessmerge.cpp", "extension/NativeEditControls/NativeEditor.cpp",
+        "include/cpptools/diagnostic.h", "include/cpptools_codegen/classbuilder.h", "src/cmakemodel/model.cpp" };
+
+    for (const bool withBuildFlags : { false, true }) {
+        cpptools::ProjectIndex index;
+        index.setRoots({ repo.generic_string() });
+        if (withBuildFlags) index.setFlagsProvider(provider);
+        std::vector<std::string> files;
+        for (const std::string& name : names) files.push_back((repo / name).generic_string());
+        index.indexFiles(files, {}, 4);
+        std::printf("--- %s\n", withBuildFlags ? "with the build's flags added" : "compile_commands.json only");
+        for (const std::string& name : names) {
+            const cpptools::ProjectIndex::Problems p = index.problemsIn((repo / name).generic_string());
+            std::printf("  %-50s errors %u  warnings %u  unresolved %u%s\n", name.c_str(), p.errors, p.warnings, p.unresolvedIncludes,
+                        p.samples.empty() ? "" : ("   first: " + p.samples[0].message).c_str());
+        }
+    }
+}
+
+TEST_F(ProjectExplorerTest, ACountInTheInfoPanelOpensOntoTheFilesBehindItAndTheyOpen) {
+    write("really_broken.cpp", "int f() { return undeclared_name; }\n");
+    explorer_->setBackground(false);
+    explorer_->setRoot(dir_.generic_string());
+    explorer_->waitForIndexing();
+    explorer_->setInfoShown(true);
+
+    ExplorerTreeModel* model = explorer_->model();
+    ASSERT_GE(model->childCount({}), 3u);   // Timing, Top-level folders, Index, CMake
+    std::size_t errorRow = model->childCount({ 2 });
+    for (std::size_t i = 0; i < model->childCount({ 2 }); ++i) {
+        const ExplorerNode* row = model->nodeAt({ 2, i });
+        if (row != nullptr && row->text == "Files with errors") errorRow = i;
+    }
+    ASSERT_LT(errorRow, model->childCount({ 2 }));
+    ASSERT_EQ(model->childCount({ 2, errorRow }), 1u);
+    const ExplorerNode* file = model->nodeAt({ 2, errorRow, 0 });
+    ASSERT_NE(file, nullptr);
+    EXPECT_EQ(file->text, "really_broken.cpp");
+
+    EXPECT_TRUE(explorer_->activate({ 2, errorRow, 0 })) << "a double-click on it opens the file";
+    EXPECT_NE(opened_.path.find("really_broken.cpp"), std::string::npos);
 }
 
 TEST_F(ProjectExplorerTest, TheInfoButtonShowsHowLongThingsTookAndWhatIsWhere) {

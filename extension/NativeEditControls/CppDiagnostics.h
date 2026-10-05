@@ -76,6 +76,7 @@ namespace CodeToolsVsix
         mutable std::mutex mutex_;
         std::string path_;
         mutable bool flagsValid_ = false;
+        mutable unsigned flagsSettingsVersion_ = 0;   // WorkspaceInfo::compileSettingsVersion() when flags_ was looked up
         mutable cpptools::CompileFlags flags_;
     };
 
