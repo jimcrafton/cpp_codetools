@@ -62,6 +62,13 @@ Jump to handler code:
 
 <img width="851" height="727" alt="sc21" src="https://github.com/user-attachments/assets/ffdbe496-1a31-4798-b36b-e94abf5691c7" />
 
+The VS IDE Solution Explorer replacement
+
+<img width="596" height="1105" alt="sc24" src="https://github.com/user-attachments/assets/c9ed0001-1b92-4bb7-8612-752951964f6a" />
+
+<img width="593" height="1104" alt="sc23" src="https://github.com/user-attachments/assets/3bbf5d2f-970e-485e-be94-6e1821d168d2" />
+
+<img width="597" height="1107" alt="sc22" src="https://github.com/user-attachments/assets/64a00fe8-117c-4bae-aa1f-baee510b1e32" />
 
 
 
