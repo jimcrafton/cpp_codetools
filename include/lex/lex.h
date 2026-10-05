@@ -21,3 +21,6 @@
 #include "json5_language.h"
 #include "cpp_lexer.h"
 #include "cpp_language.h"
+#include "cmake_lexer.h"
+#include "cmake_parser.h"
+#include "cmake_language.h"

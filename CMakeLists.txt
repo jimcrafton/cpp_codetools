@@ -230,7 +230,9 @@ add_library(cpptools STATIC
     src/compileflags.cpp
     src/log.cpp
     src/delegatebindings.cpp
+    src/projectindex.cpp
     include/cpptools/delegatebindings.h
+    include/cpptools/projectindex.h
     include/cpptools/symbol.h
     include/cpptools/compileflags.h
     include/cpptools/diagnostic.h
@@ -293,6 +295,9 @@ add_library(lex STATIC
     src/lex/json5_language.cpp
     src/lex/cpp_lexer.cpp
     src/lex/cpp_language.cpp
+    src/lex/cmake_lexer.cpp
+    src/lex/cmake_parser.cpp
+    src/lex/cmake_language.cpp
     include/lex/lex.h
     include/lex/lexer_base.h
     include/lex/json5_lexer.h
@@ -304,11 +309,28 @@ add_library(lex STATIC
     include/lex/highlight.h
     include/lex/json5_language.h
     include/lex/cpp_lexer.h
-    include/lex/cpp_language.h)
+    include/lex/cpp_language.h
+    include/lex/cmake_lexer.h
+    include/lex/cmake_parser.h
+    include/lex/cmake_language.h)
 
 target_include_directories(lex PUBLIC include)
 if(MSVC)
     target_compile_options(lex PRIVATE /utf-8)
+endif()
+
+# cmakemodel - the project as CMake's File API describes it (targets, sources, link edges, and the
+# CMakeLists line behind each). No CMake or Clang dependency: lex's JSON parser only. See
+# solution-explorer-plan.md, Phase 1.
+add_library(cmakemodel STATIC
+    src/cmakemodel/model.cpp
+    src/cmakemodel/fileapi.cpp
+    include/cmakemodel/model.h
+    include/cmakemodel/fileapi.h)
+target_include_directories(cmakemodel PUBLIC include)
+target_link_libraries(cmakemodel PUBLIC lex)
+if(MSVC)
+    target_compile_options(cmakemodel PRIVATE /utf-8)
 endif()
 
 add_subdirectory(tools/cppoutline)
@@ -381,6 +403,13 @@ add_library(nativeeditcontrols_core OBJECT
     extension/NativeEditControls/LayoutEditingPolicy.cpp
     extension/NativeEditControls/DirectoryTree.cpp
     extension/NativeEditControls/TextEncoding.cpp
+    extension/NativeEditControls/Settings.cpp
+    extension/NativeEditControls/ExplorerModel.cpp
+    extension/NativeEditControls/ExplorerItem.cpp
+    extension/NativeEditControls/WorkspaceInfo.cpp
+    extension/NativeEditControls/NativeToolWindow.cpp
+    extension/NativeEditControls/ProjectExplorer.cpp
+    extension/NativeEditControls/ExplorerToolWindow.cpp
     extension/NativeEditControls/Logging.cpp)
 
 target_compile_definitions(nativeeditcontrols_core PUBLIC
@@ -391,7 +420,7 @@ target_compile_definitions(nativeeditcontrols_core PUBLIC
 
 set(VSEXT_INCLUDES "C:/Program Files/Microsoft Visual Studio/18/Community/VSSDK/VisualStudioIntegration/Common/Inc")
 target_include_directories(nativeeditcontrols_core PUBLIC include ${VSEXT_INCLUDES})
-target_link_libraries(nativeeditcontrols_core PUBLIC cpptools cpptools_codegen newui lex user32.lib gdi32.lib comdlg32.lib)
+target_link_libraries(nativeeditcontrols_core PUBLIC cpptools cpptools_codegen cmakemodel newui lex user32.lib gdi32.lib comdlg32.lib)
 add_dependencies(nativeeditcontrols_core cpptools_version)
 
 add_library(NativeEditControls SHARED

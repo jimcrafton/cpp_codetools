@@ -31,8 +31,8 @@ namespace CodeToolsVsix
     class SelectionOverlay : public newui::Overlay
     {
     public:
-        static constexpr float kHandleSize = 7.0f;
-        static constexpr float kHandleHalf = kHandleSize * 0.5f;
+        // The corner handle's side, from the options (7 by default).
+        static float handleSize();
         static constexpr float kOutlineWidth = 2.0f;
         static constexpr float kBadgePaddingX = 6.0f;
         static constexpr float kBadgeHeight = 18.0f;

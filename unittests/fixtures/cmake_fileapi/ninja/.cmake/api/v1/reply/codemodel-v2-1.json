@@ -1,0 +1,11 @@
+{"kind":"codemodel","version":{"major":2,"minor":10},"paths":{"source":"C:/proj","build":"C:/proj/build"},
+ "configurations":[{"name":"Debug",
+  "directories":[{"source":".","build":"."},{"source":"tools","build":"tools"}],
+  "projects":[{"name":"proj","directoryIndexes":[0,1]}],
+  "targets":[
+   {"name":"app","id":"app::@1","directoryIndex":1,"projectIndex":0,"jsonFile":"target-app-Debug.json"},
+   {"name":"core","id":"core::@1","directoryIndex":0,"projectIndex":0,"jsonFile":"target-core-Debug.json"},
+   {"name":"objs","id":"objs::@1","directoryIndex":0,"projectIndex":0,"jsonFile":"target-objs-Debug.json"},
+   {"name":"core_tests","id":"core_tests::@1","directoryIndex":0,"projectIndex":0,"jsonFile":"target-core_tests-Debug.json"},
+   {"name":"gen","id":"gen::@1","directoryIndex":0,"projectIndex":0,"jsonFile":"target-gen-Debug.json"},
+   {"name":"ALL_BUILD","id":"ALL_BUILD::@1","directoryIndex":0,"projectIndex":0,"jsonFile":"target-ALL_BUILD-Debug.json"}]}]}

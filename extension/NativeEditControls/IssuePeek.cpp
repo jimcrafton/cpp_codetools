@@ -1,5 +1,7 @@
 #include "IssuePeek.h"
 
+#include "Settings.h"
+
 namespace CodeToolsVsix
 {
     namespace
@@ -37,13 +39,14 @@ namespace CodeToolsVsix
             return lines;
         }
 
-        // `text` with each tab turned into spaces up to the next multiple of kTabWidth.
+        // `text` with each tab turned into spaces up to the next multiple of the peek tab width setting.
         std::string expandTabs(const std::string& text)
         {
+            const std::size_t tabWidth = static_cast<std::size_t>(Settings::instance().getInt(Settings::kPeekTabWidth, 1, 16));
             std::string out;
             for (char c : text) {
                 if (c == '\t') {
-                    const std::size_t pad = IssuePeek::kTabWidth - out.size() % IssuePeek::kTabWidth;
+                    const std::size_t pad = tabWidth - out.size() % tabWidth;
                     out.append(pad, ' ');
                 } else {
                     out += c;

@@ -1,5 +1,8 @@
 #include "NativeEditor.h"
+#include "NativeToolWindow.h"
+#include "Settings.h"
 #include "TextEncoding.h"
+#include "WorkspaceInfo.h"
 
 #include <cpptools/version.h>
 #include <newui/version.h>
@@ -111,6 +114,56 @@ void __stdcall NativeEditControl_SetHost(const HostServices* services)
     });
 
     HostLocationOpener::instance().setCallback(host.openLocation);
+}
+
+HWND __cdecl NativeToolWindow_Create(HWND hwndParent, int x, int y, int width, int height, ToolWindowType type)
+{
+    return NativeToolWindowManager::create(hwndParent, x, y, width, height, type);
+}
+
+BOOL __stdcall NativeToolWindow_SetBounds(HWND hwnd, int x, int y, int width, int height)
+{
+    return NativeToolWindowManager::setBounds(hwnd, x, y, width, height) ? TRUE : FALSE;
+}
+
+BOOL __stdcall NativeToolWindow_RequestClose(HWND hwnd)
+{
+    return NativeToolWindowManager::close(hwnd) ? TRUE : FALSE;
+}
+
+void __stdcall NativeEditControl_WorkspaceChanged(const wchar_t* roots, const wchar_t* configuration)
+{
+    // Listeners run on the edit thread, where the tool windows live.
+    NativeEditManager::startRunLoop();
+    WorkspaceInfo::instance().setRunLoop(NativeEditManager::runLoop());
+
+    std::vector<std::string> folders;
+    std::wstring all = roots != nullptr ? roots : L"";
+    std::size_t from = 0;
+    while (from <= all.size() && !all.empty()) {
+        std::size_t to = all.find(L'\n', from);
+        if (to == std::wstring::npos) to = all.size();
+        if (to > from) folders.push_back(wideToUtf8(all.substr(from, to - from)));
+        from = to + 1;
+    }
+    WorkspaceInfo::instance().set(std::move(folders), configuration != nullptr ? wideToUtf8(std::wstring(configuration)) : std::string());
+}
+
+void __stdcall NativeEditControl_SettingChanged(const wchar_t* settingName, const wchar_t* value)
+{
+    if (settingName == nullptr) {
+        return;
+    }
+    // Listeners run on the edit thread, where the editors live. Set on every call, which keeps this
+    // independent of whether the host table has been registered yet.
+    NativeEditManager::startRunLoop();
+    Settings::instance().setRunLoop(NativeEditManager::runLoop());
+
+    std::string key;
+    for (const wchar_t* c = settingName; *c != L'\0'; ++c) {
+        key += static_cast<char>(*c);   // keys are ASCII
+    }
+    Settings::instance().set(key, value != nullptr ? std::wstring(value) : std::wstring());
 }
 
 void __stdcall NativeEditControl_HostGetTextReply(

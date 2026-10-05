@@ -34,6 +34,9 @@ namespace CodeToolsVsix
                 OpenLocation = Marshal.GetFunctionPointerForDelegate(HostDocumentOpener.OpenLocationCallback),
             };
             NativeMethods.NativeEditControl_SetHost(ref services);
+
+            // The options go over once the DLL is connected; changes follow from OptionsStorage.
+            CodeToolsPackage.Options?.PushAll();
         }
     }
 }

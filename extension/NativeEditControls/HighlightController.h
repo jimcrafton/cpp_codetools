@@ -114,8 +114,15 @@ namespace CodeToolsVsix
         // How long typing must pause before the first pass starts (default 50 ms).
         void setDelay(std::chrono::milliseconds delay) { delays_[0] = delay; }
 
+        // Changes what the first pass computes (a file of another language was loaded); takes effect from the
+        // next pass. The second pass is removed by clearOverlayAnalyzer(), which also drops its squiggles.
+        void setAnalyzer(HighlightAnalyzer analyzer) { analyzer_ = std::move(analyzer); }
+        void clearOverlayAnalyzer();
+
         // The second pass, and how long typing must pause before it starts (default 600 ms).
         void setOverlayAnalyzer(OverlayAnalyzer analyzer, std::chrono::milliseconds delay = std::chrono::milliseconds(600));
+        // Changes the second pass's pause; takes effect from the next edit.
+        void setOverlayDelay(std::chrono::milliseconds delay) { delays_[kOverlayPass] = delay; }
         // Called on the UI thread after each overlay is applied; the handler may move its extra out.
         void setOnOverlayApplied(std::function<void(HighlightOverlay&)> handler) { onOverlayApplied_ = std::move(handler); }
 

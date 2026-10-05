@@ -2372,7 +2372,7 @@ namespace CodeToolsVsix
         ToolboxPlacement placement;
         placement.target = target;
         placement.dropBounds = newui::Rect(rootLocalPt.x - targetOrigin.x, rootLocalPt.y - targetOrigin.y,
-            Workspace::kNewControlDefaultWidth, Workspace::kNewControlDefaultHeight);
+            Workspace::newControlDefaultWidth(), Workspace::kNewControlDefaultHeight);
 
         // What the target's own layout policy would do with it - the same zero-delta resolve()
         // buildReparentAction() uses for a canvas drag into a container.

@@ -74,7 +74,6 @@ namespace CodeToolsVsix
         // display-units-plan.md's "Monitor DPI scaling" vs "Font-relative sizing" distinction.
         static constexpr newui::DisplayValue kEdge{6.0f, newui::DisplayUnit::Dip};       // keep an overlay this far inside the host
         static constexpr newui::DisplayValue kCaretGap{6.0f, newui::DisplayUnit::Dip};   // between the caret's line and an overlay next to it
-        static constexpr newui::DisplayValue kMinimapWidth{28.0f, newui::DisplayUnit::Dip};
 
         FindReplaceController(newui::View& host, newui::TextFoldingControl& text, HighlightController* highlight);
         ~FindReplaceController();

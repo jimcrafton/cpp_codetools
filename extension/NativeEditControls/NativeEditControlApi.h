@@ -133,6 +133,38 @@ NATIVEEDITCONTROL_API BOOL __stdcall NativeEditControl_ExecCommand(
 // replaces the whole set.
 NATIVEEDITCONTROL_API void __stdcall NativeEditControl_SetHost(const HostServices* services);
 
+// Which tool-window pane NativeToolWindow_Create builds. A tool window (the project explorer) is not a
+// document: it has no file, and VS keeps one of it for the whole session.
+enum class ToolWindowType : int32_t
+{
+    Unknown = 0,
+    ProjectExplorer = 1
+};
+
+// Creates a tool-window pane as a child of hwndParent (the window the managed tool window gives it),
+// filling (x, y, width, height). Like NativeEditControl_Create the pane lives on this DLL's edit thread and
+// must be closed with NativeToolWindow_RequestClose(), never DestroyWindow(). Returns its HWND, or null.
+NATIVEEDITCONTROL_API HWND __cdecl NativeToolWindow_Create(
+    HWND hwndParent, int x, int y, int width, int height, ToolWindowType type);
+
+// Moves and sizes the pane within its parent - call it when the managed host window is resized.
+NATIVEEDITCONTROL_API BOOL __stdcall NativeToolWindow_SetBounds(HWND hwnd, int x, int y, int width, int height);
+
+NATIVEEDITCONTROL_API BOOL __stdcall NativeToolWindow_RequestClose(HWND hwnd);
+
+// What the host has open: the workspace's root folders and the active build configuration, pushed whenever
+// a solution or folder opens or closes. roots is the folders' paths separated by '\n' (empty: nothing is
+// open); configuration may be empty. Both are null-terminated UTF-16, copied before this returns; from
+// any thread.
+NATIVEEDITCONTROL_API void __stdcall NativeEditControl_WorkspaceChanged(const wchar_t* roots, const wchar_t* configuration);
+
+// The host's side of the options: a codetools++ setting (the CodeTools.* names in
+// CodeToolsSettings.registration.json) and its value as text ("true"/"false" for booleans, decimal for
+// numbers; the native side knows each key's type, so none is passed). Pushed once per setting after the
+// host connects, then again on each change; from any thread. Both strings are null-terminated UTF-16 and
+// copied before this returns.
+NATIVEEDITCONTROL_API void __stdcall NativeEditControl_SettingChanged(const wchar_t* settingName, const wchar_t* value);
+
 // How the host answers HostServices::getText / applyEdits requests (see HostEditorBridge.h and
 // DocumentEditService.h): from any thread, never from inside the request callback itself (VS's UI thread
 // can be mid-call into this DLL). Text is UTF-16 and offsets are UTF-16 indices. status is EditStatus

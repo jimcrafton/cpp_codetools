@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include "../extension/NativeEditControls/IssuePeek.h"
+#include "../extension/NativeEditControls/Settings.h"
 
 using namespace CodeToolsVsix;
 
@@ -101,6 +102,18 @@ TEST(IssuePeek, TabsAreExpandedAndTheUnderlineFollowsThem) {
     EXPECT_EQ(peeks[0].underlineStart, 12u);
     EXPECT_EQ(peeks[0].underlineLength, 1u);
     EXPECT_EQ(peeks[0].excerpt[1][peeks[0].underlineStart], 'c');
+}
+
+TEST(IssuePeek, TheTabWidthComesFromTheOptions) {
+    Settings::instance().set(Settings::kPeekTabWidth.key, L"2");
+    const std::string text = "int a;\n\tint b = c;\n";
+    const std::size_t at = text.find('\t') + 9;
+    const auto peeks = buildIssuePeeks({problem(2, 10, at, "undeclared", cpptools::Severity::Error, at + 1)}, text);
+    Settings::instance().set(Settings::kPeekTabWidth.key, L"4");   // the shared instance outlives the test
+
+    ASSERT_EQ(peeks[0].excerpt.size(), 2u);
+    EXPECT_EQ(peeks[0].excerpt[1], "  int b = c;");
+    EXPECT_EQ(peeks[0].underlineStart, 10u);
 }
 
 TEST(IssuePeek, CrLfLinesAreSplitWithoutTheCarriageReturn) {

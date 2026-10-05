@@ -1,0 +1,213 @@
+{
+  meta: {
+    author: "",
+    date: "2026-10-04",
+    copyright: "",
+    version: "0.1.0.1"
+  },
+  type: "SubView",
+  visible: true,
+  name: "explorer",
+  layout: {
+    type: "FlexLayout",
+    orientation: "Vertical",
+    spacing: 4,
+    padding: 8,
+    crossAxisAlignment: "Stretch"
+  },
+  style: {
+    type: "ViewStyle",
+    backgroundFill: {
+      type: "Fill",
+      kind: "Color",
+      color: "ControlBackground"
+    }
+  },
+  childViews: [
+    {
+      type: "Label",
+      name: "explorerTitle",
+      text: "C++ PROJECT EXPLORER",
+      textAlignment: "Left",
+      style: {
+        type: "LabelStyle",
+        text: "C++ PROJECT EXPLORER",
+        textColor: "DisabledText",
+        font: {
+          type: "Font",
+          name: "Segoe UI",
+          size: 11
+        }
+      },
+      desiredSize: {
+        type: "Size",
+        width: 200,
+        height: 18
+      },
+      desiredSizeOverride: true
+    },
+    {
+      type: "SubView",
+      visible: true,
+      name: "modeHost",
+      layout: {
+        type: "FlexLayout",
+        orientation: "Vertical",
+        spacing: 0,
+        padding: 0,
+        crossAxisAlignment: "Stretch"
+      },
+      desiredSize: {
+        type: "Size",
+        width: 200,
+        height: 28
+      },
+      desiredSizeOverride: true
+    },
+    {
+      type: "TextField",
+      name: "filterInput",
+      placeholder: "Filter...",
+      font: {
+        type: "Font",
+        name: "Segoe UI",
+        size: 12
+      },
+      textColor: "ControlText",
+      desiredSize: {
+        type: "Size",
+        width: 200,
+        height: 24
+      },
+      desiredSizeOverride: true
+    },
+    {
+      type: "SubView",
+      visible: true,
+      name: "rootBar",
+      layout: {
+        type: "FlexLayout",
+        orientation: "Horizontal",
+        spacing: 4,
+        padding: 0,
+        crossAxisAlignment: "Stretch"
+      },
+      childViews: [
+        {
+          type: "SubView",
+          visible: true,
+          name: "rootText",
+          layout: {
+            type: "FlexLayout",
+            orientation: "Vertical",
+            spacing: 0,
+            padding: 0,
+            crossAxisAlignment: "Stretch"
+          },
+          layoutParams: {
+            type: "FlexLayoutParams",
+            weight: 1.0
+          },
+          childViews: [
+        {
+          type: "Label",
+          name: "rootName",
+          text: "",
+          textAlignment: "Left",
+          style: {
+            type: "LabelStyle",
+            text: "",
+            textColor: "ControlText",
+            font: {
+              type: "Font",
+              name: "Segoe UI",
+              size: 12.5
+            }
+          },
+          desiredSize: {
+            type: "Size",
+            width: 200,
+            height: 18
+          },
+          desiredSizeOverride: true
+        },
+        {
+          type: "Label",
+          name: "rootPath",
+          text: "",
+          textAlignment: "Left",
+          style: {
+            type: "LabelStyle",
+            text: "",
+            textColor: "DisabledText",
+            font: {
+              type: "Font",
+              name: "Segoe UI",
+              size: 11
+            }
+          },
+          desiredSize: {
+            type: "Size",
+            width: 200,
+            height: 16
+          },
+          desiredSizeOverride: true
+        }
+          ]
+        },
+        {
+          type: "Button",
+          name: "infoButton",
+          text: "i",
+          toggleButton: true,
+          desiredSize: { type: "Size", width: 26, height: 26 },
+          desiredSizeOverride: true
+        }
+      ],
+      desiredSize: {
+        type: "Size",
+        width: 200,
+        height: 34
+      },
+      desiredSizeOverride: true
+    },
+    {
+      type: "SubView",
+      visible: true,
+      name: "treeHost",
+      layout: {
+        type: "FlexLayout",
+        orientation: "Vertical",
+        spacing: 0,
+        padding: 0,
+        crossAxisAlignment: "Stretch"
+      },
+      layoutParams: {
+        type: "FlexLayoutParams",
+        weight: 1.0
+      }
+    },
+    {
+      type: "Label",
+      name: "statusLabel",
+      text: "",
+      textAlignment: "Left",
+      style: {
+        type: "LabelStyle",
+        text: "",
+        textColor: "DisabledText",
+        font: {
+          type: "Font",
+          name: "Segoe UI",
+          size: 11
+        }
+      },
+      desiredSize: {
+        type: "Size",
+        width: 200,
+        height: 16
+      },
+      desiredSizeOverride: true
+    }
+  ]
+}

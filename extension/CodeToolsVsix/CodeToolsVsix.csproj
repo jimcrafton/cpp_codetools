@@ -19,7 +19,7 @@
 
     <!-- In-proc VS packages that implement legacy COM editor interfaces (IVsEditorFactory,
          IVsWindowPane) must be .NET Framework - the shell loads them in-proc, not OOP. -->
-    <UseWindowsForms>false</UseWindowsForms>
+    <UseWindowsForms>true</UseWindowsForms>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Platforms>AnyCPU;x64</Platforms>
     <ExtensionInstallationRoot>CommonExtensions</ExtensionInstallationRoot>
@@ -107,6 +107,21 @@
          if VS 2026 publishes its own package line (17.14.x is current as of Aug 2026). -->
     <PackageReference Include="Microsoft.VisualStudio.SDK" Version="17.14.40265" ExcludeAssets="runtime" />
     <PackageReference Include="Microsoft.VSSDK.BuildTools" Version="18.9.820" />
+    <!-- IVsFolderWorkspaceService (Open Folder mode: which folder is open, and when it changes). It lives in
+         Microsoft.VisualStudio.Workspace.VSIntegration.Contracts, shipped by this package. -->
+    <PackageReference Include="Microsoft.VisualStudio.Workspace.VSIntegration" Version="17.12.19" ExcludeAssets="runtime" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- MenuCommand (the View menu command) is in System.Design. -->
+    <Reference Include="System.Design" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- View > Other Windows > C++ Project Explorer; compiled into the package as Menus.ctmenu. -->
+    <VSCTCompile Include="CodeToolsPackage.vsct">
+      <ResourceName>Menus.ctmenu</ResourceName>
+    </VSCTCompile>
   </ItemGroup>
 
   <ItemGroup>

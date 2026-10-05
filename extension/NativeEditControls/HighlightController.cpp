@@ -190,6 +190,15 @@ namespace CodeToolsVsix
         delays_[kOverlayPass] = delay;
     }
 
+    void HighlightController::clearOverlayAnalyzer()
+    {
+        overlayAnalyzer_ = nullptr;
+        if (!overlay_.empty()) {
+            overlay_.clear();
+            publishRanges();
+        }
+    }
+
     void HighlightController::handleTextChanged()
     {
         ++state_->generation;

@@ -53,8 +53,9 @@ namespace CodeToolsVsix
         // 58px), not arbitrary guesses - see centerAndRight/mainRow/middle's
         // own setFixedPane()/setSplitPosition() calls (Workspace.cpp) for
         // which pane each of these actually sizes.
-        static constexpr float kToolboxPaneWidth = 220.0f;
-        static constexpr float kPropertiesPaneWidth = 300.0f;
+        // Widths come from the options (Settings), those 220 and 300 by default.
+        static float toolboxPaneWidth();
+        static float propertiesPaneWidth();
 
         // Document Outline's own fixed height within the right-hand dock,
         // above Properties (which absorbs the rest) - Main.dc.html's own
@@ -77,12 +78,14 @@ namespace CodeToolsVsix
         // bluesky/designer-surface/Main.dc.html's own ".artboard" (640x460),
         // itself an arbitrary reference size. A loaded document overrides it via
         // setCanvasFrameSize() below.
-        static constexpr float kDefaultCanvasWidth = 640.0f;
+        // The width is an option (640 by default).
+        static float defaultCanvasWidth();
         static constexpr float kDefaultCanvasHeight = 460.0f;
 
         // A brand-new control's default size (Toolbox double-click and drag-drop both use it) -
         // nothing in newui measures itself, so a fixed default is the honest v1 answer.
-        static constexpr float kNewControlDefaultWidth = 120.0f;
+        // The width is an option (120 by default).
+        static float newControlDefaultWidth();
         static constexpr float kNewControlDefaultHeight = 32.0f;
 
         // Thinner than newui::Splitter's own generic 6px default - a

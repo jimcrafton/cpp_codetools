@@ -290,7 +290,7 @@ namespace CodeToolsVsix
         textControl->setVisible(true);
         textControl->setModel(std::make_unique<newui::text::HistoryTextModel>());
         textControl->setHighlightsCurrentLine(true);
-        textControl->setWordWrap(false);   // code: one row per line, scrolling sideways when it's long
+        textControl->setWordWrap(Settings::instance().getBool(Settings::kWordWrap));   // off: one row per line, scrolling sideways
         scrollView->addChild(textControl);
 
         auto* outlineScroll = new newui::ScrollView();
@@ -355,9 +355,7 @@ namespace CodeToolsVsix
         // for syntax-error squiggles, and keeps the outline current.
         highlight_ = std::make_unique<HighlightController>(*textControl, &analyzeCpp);
         document_ = std::make_shared<CppDocument>();
-        highlight_->setOverlayAnalyzer([document = document_](const std::wstring& text) {
-            return analyzeCppDiagnostics(text, document);
-        });
+        applyFileKind(FileKind::Cpp);
         highlight_->setOnOverlayApplied([this](HighlightOverlay& overlay) {
             if (const auto* outline = std::any_cast<std::wstring>(&overlay.extra)) {
                 setOutlineText(*outline);
@@ -372,6 +370,8 @@ namespace CodeToolsVsix
                 status_->refresh();   // the colors pass republishes the overlay's squiggles, moved along
             }
         });
+        applySettings();
+        settingsConnection_ = Settings::instance().onChanged.add(this, &CppEditor::handleSettingChanged);
 
         // Find / Replace / Go to line: overlays added to the same host as the two panes.
         find_ = std::make_unique<FindReplaceController>(*host, *textControl, highlight_.get());
@@ -399,6 +399,72 @@ namespace CodeToolsVsix
         caretConnection_ = textControl->caret().onPositionChanged.add(this, &CppEditor::handleCaretMoved);
 
         return true;
+    }
+
+    newui::SyncReturn CppEditor::handleSettingChanged(Settings&, std::string key)
+    {
+        if (key.rfind("CodeTools.editor.", 0) == 0) {
+            applySettings();
+        }
+        return newui::SyncReturn::Ignored;
+    }
+
+    CppEditor::FileKind CppEditor::fileKindFor(const std::wstring& path)
+    {
+        const std::size_t slash = path.find_last_of(L"\\/");
+        std::wstring name = path.substr(slash == std::wstring::npos ? 0 : slash + 1);
+        for (wchar_t& c : name) {
+            if (c >= L'A' && c <= L'Z') c = static_cast<wchar_t>(c - L'A' + L'a');
+        }
+        auto endsWith = [&name](const std::wstring& suffix) {
+            return name.size() >= suffix.size() && name.compare(name.size() - suffix.size(), suffix.size(), suffix) == 0;
+        };
+        if (name == L"cmakelists.txt" || endsWith(L".cmake")) {
+            return FileKind::CMake;
+        }
+        for (const wchar_t* ext : { L".c", L".cc", L".cpp", L".cxx", L".c++", L".h", L".hh", L".hpp", L".hxx", L".h++",
+                                    L".inl", L".ipp", L".tpp", L".ixx", L".cppm" }) {
+            if (endsWith(ext)) {
+                return FileKind::Cpp;
+            }
+        }
+        return FileKind::Plain;
+    }
+
+    void CppEditor::applyFileKind(FileKind kind)
+    {
+        fileKind_ = kind;
+        if (highlight_ == nullptr) {
+            return;
+        }
+        switch (kind) {
+            case FileKind::Cpp:
+                highlight_->setAnalyzer(&analyzeCpp);
+                highlight_->setOverlayAnalyzer([document = document_](const std::wstring& text) {
+                    return analyzeCppDiagnostics(text, document);
+                });
+                break;
+            case FileKind::CMake:
+                highlight_->setAnalyzer(&analyzeCMake);
+                highlight_->clearOverlayAnalyzer();
+                break;
+            case FileKind::Plain:
+                highlight_->setAnalyzer(&analyzePlainText);
+                highlight_->clearOverlayAnalyzer();
+                break;
+        }
+    }
+
+    void CppEditor::applySettings()
+    {
+        const Settings& settings = Settings::instance();
+        if (textControl_ != nullptr) {
+            textControl_->setWordWrap(settings.getBool(Settings::kWordWrap));
+        }
+        if (highlight_ != nullptr) {
+            highlight_->setDelay(std::chrono::milliseconds(settings.getInt(Settings::kHighlightDelayMs, 0, 5000)));
+            highlight_->setOverlayDelay(std::chrono::milliseconds(settings.getInt(Settings::kDiagnosticsDelayMs, 0, 10000)));
+        }
     }
 
     void CppEditor::startLoadingAnimation()
@@ -452,6 +518,7 @@ namespace CodeToolsVsix
 
     CppEditor::~CppEditor()
     {
+        Settings::instance().onChanged.remove(settingsConnection_);
         if (!registeredPath_.empty())
         {
             documentEditService().unregisterEditor(registeredPath_, this);
@@ -551,6 +618,10 @@ namespace CodeToolsVsix
             return false;
         }
 
+        // What kind of file this is decides what analyzes it: libclang must not parse a CMakeLists.txt.
+        const FileKind kind = fileKindFor(path);
+        applyFileKind(kind);
+
         // The parse pretends the text is this file (so its own directory is searched for includes).
         document_->setPath(wideToUtf8(path.c_str(), path.size()));
         registerForEdits(path);
@@ -568,11 +639,19 @@ namespace CodeToolsVsix
         // a no-RunLoop environment (unit tests - HighlightController::handleTextChanged() falls
         // back to refresh() when there's nothing to schedule onto), so only a real, message-pumped
         // run (testharness, VS) actually shows it, however briefly.
-        setOutlineText(L"--- Outline (cpptools): parsing... ---");
-        startLoadingAnimation();
+        if (kind == FileKind::Cpp) {
+            setOutlineText(L"--- Outline (cpptools): parsing... ---");
+            startLoadingAnimation();   // stops when the first parse lands, which only C++ has
+        } else {
+            setOutlineText(kind == FileKind::CMake ? L"--- No outline for CMake files ---" : L"--- No outline for this file type ---");
+            stopLoadingAnimation();
+        }
 
         textControl_->setText(utf8ToWide(contentUtf8));
         clearDirty();
+        if (kind != FileKind::Cpp && status_ != nullptr) {
+            status_->refresh();   // no problems to show: the previous file's are gone
+        }
 
         return true;
     }

@@ -4,6 +4,18 @@
 		"CodeTools": {
 			"title": "codetools++",
 			"description": "Settings for codetools++"
+		},
+		"CodeTools.editor": {
+			"title": "C++ Editor",
+			"description": "How the C++ editor behaves"
+		},
+		"CodeTools.designer": {
+			"title": "Designer",
+			"description": "How the .newui designer looks and behaves"
+		},
+		"CodeTools.explorer": {
+			"title": "Project Explorer",
+			"description": "The C++ project explorer tool window. These settings take effect once the explorer is available"
 		}
 	},
 	"properties": {
@@ -13,6 +25,91 @@
 			"description": "C++ extensions, separated by semicolons",
 			"default": ".cpp;.cc;.cxx",
 			"scope": "resource"
+		},
+		"CodeTools.editor.highlightDelayMs": {
+			"type": "integer",
+			"title": "Highlight delay (ms)",
+			"description": "How long typing must pause before syntax colors and folds are recomputed",
+			"default": 50
+		},
+		"CodeTools.editor.diagnosticsDelayMs": {
+			"type": "integer",
+			"title": "Diagnostics delay (ms)",
+			"description": "How long typing must pause before the code is parsed again for errors and the outline",
+			"default": 600
+		},
+		"CodeTools.editor.wordWrap": {
+			"type": "boolean",
+			"title": "Word wrap",
+			"description": "Wrap long lines instead of scrolling sideways",
+			"default": false
+		},
+		"CodeTools.editor.peekTabWidth": {
+			"type": "integer",
+			"title": "Tab width in problem previews",
+			"description": "A tab in a source excerpt is shown as this many columns",
+			"default": 4
+		},
+		"CodeTools.editor.minimapWidth": {
+			"type": "integer",
+			"title": "Minimap width",
+			"description": "Width of the strip beside the scrollbar that shows search matches and problems, in device-independent pixels",
+			"default": 28
+		},
+		"CodeTools.designer.toolboxWidth": {
+			"type": "integer",
+			"title": "Toolbox width",
+			"description": "Width of the toolbox pane, in device-independent pixels. Applies to designers opened afterward",
+			"default": 220
+		},
+		"CodeTools.designer.propertiesWidth": {
+			"type": "integer",
+			"title": "Properties width",
+			"description": "Width of the properties pane, in device-independent pixels. Applies to designers opened afterward",
+			"default": 300
+		},
+		"CodeTools.designer.canvasWidth": {
+			"type": "integer",
+			"title": "Blank canvas width",
+			"description": "Width of the design surface for a new, empty document, in device-independent pixels",
+			"default": 640
+		},
+		"CodeTools.designer.newControlWidth": {
+			"type": "integer",
+			"title": "New control width",
+			"description": "Width of a control dropped from the toolbox, in device-independent pixels",
+			"default": 120
+		},
+		"CodeTools.explorer.hideNative": {
+			"type": "boolean",
+			"title": "Hide Visual Studio's Solution Explorer",
+			"description": "Close the built-in Solution Explorer when a solution or folder opens. Not yet active",
+			"default": true
+		},
+		"CodeTools.explorer.defaultView": {
+			"type": "string",
+			"title": "Default view",
+			"description": "The view shown when the explorer opens. Not yet active",
+			"default": "Symbols",
+			"enum": ["Files", "Symbols", "Products", "Analysis"]
+		},
+		"CodeTools.explorer.compileCommandsPaths": {
+			"type": "string",
+			"title": "compile_commands.json search paths",
+			"description": "Folders to search for compile_commands.json, relative to the workspace root, separated by semicolons. Not yet active",
+			"default": "build-ninja;build;out/build/*"
+		},
+		"CodeTools.explorer.dimUnreferenced": {
+			"type": "boolean",
+			"title": "Dim unreferenced symbols",
+			"description": "Show symbols nothing refers to in a dimmed style. Not yet active",
+			"default": true
+		},
+		"CodeTools.designer.handleSize": {
+			"type": "integer",
+			"title": "Selection handle size",
+			"description": "Side of the square resize handles on the selected control, in device-independent pixels",
+			"default": 7
 		}
 	}
 }

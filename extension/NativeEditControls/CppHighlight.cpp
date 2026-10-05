@@ -1,8 +1,11 @@
 #include "CppHighlight.h"
 
+#include <lex/cmake_language.h>
+#include <lex/cmake_parser.h>
 #include <lex/cpp_language.h>
 #include <lex/cpp_lexer.h>
 
+#include <cstdint>
 #include <cwctype>
 #include <string_view>
 
@@ -94,6 +97,59 @@ namespace CodeToolsVsix
             }
         }
         return folds;
+    }
+
+    std::vector<newui::text::TextFold> cmakeFoldsFor(const std::wstring& text)
+    {
+        struct Section { std::wstring opener; std::size_t offset; std::uint32_t line; };
+        std::vector<newui::text::TextFold> folds;
+        std::vector<Section> open;
+        auto close = [&](const Section& section, std::size_t end, std::uint32_t endLine) {
+            if (endLine > section.line && end > section.offset) {
+                newui::text::TextFold fold;
+                fold.start = section.offset;
+                fold.length = end - section.offset;
+                fold.placeholder = L"...";
+                folds.push_back(fold);
+            }
+        };
+
+        const lex::cmake::ParseResult parsed = lex::cmake::parse(text);
+        for (const lex::cmake::Command& command : parsed.commands) {
+            std::wstring lower = command.name;
+            for (wchar_t& c : lower) {
+                if (c >= L'A' && c <= L'Z') c = static_cast<wchar_t>(c - L'A' + L'a');
+            }
+            if (command.opensBlock()) {
+                open.push_back({ lower, lineEnd(text, command.end), command.endLine });
+            } else if ((lower == L"elseif" || lower == L"else") && !open.empty() && open.back().opener == L"if") {
+                close(open.back(), command.offset, command.line);
+                open.back() = { L"if", lineEnd(text, command.end), command.endLine };
+            } else if (command.closesBlock()) {
+                const std::wstring wanted = lower.substr(3);
+                for (std::size_t i = open.size(); i-- > 0;) {
+                    if (open[i].opener == wanted) {
+                        close(open[i], command.offset, command.line);
+                        open.resize(i);
+                        break;
+                    }
+                }
+            }
+        }
+        return folds;
+    }
+
+    HighlightResult analyzeCMake(const std::wstring& text)
+    {
+        HighlightResult result;
+        appendStyleRanges(lex::cmakeLanguage(), text, result.ranges);
+        result.folds = cmakeFoldsFor(text);
+        return result;
+    }
+
+    HighlightResult analyzePlainText(const std::wstring&)
+    {
+        return HighlightResult();
     }
 
     HighlightResult analyzeCpp(const std::wstring& text)

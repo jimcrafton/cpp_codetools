@@ -1,9 +1,20 @@
 find_package(Threads REQUIRED)
 
+# cmakemodel_tests - the File API reader, against a small hand-written reply and (when it has one) this
+# repo's own build tree. A separate executable: it needs neither libclang nor newui.
+add_executable(cmakemodel_tests test_cmakemodel.cpp)
+target_link_libraries(cmakemodel_tests PRIVATE cmakemodel GTest::gtest_main)
+target_compile_definitions(cmakemodel_tests PRIVATE
+    CMAKEMODEL_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/cmake_fileapi"
+    CMAKEMODEL_REPO_BUILD_DIR="${CMAKE_BINARY_DIR}")
+
 add_executable(cpptools_tests
     test_parser.cpp
     test_compileflags.cpp
+    test_projectindex.cpp
 )
+
+target_compile_definitions(cpptools_tests PRIVATE CPPTOOLS_TEST_REPO_ROOT="${CMAKE_SOURCE_DIR}")
 
 target_link_libraries(cpptools_tests PRIVATE cpptools GTest::gtest_main Threads::Threads)
 
@@ -50,8 +61,12 @@ add_executable(lex_tests
     lex/json5_parser_tests.cpp
     lex/json5_diff_tests.cpp
     lex/json5_presentation_tests.cpp
-    lex/highlight_tests.cpp)
+    lex/highlight_tests.cpp
+    lex/cmake_lexer_tests.cpp
+    lex/cmake_parser_tests.cpp)
 target_link_libraries(lex_tests PRIVATE lex GTest::gtest_main Threads::Threads)
+# The CMake tests read this repo's own CMakeLists.txt.
+target_compile_definitions(lex_tests PRIVATE CMAKE_LEXER_TEST_ROOT="${CMAKE_SOURCE_DIR}")
 if(MSVC)
     target_compile_options(lex_tests PRIVATE /utf-8)
 endif()
@@ -79,6 +94,10 @@ add_executable(nativeeditcontrols_tests
     test_delegate_chips.cpp
     test_issue_peek.cpp
     test_host_location_opener.cpp
+    test_settings.cpp
+    test_explorer_model.cpp
+    test_project_explorer.cpp
+    test_editor_file_kinds.cpp
     test_host_services.cpp
     test_problem_list.cpp
     test_cpp_editor.cpp
@@ -114,6 +133,8 @@ add_executable(nativeeditcontrols_tests
 )
 
 target_link_libraries(nativeeditcontrols_tests PRIVATE nativeeditcontrols_core GTest::gtest_main Threads::Threads)
+# The explorer tests copy the hand-written CMake File API reply.
+target_compile_definitions(nativeeditcontrols_tests PRIVATE EXPLORER_TEST_FIXTURES="${CMAKE_SOURCE_DIR}/unittests/fixtures/cmake_fileapi")
 
 cpptools_copy_libclang_dll(nativeeditcontrols_tests)
 

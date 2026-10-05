@@ -1,6 +1,7 @@
 #include "FindReplaceController.h"
 #include "HighlightController.h"
 #include "Logging.h"
+#include "Settings.h"
 
 #include <newui/bundle.h>
 #include <newui/layout.h>
@@ -817,7 +818,8 @@ namespace CodeToolsVsix
         if (scroll != nullptr && scroll->vBar() != nullptr && scroll->vBar()->isVisible()) {
             scrollBarWidth = scroll->vBar()->bounds().width();
         }
-        const float minimapWidth = kMinimapWidth.toPixelsX(host_->displayMetrics());
+        const newui::DisplayValue minimapDip{ static_cast<float>(Settings::instance().getInt(Settings::kMinimapWidth, 12, 200)), newui::DisplayUnit::Dip };
+        const float minimapWidth = minimapDip.toPixelsX(host_->displayMetrics());
         minimap_->setBounds(newui::Rect(viewport.right() - scrollBarWidth - minimapWidth, viewport.top(),
             minimapWidth, viewport.height()));
 

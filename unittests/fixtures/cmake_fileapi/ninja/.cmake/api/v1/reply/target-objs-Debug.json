@@ -1,0 +1,5 @@
+{"name":"objs","id":"objs::@1","type":"OBJECT_LIBRARY","artifacts":[{"path":"objs.dir/o1.obj"}],
+ "backtrace":1,
+ "backtraceGraph":{"files":["CMakeLists.txt"],"commands":["add_library"],"nodes":[{"file":0},{"command":0,"file":0,"line":20,"parent":0}]},
+ "sources":[{"path":"src/o1.cpp","compileGroupIndex":0,"sourceGroupIndex":0,"backtrace":1}],
+ "sourceGroups":[{"name":"Source Files","sourceIndexes":[0]}]}

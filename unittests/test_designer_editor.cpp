@@ -288,7 +288,7 @@ TEST_F(DesignerEditorFileFixture, ClickInFrameProxysOverflowPastCanvasWellIsIgno
     // Confirms this test setup actually reproduces the overflow condition -
     // otherwise the assertion below would trivially pass for the wrong
     // reason (nothing to do with the bug at all).
-    ASSERT_LT(canvasWellBounds.size().width, CodeToolsVsix::Workspace::kDefaultCanvasWidth);
+    ASSERT_LT(canvasWellBounds.size().width, CodeToolsVsix::Workspace::defaultCanvasWidth());
 
     newui::Point nearControl(surfaceBounds.left() + 20.0f, surfaceBounds.top() + 15.0f);
     ASSERT_FALSE(canvasWellBounds.contains(nearControl))
@@ -1101,7 +1101,7 @@ TEST_F(DesignerEditorFileFixture, LoadSizesTheFrameProxyAroundTheFilesRootViewCl
 
     // New goes back to the default blank-document size.
     editor.workspace()->newButton()->onClick(*editor.workspace()->newButton());
-    EXPECT_FLOAT_EQ(editor.workspace()->frameProxy()->bounds().width(), CodeToolsVsix::Workspace::kDefaultCanvasWidth);
+    EXPECT_FLOAT_EQ(editor.workspace()->frameProxy()->bounds().width(), CodeToolsVsix::Workspace::defaultCanvasWidth());
     EXPECT_FLOAT_EQ(editor.workspace()->frameProxy()->bounds().height(), CodeToolsVsix::Workspace::kDefaultCanvasHeight);
 }
 
@@ -2811,7 +2811,7 @@ TEST(DesignerEditorToolboxDrop, DroppingOntoAContainerNestsItThereAtTheDropPoint
     EXPECT_TRUE(created->isVisible());
     EXPECT_FLOAT_EQ(created->bounds().left(), 40.0f);   // container-local, top-left at the drop point
     EXPECT_FLOAT_EQ(created->bounds().top(), 25.0f);
-    EXPECT_FLOAT_EQ(created->bounds().width(), CodeToolsVsix::Workspace::kNewControlDefaultWidth);
+    EXPECT_FLOAT_EQ(created->bounds().width(), CodeToolsVsix::Workspace::newControlDefaultWidth());
     EXPECT_FLOAT_EQ(created->bounds().height(), CodeToolsVsix::Workspace::kNewControlDefaultHeight);
     EXPECT_TRUE(editor.isDirty());
     EXPECT_EQ(editor.viewDesignerModel().childCount({0, 0}), 1u);  // Outline refreshed
@@ -2970,7 +2970,7 @@ TEST(DesignerEditorToolboxHover, OverAFreePositionContainerHighlightsItAndShowsA
     newui::Rect boxRoot = CodeToolsVsix::SelectionOverlay::boundsInRootView(f.anchorBox);
     EXPECT_FLOAT_EQ(ghost->left(), boxRoot.left() + 40.0f);
     EXPECT_FLOAT_EQ(ghost->top(), boxRoot.top() + 25.0f);
-    EXPECT_FLOAT_EQ(ghost->size().width, CodeToolsVsix::Workspace::kNewControlDefaultWidth);
+    EXPECT_FLOAT_EQ(ghost->size().width, CodeToolsVsix::Workspace::newControlDefaultWidth());
 
     // Hovering creates nothing and pushes no undo step.
     EXPECT_EQ(f.anchorBox->childViews().size(), 0u);

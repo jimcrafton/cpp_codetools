@@ -15,7 +15,6 @@ namespace CodeToolsVsix
     {
         // How many lines of context around the problem's own line (so up to 2 * kContext + 1).
         static constexpr std::size_t kContext = 2;
-        static constexpr std::size_t kTabWidth = 4;   // a tab in an excerpt is shown as this many spaces
 
         std::string summary;        // "error 6:10  'bojangle' file not found"
         std::string message;        // "'bojangle' file not found"

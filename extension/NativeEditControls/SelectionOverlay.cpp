@@ -1,11 +1,18 @@
 #include "SelectionOverlay.h"
 
+#include "Settings.h"
+
 #include <newui/fontmanager.h>
 #include <newui/reflection.h>
 #include <newui/uicolormanager.h>
 
 namespace CodeToolsVsix
 {
+    float SelectionOverlay::handleSize()
+    {
+        return static_cast<float>(Settings::instance().getInt(Settings::kHandleSize, 3, 24));
+    }
+
     namespace
     {
 
@@ -14,7 +21,8 @@ namespace CodeToolsVsix
         // mockup's corner-of-the-box placement (h-tl/h-tr/h-bl/h-br).
         void paintHandle(BLContext& ctx, float cx, float cy, BLRgba32 borderColor)
         {
-            BLRect r(cx - SelectionOverlay::kHandleHalf, cy - SelectionOverlay::kHandleHalf, SelectionOverlay::kHandleSize, SelectionOverlay::kHandleSize);
+            const double size = SelectionOverlay::handleSize();
+            BLRect r(cx - size * 0.5, cy - size * 0.5, size, size);
             ctx.set_fill_style(BLRgba32(0xFFFFFFFFu));
             ctx.fill_rect(r);
             ctx.set_stroke_style(borderColor);

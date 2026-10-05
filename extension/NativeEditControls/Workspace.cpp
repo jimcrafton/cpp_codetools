@@ -12,6 +12,8 @@
 
 #include "newui/reflectionio.h"
 
+#include "Settings.h"
+
 #include <json5/json5.hpp>
 #include <json5/json5_input.hpp>
 #include <json5/json5_output.hpp>
@@ -21,6 +23,26 @@
 
 namespace CodeToolsVsix
 {
+    float Workspace::toolboxPaneWidth()
+    {
+        return static_cast<float>(Settings::instance().getInt(Settings::kToolboxWidth, 120, 800));
+    }
+
+    float Workspace::propertiesPaneWidth()
+    {
+        return static_cast<float>(Settings::instance().getInt(Settings::kPropertiesWidth, 160, 900));
+    }
+
+    float Workspace::defaultCanvasWidth()
+    {
+        return static_cast<float>(Settings::instance().getInt(Settings::kCanvasWidth, 100, 4000));
+    }
+
+    float Workspace::newControlDefaultWidth()
+    {
+        return static_cast<float>(Settings::instance().getInt(Settings::kNewControlWidth, 20, 1000));
+    }
+
     namespace
     {
         void styleAsPane(newui::ViewBuilder<newui::SubView>& builder, newui::UIColorRole role)
@@ -51,11 +73,11 @@ namespace CodeToolsVsix
         {
             view->setVisible(true);
             view->setBounds(newui::Rect(Workspace::kNewControlDefaultMargin, Workspace::kNewControlDefaultMargin,
-                Workspace::kNewControlDefaultWidth, Workspace::kNewControlDefaultHeight));
+                Workspace::newControlDefaultWidth(), Workspace::kNewControlDefaultHeight));
             auto params = std::make_unique<newui::AnchorLayoutParams>(newui::Anchor::Left | newui::Anchor::Top);
             params->setLeftMargin(Workspace::kNewControlDefaultMargin);
             params->setTopMargin(Workspace::kNewControlDefaultMargin);
-            params->setWidth(Workspace::kNewControlDefaultWidth);
+            params->setWidth(Workspace::newControlDefaultWidth());
             params->setHeight(Workspace::kNewControlDefaultHeight);
             view->setLayoutParams(std::move(params));
         }
@@ -75,7 +97,7 @@ namespace CodeToolsVsix
             return;
         }
         bool usable = frameSize.width > 0.0f && frameSize.height > 0.0f;
-        params->setWidth(usable ? frameSize.width : kDefaultCanvasWidth);
+        params->setWidth(usable ? frameSize.width : defaultCanvasWidth());
         params->setHeight(usable ? frameSize.height : kDefaultCanvasHeight);
         canvasWell_->updateLayout();
         frameProxy_->updateLayout();
@@ -234,7 +256,7 @@ namespace CodeToolsVsix
                 // (width/height come from these params, not the child's
                 // own desiredSize() - see AnchorLayoutParams's own comment).
                 p.setAnchors(newui::Anchor::CenterX | newui::Anchor::CenterY);
-                p.setWidth(Workspace::kDefaultCanvasWidth);
+                p.setWidth(Workspace::defaultCanvasWidth());
                 p.setHeight(Workspace::kDefaultCanvasHeight);
             })
             .configure([](newui::FrameProxy& f) { f.setDesignTime(true); });
@@ -330,7 +352,7 @@ namespace CodeToolsVsix
         centerAndRightBuilder.name("workspaceCenterAndRight")
             .configure([](newui::Splitter& s) {
                 s.setFixedPane(newui::SplitterFixedPane::Second);
-                s.setSplitPosition(kPropertiesPaneWidth);
+                s.setSplitPosition(propertiesPaneWidth());
                 s.setDividerThickness(kDividerThickness);
             });
         centerAndRightBuilder.child(designerViews_).child(rightDock);
@@ -388,7 +410,7 @@ namespace CodeToolsVsix
         newui::ViewBuilder<newui::Splitter> mainRowBuilder;
         mainRowBuilder.name("workspaceMainRow")
             .configure([](newui::Splitter& s) {
-                s.setSplitPosition(kToolboxPaneWidth);
+                s.setSplitPosition(toolboxPaneWidth());
                 s.setDividerThickness(kDividerThickness);
             });
         mainRowBuilder.child(toolboxPane_).child(centerAndRight);

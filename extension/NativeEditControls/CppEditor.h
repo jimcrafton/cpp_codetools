@@ -14,6 +14,7 @@
 #include "FindReplaceController.h"
 #include "HighlightController.h"
 #include "NativeEditor.h"
+#include "Settings.h"
 
 namespace CodeToolsVsix
 {
@@ -53,6 +54,12 @@ namespace CodeToolsVsix
         // pre-existing caller.
         CppEditor(newui::RootView* rootView, newui::SubView* contentHost = nullptr);
         ~CppEditor() override;
+
+        // What a file is, which decides how its text is analyzed: C++ is colored, folded and parsed by libclang
+        // for problems and an outline; CMake is colored and folded; anything else is plain text.
+        enum class FileKind { Cpp, CMake, Plain };
+        static FileKind fileKindFor(const std::wstring& path);
+        FileKind fileKind() const { return fileKind_; }
 
         // Reads filePath (UTF-8), sets it as the editable TextControl's text, and separately
         // populates the read-only outline pane with a cpptools outline if parsing finds any
@@ -102,6 +109,15 @@ namespace CodeToolsVsix
         // Colors, folds and syntax-error squiggles for textControl_, computed off the UI thread.
         std::unique_ptr<HighlightController> highlight_;
         std::shared_ptr<CppDocument> document_;   // what the parse thinks the text is (its path), shared with the worker
+
+        // Points the highlight passes at what kind of file is loaded (see FileKind).
+        void applyFileKind(FileKind kind);
+        FileKind fileKind_ = FileKind::Cpp;
+
+        // Word wrap and the highlight pauses, from the options (Settings); re-applied when one changes.
+        void applySettings();
+        newui::SyncReturn handleSettingChanged(Settings& settings, std::string key);
+        newui::Connection settingsConnection_;
 
         // host as passed to setupUI() (root itself, or a caller-supplied contentHost - see
         // setupUI()'s own comment) - kept so load() can size/position loadingProgress_ against it;

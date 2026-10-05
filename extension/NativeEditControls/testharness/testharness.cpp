@@ -24,9 +24,9 @@
 
 #include "../CppEditor.h"
 #include "../DesignerEditor.h"
-#include "../DirectoryTree.h"
 #include "../DocumentTabs.h"
 #include "../NativeEditor.h"
+#include "../ProjectExplorer.h"
 
 #include <commdlg.h>
 #include <cstdio>
@@ -38,8 +38,8 @@
 // constructor also calls it (NativeEditor.cpp) once an editor is actually opened. Every real newui
 // example app calls this once at startup; testharness never needed to before because everything it
 // built (Toolbox/DocumentOutline/PropertiesGrid) only ever painted after "Open C++"/"Open Designer"
-// had already constructed a NativeEditManager first - DirectoryTree is the first thing here that
-// can paint (a plain newui::TreeController's own createItem(), which instantiates "TreeItem" via
+// had already constructed a NativeEditManager first - the project explorer's tree is the first thing here
+// that can paint (a plain newui::TreeController's own createItem(), which instantiates "TreeItem" via
 // reflection) before any editor is ever opened, so it needs this registered unconditionally too.
 extern void registerReflectionData();
 
@@ -47,11 +47,8 @@ using namespace CodeToolsVsix;
 
 namespace
 {
-    // Fixed dock width for directoryTree - no particular design reasoning behind the number
-    // (unlike Workspace::kToolboxPaneWidth's own Main.dc.html-derived value), just a reasonable
-    // default for a file-name-only tree; the divider is a real, user-draggable newui::Splitter,
-    // so this is only ever the starting position.
-    constexpr float kDirectoryTreePaneWidth = 240.0f;
+    // Starting width of the project explorer's pane; the divider is a real, user-draggable newui::Splitter.
+    constexpr float kExplorerPaneWidth = 340.0f;
     constexpr float kDividerThickness = 4.0f;
 
     // Returns an empty string if the user cancels.
@@ -110,7 +107,7 @@ namespace
     }
 }
 
-int main()
+int main(int argc, char** argv)
 {
     registerReflectionData();
 
@@ -119,6 +116,7 @@ int main()
     // DllMain in the VSIX); here it is the exe itself.
     NativeEditManager::setModuleHandle(::GetModuleHandleW(nullptr));
     DocumentTabs* tabs = nullptr;   // owned by the frame's view tree, built below
+    std::unique_ptr<ProjectExplorer> explorer;   // its views belong to the frame; reset before they go
 
     newui::Application& app = newui::Application::instance();
     app.setName("codetools++ testharness");
@@ -127,7 +125,8 @@ int main()
     frame.setTitle("codetools++ NativeEditor test harness");
     frame.setBounds(newui::Rect(100, 100, 1000, 700));
 
-    frame.onClosed += [&tabs](newui::Frame& frame) {
+    frame.onClosed += [&tabs, &explorer](newui::Frame& frame) {
+        explorer.reset();
         // The editors' windows are children of the frame's: close them while those still exist.
         if (nullptr != tabs)
         {
@@ -145,12 +144,18 @@ int main()
     rootLayout->setPadding(0.0f);
     root.setLayout(std::move(rootLayout));
 
-    // mainRow: directoryTree | document tabs, a horizontal split - fixedPane(First) is Splitter's
-    // own default (directoryTree pinned at kDirectoryTreePaneWidth, the tabs grow), matching the
+    // mainRow: project explorer | document tabs, a horizontal split - fixedPane(First) is Splitter's
+    // own default (the explorer pinned at kExplorerPaneWidth, the tabs grow), matching the
     // standard docking-IDE convention (Workspace::mainRow, Workspace.cpp, follows the same
     // convention for its own Toolbox pane).
-    auto* directoryTree = new DirectoryTree();
-    directoryTree->setName("testharnessDirectoryTree");
+    auto* explorerHost = new newui::SubView();
+    explorerHost->setName("testharnessExplorerHost");
+    explorerHost->setVisible(true);
+    auto explorerLayout = std::make_unique<newui::FlexLayout>(newui::Orientation::Vertical);
+    explorerLayout->setSpacing(0.0f);
+    explorerLayout->setPadding(0.0f);
+    explorerHost->setLayout(std::move(explorerLayout));
+    explorer = std::make_unique<ProjectExplorer>(*explorerHost);
 
     tabs = new DocumentTabs([&tabs](DocumentType type, HWND parent) {
         std::unique_ptr<NativeEditor> editor = makeEditor(type, parent);
@@ -168,13 +173,13 @@ int main()
 
     auto* mainRow = new newui::Splitter(newui::Orientation::Horizontal);
     mainRow->setName("testharnessMainRow");
-    mainRow->setSplitPosition(kDirectoryTreePaneWidth);
+    mainRow->setSplitPosition(kExplorerPaneWidth);
     mainRow->setDividerThickness(kDividerThickness);
     mainRow->setLayoutParams(std::make_unique<newui::FlexLayoutParams>(1.0f));
-    mainRow->addChild(directoryTree);
+    mainRow->addChild(explorerHost);
     mainRow->addChild(tabs);
 
-    // Shared by the Open menu items and by directoryTree's own double-click: a new tab, or the one
+    // Shared by the Open menu items and by the explorer's own double-click: a new tab, or the one
     // that already shows the file.
     auto openPath = [&root, &tabs](const std::wstring& path, DocumentType type) {
         if (path.empty())
@@ -210,24 +215,25 @@ int main()
         tabs->refreshTitles();
     };
 
-    // A file in directoryTree is always a C/C++ source/header (DirectoryTreeModel's own
-    // isSourceFile() filter, DirectoryTree.cpp) - always CppSource, no extension sniffing needed.
-    directoryTree->onFileActivated.add([openPath](DirectoryTree&, const std::string& path) {
-        openPath(toWide(path), DocumentType::CppSource);
-        return newui::SyncReturn::Handled;
+    // What a row of the explorer opens: a tab, at the line when the row names one. A .newui file is a design.
+    explorer->setOpenHandler([&tabs](const std::string& path, std::size_t line) {
+        const std::wstring wide = toWide(path);
+        const std::size_t dot = wide.rfind(L'.');
+        const bool design = dot != std::wstring::npos && wide.substr(dot) == L".newui";
+        return tabs->openAt(wide, design ? DocumentType::Designer : DocumentType::CppSource, line, 1) != nullptr;
     });
 
     std::vector<std::unique_ptr<newui::MenuItem>> menuItems;
 
     auto fileMenu = std::make_unique<newui::MenuItem>("File");
     fileMenu->addChild(std::make_unique<newui::MenuItem>("Open Folder..."))->onClick.add(
-        [&frame, directoryTree](newui::MenuItem&) {
+        [&frame, &explorer](newui::MenuItem&) {
             newui::FileDialogOptions options;
             options.title = "Select a project folder";
             std::string selectedPath;
             if (newui::Dialog::showBrowseForFolder(frame.frameHandle(), options, selectedPath))
             {
-                directoryTree->setRootPath(selectedPath);
+                explorer->setRoot(selectedPath);
                 // "we need to know what directory/project we're working on" even without a real
                 // IDE host to show it - the frame's own title is the simplest place testharness
                 // has for that.
@@ -262,6 +268,18 @@ int main()
     menuBar->setLayoutParams(std::make_unique<newui::FlexLayoutParams>(0.0f));
     root.addChild(menuBar);
     root.addChild(mainRow);
+
+    // A folder given on the command line is open from the start.
+    if (argc > 1)
+    {
+        // From the loop, so the explorer's background work has one to deliver to.
+        const std::string folder = argv[1];
+        app.runLoop().postIdle([&explorer, folder]() {
+            explorer->setRoot(folder);
+            return true;
+        });
+        frame.setTitle(std::string("codetools++ NativeEditor test harness - ") + argv[1]);
+    }
 
     app.run();
 

@@ -1,0 +1,9 @@
+{"name":"app","id":"app::@1","type":"EXECUTABLE","nameOnDisk":"app.exe","artifacts":[{"path":"tools/app.exe"}],
+ "backtrace":1,
+ "backtraceGraph":{"files":["tools/CMakeLists.txt"],"commands":["add_executable","target_link_libraries"],
+  "nodes":[{"file":0},{"command":0,"file":0,"line":2,"parent":0},{"command":1,"file":0,"line":3,"parent":0}]},
+ "sources":[{"path":"tools/main.cpp","compileGroupIndex":0,"sourceGroupIndex":0,"backtrace":1}],
+ "sourceGroups":[{"name":"Source Files","sourceIndexes":[0]}],
+ "linkLibraries":[{"id":"core::@1","backtrace":2},{"id":"ext::lib::@1","backtrace":2},{"fragment":"user32.lib","role":"libraries","backtrace":2}],
+ "dependencies":[{"id":"core::@1","backtrace":2},{"id":"ZERO_CHECK::@1"}],
+ "compileGroups":[{"language":"CXX","sourceIndexes":[0],"defines":[{"define":"WIN32"},{"define":"UNICODE"}],"includes":[{"path":"C:/proj/include"}]}]}

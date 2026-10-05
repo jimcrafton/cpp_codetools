@@ -54,6 +54,15 @@ namespace CodeToolsVsix
         Designer = 2
     }
 
+    /// <summary>Mirrors NativeEditControlApi.h's ToolWindowType - which native tool-window pane
+    /// NativeToolWindow_Create builds. A tool window is not a document, so it has its own enum rather than a
+    /// <see cref="DocumentType"/>.</summary>
+    internal enum ToolWindowType : int
+    {
+        Unknown = 0,
+        ProjectExplorer = 1
+    }
+
     /// <summary>Mirrors NativeEditor.h's EditorCommand. Values are explicit on both sides
     /// (not left to implicit ordering) so a mismatch can't silently slip in from reordering either
     /// enum independently.</summary>
@@ -111,6 +120,26 @@ namespace CodeToolsVsix
 
         [DllImport("NativeEditControls.dll", CallingConvention = CallingConvention.StdCall, CharSet = CharSet.Unicode)]
         public static extern void NativeEditControl_SettingChanged(string settingName, string value);
+
+        /// <summary>What is open: the workspace's root folders (separated by '\n'; empty when nothing is) and
+        /// the active build configuration. Pushed by <see cref="WorkspaceTracker"/> as solutions and
+        /// folders open and close.</summary>
+        [DllImport("NativeEditControls.dll", CallingConvention = CallingConvention.StdCall, CharSet = CharSet.Unicode)]
+        public static extern void NativeEditControl_WorkspaceChanged(string roots, string configuration);
+
+        /// <summary>Creates a tool-window pane (the project explorer) as a child of hwndParent. Like
+        /// <see cref="NativeEditControl_Create"/>, the window lives on native's edit thread: close it with
+        /// <see cref="NativeToolWindow_RequestClose"/>, never DestroyWindow.</summary>
+        [DllImport("NativeEditControls.dll", EntryPoint = "NativeToolWindow_Create", CallingConvention = CallingConvention.Cdecl, SetLastError = true)]
+        public static extern IntPtr NativeToolWindow_Create(IntPtr hwndParent, int x, int y, int width, int height, ToolWindowType type);
+
+        [DllImport("NativeEditControls.dll", EntryPoint = "NativeToolWindow_SetBounds", CallingConvention = CallingConvention.StdCall)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool NativeToolWindow_SetBounds(IntPtr hwnd, int x, int y, int width, int height);
+
+        [DllImport("NativeEditControls.dll", EntryPoint = "NativeToolWindow_RequestClose", CallingConvention = CallingConvention.StdCall)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool NativeToolWindow_RequestClose(IntPtr hwnd);
 
 
         /// <summary>Destroys the control behind hwnd - must be used instead of

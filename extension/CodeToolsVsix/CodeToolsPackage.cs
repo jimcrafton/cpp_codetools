@@ -37,9 +37,18 @@ namespace CodeToolsVsix
     // DesignerEditor instead of CppEditor.
     [ProvideEditorExtension(typeof(CodeToolsEditorFactory), ".newui", 100)]
     [ProvideSettingsManifest(PackageRelativeManifestFile = "CodeToolsSettings.registration.json")]
+    // The C++ project explorer: a tool window docked as a tab beside Solution Explorer (3ae79031-... is its
+    // window GUID; this only applies the first time it opens, after which VS keeps the user's layout), shown
+    // from View > Other Windows. The package loads when a solution or a folder opens so it can follow it.
+    [ProvideToolWindow(typeof(ProjectExplorerToolWindow), Style = VsDockStyle.Tabbed,
+        Window = "3ae79031-e1bc-11d0-8f78-00a0c9110057")]
+    [ProvideMenuResource("Menus.ctmenu", 1)]
+    [ProvideAutoLoad(UIContextGuids80.SolutionExists, PackageAutoLoadFlags.BackgroundLoad)]
+    [ProvideAutoLoad("4646B819-1AE0-4E79-97F4-8A8176FDD664", PackageAutoLoadFlags.BackgroundLoad)]   // a folder is open
     public sealed class CodeToolsPackage : AsyncPackage
     {
         public static OptionsStorage Options { get; private set; }
+        internal static ProjectExplorerHost Explorer { get; private set; }
 
         protected override async Task InitializeAsync(CancellationToken cancellationToken, IProgress<ServiceProgressData> progress)
         {
@@ -56,6 +65,9 @@ namespace CodeToolsVsix
                 // 2. Instantiate your storage wrapper
                 Options = new OptionsStorage(settingsManager);
             }
+
+            // The project explorer: its command, the open workspace, hiding the built-in explorer.
+            Explorer = await ProjectExplorerHost.CreateAsync(this);
         }
     }
 }
