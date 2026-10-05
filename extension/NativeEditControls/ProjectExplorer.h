@@ -94,6 +94,7 @@ namespace CodeToolsVsix
         struct Alive;
         struct Found;
         struct FileProducts;
+        struct FileProblems;
 
         newui::SyncReturn handleModeChanged(newui::SegmentedControl& sender);
         newui::SyncReturn handleInfoToggled(newui::Button& sender);
@@ -108,6 +109,7 @@ namespace CodeToolsVsix
         void startWork();
         void stopWork();
         void applyFound(const std::shared_ptr<Found>& found);
+        void collectProblems();   // which files, and the folders above them, have errors or warnings
 
         newui::View* view_ = nullptr;                    // owned by the host
         newui::Label* rootName_ = nullptr;
@@ -130,6 +132,7 @@ namespace CodeToolsVsix
 
         std::shared_ptr<cpptools::ProjectIndex> index_;
         std::shared_ptr<cmakemodel::Model> cmake_;
+        std::shared_ptr<FileProblems> problems_;
         std::shared_ptr<FileProducts> products_;         // which products each file is in; read by lazily loaded folders
         std::string buildDir_;
         std::string note_;                               // why Products is empty, when it is

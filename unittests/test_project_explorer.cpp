@@ -314,6 +314,31 @@ TEST(WorkspaceInfoTest, AChangeIsAnnouncedOnceAndOnlyWhenSomethingChanged) {
     EXPECT_EQ(heard, 3) << "a listener that disconnected is not called";
 }
 
+TEST_F(ProjectExplorerTest, AMissingHeaderAndItsKnockOnErrorsAreOnlyAWarningOnTheFile) {
+    write("broken.cpp", "#include \"does_not_exist.h\"\nMissingType value;\n");   // the second line fails because of the first
+    write("really_broken.cpp", "int f() { return undeclared_name; }\n");           // an error of its own
+    explorer_->setBackground(false);
+    explorer_->setRoot(dir_.generic_string());
+    explorer_->waitForIndexing();
+    explorer_->setMode(ExplorerMode::Files);
+
+    ExplorerTreeModel* model = explorer_->model();
+    auto badgeOf = [&](const std::string& name) {
+        for (std::size_t i = 0; i < model->childCount({}); ++i) {
+            const ExplorerNode* node = model->nodeAt({ i });
+            if (node != nullptr && node->text == name) return node->badge;
+        }
+        return ExplorerNode::Badge::None;
+    };
+    EXPECT_EQ(badgeOf("broken.cpp"), ExplorerNode::Badge::Warning) << "unresolved include: the flags, not the code";
+    EXPECT_EQ(badgeOf("really_broken.cpp"), ExplorerNode::Badge::Error);
+    EXPECT_EQ(badgeOf("b.cpp"), ExplorerNode::Badge::None);
+
+    const ProjectStats& stats = explorer_->stats();
+    EXPECT_EQ(stats.filesWithUnresolvedIncludes, 1u);
+    EXPECT_EQ(stats.filesWithErrors, 1u) << "the knock-on error is counted with the include, not as an error";
+}
+
 TEST_F(ProjectExplorerTest, TheInfoButtonShowsHowLongThingsTookAndWhatIsWhere) {
     explorer_->setBackground(false);
     explorer_->setRoot(dir_.generic_string());

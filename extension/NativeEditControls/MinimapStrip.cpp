@@ -66,6 +66,12 @@ namespace CodeToolsVsix
         const float caretWidth = kCaretWidth.toPixelsX(metrics);
         const float caretHeight = kCaretHeight.toPixelsY(metrics);
 
+        // The strip sits over the end of the code lines, so it gets half of the editor's own background: the
+        // ticks read, and the text behind them stays visible but out of the way.
+        const BLRgba32 ground = newui::UIColorManager::colorFor(newui::UIColorRole::ControlBackground).toBLRgba32();
+        ctx.set_fill_style(BLRgba32(ground.r(), ground.g(), ground.b(), kBackgroundAlpha));
+        ctx.fill_rect(BLRect(0.0, 0.0, static_cast<double>(size.width), static_cast<double>(size.height)));
+
         // A subtle separator from the code beside it.
         ctx.set_stroke_style(newui::UIColorManager::colorFor(newui::UIColorRole::ControlBorder).toBLRgba32());
         ctx.set_stroke_width(1.0);

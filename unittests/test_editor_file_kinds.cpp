@@ -125,6 +125,29 @@ TEST(EditorFileKinds, APlainTextFileHasNoProblemsAndNoOutline) {
     EXPECT_TRUE(editor.statusBar()->problems().empty());
 }
 
+// Run by name (--gtest_also_run_disabled_tests): how long a splitter drag costs the editor per step. Prints to stdout.
+TEST(EditorFileKinds, DISABLED_ResizingAnEditorHoldingARealFileIsCheap) {
+    const fs::path repo = fs::path(EXPLORER_TEST_FIXTURES).parent_path().parent_path().parent_path();
+    const std::wstring path = (repo / "3rdparty/newui/examples/controls1.cpp").wstring();
+    ASSERT_TRUE(fs::exists(path)) << "needs the newui example (about 600 lines)";
+    auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 1000, 700), "resizeBenchRoot");
+    CppEditor editor(root);
+    ASSERT_TRUE(editor.load(path.c_str(), path.size()));
+    root->setBounds(newui::Rect(0, 0, 1000, 700));
+
+    const int steps = 80;
+    double total = 0.0, worst = 0.0;
+    for (int i = 0; i < steps; ++i) {
+        const float width = 700.0f + float((i * 37) % 300);   // a drag back and forth
+        const auto start = std::chrono::steady_clock::now();
+        root->setBounds(newui::Rect(0, 0, width, 700));
+        const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+        total += ms;
+        worst = (std::max)(worst, ms);
+    }
+    std::printf("resize of a 600-line editor: %.2f ms per step on average, %.2f ms worst, over %d steps\n", total / steps, worst, steps);
+}
+
 TEST(EditorFileKinds, ACppFileIsStillAnalyzedAsCpp) {
     TempFile file("a.cpp", "int main() { return 0; }\n");
     auto* root = new newui::RootView(nullptr, newui::Rect(0, 0, 900, 700), "cppKindRoot");

@@ -4,6 +4,7 @@
 #include "../extension/NativeEditControls/ExplorerModel.h"
 
 #include <cmakemodel/model.h>
+#include <newui/svgimage.h>
 #include <cpptools/projectindex.h>
 
 #include <gtest/gtest.h>
@@ -140,7 +141,7 @@ TEST_F(ExplorerModelTest, TheFileDetailProviderCanAddWhatEachRowSays) {
 
     const auto top = rows(model);
     ASSERT_EQ(top.size(), 1u);
-    EXPECT_EQ(top[0], "a.cpp   not built");
+    EXPECT_EQ(top[0], "a.cpp   not built   1 line   1 B") << "the label, then the line and size columns";
 }
 
 TEST_F(ExplorerModelTest, SearchingFilesListsMatchesAnywhereBelowTheRoot) {
@@ -448,6 +449,38 @@ TEST_F(ExplorerModelTest, ScanningStopsWhenCancelled) {
     for (const FolderStat& folder : scan.folders) EXPECT_EQ(folder.files, 0u);
 }
 
+TEST_F(ExplorerModelTest, FileRowsKeepTheirSizeAndShowLinesForCppAndCMakeWhateverElseTheyShow) {
+    write("a.cpp", "int a;\nint b;\nint c;\n");                 // 3 lines, newline-terminated
+    write("b.h", "one\ntwo");                                    // 2 lines, no final newline
+    write("empty.cpp", "");
+    write("notes.md", "x\ny\nz\n");                              // not a line-counted kind
+    write("CMakeLists.txt", "project(x)\n");
+    ExplorerNode top = buildFilesTree(dir_.generic_string(), [](const std::string& path, bool isDirectory) {
+        return !isDirectory && path.find("a.cpp") != std::string::npos ? std::string("product") : std::string();
+    });
+    ExplorerTreeModel model;
+    model.setRoot(std::move(top));
+    auto find = [&](const std::string& name) -> const ExplorerNode* {   // the top-level rows are the root folder's entries
+        for (std::size_t i = 0; i < model.childCount({}); ++i) {
+            const ExplorerNode* node = model.nodeAt({ i });
+            if (node != nullptr && node->text == name) return node;
+        }
+        return nullptr;
+    };
+
+    const ExplorerNode* a = find("a.cpp");
+    ASSERT_NE(a, nullptr);
+    EXPECT_EQ(a->detail, "product") << "the product label stays beside the name";
+    ASSERT_EQ(a->cells.size(), 2u);
+    EXPECT_EQ(a->cells[0], "3 lines");
+    EXPECT_EQ(a->cells[1], "20 B") << "and no longer replaces the size";
+    EXPECT_EQ(find("b.h")->cells[0], "2 lines") << "a last line with no newline still counts";
+    EXPECT_EQ(find("empty.cpp")->cells[0], "") << "nothing to count";
+    EXPECT_EQ(find("CMakeLists.txt")->cells[0], "1 line");
+    EXPECT_EQ(find("notes.md")->cells[0], "") << "only code and CMake get a line count";
+    EXPECT_EQ(find("notes.md")->cells[1], "6 B");
+}
+
 TEST(ExplorerStats, TheInfoTreeListsFoldersLargestFirstWithTheirCounts) {
     ProjectStats stats;
     stats.scan.folders = { { "small", 2, 0, 100, false }, { "big", 1204, 30, 40 * 1024 * 1024, false }, { "build", 0, 0, 0, true } };
@@ -483,6 +516,25 @@ TEST(ExplorerStats, TheInfoTreeListsFoldersLargestFirstWithTheirCounts) {
     EXPECT_NE(folders.children[2].detail.find("not shown"), std::string::npos);
     EXPECT_EQ(tree.children[2].text, "Index");
     EXPECT_EQ(tree.children[3].text, "CMake");
+
+    // unresolved includes get a row of their own, in a warning tone, with a pointer to the likely cause
+    ProjectStats flags;
+    flags.filesWithUnresolvedIncludes = 5;
+    flags.unresolvedIncludes = 12;
+    const ExplorerNode flagged = buildStatsTree(flags);
+    const ExplorerNode* row = nullptr;
+    for (const ExplorerNode& r : flagged.children[2].children) {
+        if (r.text == "Files with unresolved includes") row = &r;
+    }
+    ASSERT_NE(row, nullptr);
+    EXPECT_EQ(row->cells[0], "5");
+    EXPECT_EQ(row->cellTones[0], ExplorerNode::Tone::Warn);
+    EXPECT_EQ(row->detail, "12 includes");
+    bool hint = false;
+    for (const ExplorerNode& r : flagged.children[2].children) {
+        if (r.kind == ExplorerNode::Kind::Note && r.text.find("compile_commands.json") != std::string::npos) hint = true;
+    }
+    EXPECT_TRUE(hint) << "a note row points at the likely cause";
 }
 
 TEST(ExplorerIcons, EachKindOfRowGetsAnIconThatExistsOnDisk) {
@@ -496,10 +548,16 @@ TEST(ExplorerIcons, EachKindOfRowGetsAnIconThatExistsOnDisk) {
     using Kind = ExplorerNode::Kind;
     EXPECT_EQ(explorerIconFor(node(Kind::File, "Parser.H")).name, "files-actions/header");
     EXPECT_EQ(explorerIconFor(node(Kind::File, "main.cpp")).name, "files-actions/source");
-    EXPECT_EQ(explorerIconFor(node(Kind::File, "CMakeLists.txt")).name, "files-actions/project");
-    EXPECT_FALSE(explorerIconFor(node(Kind::File, "notes.md")).themed) << "no colored document icon yet";
-    EXPECT_FALSE(explorerIconFor(node(Kind::Product, "app", "executable")).themed);
-    EXPECT_EQ(explorerIconFor(node(Kind::Product, "core", "static library")).name, "files-actions/module");
+    EXPECT_EQ(explorerIconFor(node(Kind::File, "CMakeLists.txt")).name, "files/cmake");
+    EXPECT_EQ(explorerIconFor(node(Kind::File, "notes.md")).name, "files/markdown");
+    EXPECT_EQ(explorerIconFor(node(Kind::File, "layout.newui")).name, "files/newui");
+    EXPECT_EQ(explorerIconFor(node(Kind::File, "other.xyz")).name, "files/document");
+    EXPECT_EQ(explorerIconFor(node(Kind::Product, "app", "executable")).name, "products/executable");
+    EXPECT_EQ(explorerIconFor(node(Kind::Product, "core", "static library")).name, "products/static-library");
+    EXPECT_EQ(explorerIconFor(node(Kind::Product, "dll", "shared library")).name, "products/shared-library");
+    ExplorerNode test = node(Kind::Product, "core_tests", "executable");
+    test.iconHint = "test";
+    EXPECT_EQ(explorerIconFor(test).name, "products/test") << "the hint wins over the type";
     EXPECT_TRUE(explorerIconFor(node(Kind::Group, "Timing")).empty());
     EXPECT_TRUE(explorerIconFor(node(Kind::Note, "x")).empty());
 
@@ -514,13 +572,107 @@ TEST(ExplorerIcons, EachKindOfRowGetsAnIconThatExistsOnDisk) {
                        Kind::Variable, Kind::Link }) {
         nodes.push_back(node(kind, "x"));
     }
-    for (const char* file : { "a.h", "a.cpp", "CMakeLists.txt", "a.md" }) nodes.push_back(node(Kind::File, file));
-    nodes.push_back(node(Kind::Product, "app", "executable"));
-    nodes.push_back(node(Kind::Product, "core", "static library"));
+    for (const char* file : { "a.h", "a.cpp", "CMakeLists.txt", "a.md", "a.json", "a.newui", "a.png", "a.txt" }) nodes.push_back(node(Kind::File, file));
+    for (const char* type : { "executable", "static library", "shared library", "module library", "object library", "interface library", "utility" }) {
+        nodes.push_back(node(Kind::Product, "p", type));
+    }
+    for (const char* hint : { "test", "custom-command" }) {
+        ExplorerNode n = node(Kind::Product, "p", "executable");
+        n.iconHint = hint;
+        nodes.push_back(n);
+    }
     for (const ExplorerNode& n : nodes) {
         const ExplorerIcon icon = explorerIconFor(n);
+        ASSERT_FALSE(icon.empty()) << n.text << " " << n.detail;
         for (bool dark : { false, true }) {
             EXPECT_TRUE(fs::exists(resources / explorerIconPath(icon, dark))) << explorerIconPath(icon, dark);
+        }
+    }
+}
+
+namespace {
+
+// The painted area of a rendered icon: the right and bottom edge of the pixels with any alpha.
+struct Painted { int right = -1; int bottom = -1; };
+
+Painted paintedExtent(const BLImage& image) {
+    BLImageData data{};
+    const_cast<BLImage&>(image).get_data(&data);
+    Painted painted;
+    for (int y = 0; y < data.size.h; ++y) {
+        const auto* row = static_cast<const std::uint8_t*>(data.pixel_data) + std::size_t(y) * data.stride;
+        for (int x = 0; x < data.size.w; ++x) {
+            if (row[x * 4 + 3] != 0) {
+                painted.right = std::max(painted.right, x);
+                painted.bottom = std::max(painted.bottom, y);
+            }
+        }
+    }
+    return painted;
+}
+
+}  // namespace
+
+// newui scales an SVG's viewBox to the size asked for, unless the file declares its own width and height: then it
+// renders at that size and crops to the one asked for (a 32 px icon drawn into 16 showed its top-left quarter).
+TEST(ExplorerIcons, TheColoredSetDeclaresNoFixedSizeAndRastersWholeAtAnySize) {
+    const fs::path repo = fs::path(EXPLORER_TEST_FIXTURES).parent_path().parent_path().parent_path();
+    const fs::path set = repo / "extension/NativeEditControls/Resources/Images/icons/cpp-symbol-icons-32";
+    int files = 0;
+    for (const auto& entry : fs::recursive_directory_iterator(set)) {
+        if (entry.path().extension() != ".svg") continue;
+        ++files;
+        std::ifstream in(entry.path(), std::ios::binary);
+        std::string head(200, ' ');
+        in.read(head.data(), 200);
+        head.resize(static_cast<std::size_t>(in.gcount()));
+        const std::string tag = head.substr(0, head.find('>'));
+        EXPECT_EQ(tag.find(" width="), std::string::npos) << entry.path().string();
+    }
+    EXPECT_GT(files, 300);
+
+    const std::string icon = (set / "light/symbols/class.svg").string();   // the shape spans 2.25 to 13.75 of 16
+    BLImage at16, at32;
+    ASSERT_TRUE(newui::renderSvgFile(icon, 16, 16, at16));
+    ASSERT_TRUE(newui::renderSvgFile(icon, 32, 32, at32));
+    const Painted p16 = paintedExtent(at16);
+    const Painted p32 = paintedExtent(at32);
+    EXPECT_GE(p16.right, 12);
+    EXPECT_LE(p16.right, 14) << "whole, not cropped to the cell";
+    EXPECT_GE(p32.right, 26);
+    EXPECT_LE(p32.right, 29);
+}
+
+TEST(ExplorerIcons, ABadgeSelectsTheComposedIconWhereOneExistsAndLeavesTheBaseWhereNot) {
+    auto node = [](ExplorerNode::Kind kind, const std::string& text, ExplorerNode::Badge badge) {
+        ExplorerNode n;
+        n.kind = kind;
+        n.text = text;
+        n.badge = badge;
+        return n;
+    };
+    using Kind = ExplorerNode::Kind;
+    using Badge = ExplorerNode::Badge;
+    EXPECT_EQ(explorerIconFor(node(Kind::File, "a.cpp", Badge::Error)).name, "badged/source-error");
+    EXPECT_EQ(explorerIconFor(node(Kind::File, "a.cpp", Badge::NotBuilt)).name, "badged/source-notbuilt");
+    EXPECT_EQ(explorerIconFor(node(Kind::File, "a.h", Badge::Warning)).name, "badged/header-warning");
+    EXPECT_EQ(explorerIconFor(node(Kind::File, "CMakeLists.txt", Badge::Error)).name, "badged/cmake-error");
+    EXPECT_EQ(explorerIconFor(node(Kind::Folder, "src", Badge::Error)).name, "badged/folder-error");
+    EXPECT_EQ(explorerIconFor(node(Kind::File, "a.h", Badge::NotBuilt)).name, "files-actions/header") << "no such composed icon: the base";
+    EXPECT_EQ(explorerIconFor(node(Kind::Folder, "src", Badge::Unreferenced)).name, "folders/folder");
+    EXPECT_EQ(explorerIconFor(node(Kind::Class, "X", Badge::Error)).name, "symbols/class") << "symbols have no badged status icons";
+
+    // every composed icon it can name exists, in both themes
+    const fs::path repo = fs::path(EXPLORER_TEST_FIXTURES).parent_path().parent_path().parent_path();
+    const fs::path resources = repo / "extension" / "NativeEditControls" / "Resources";
+    for (Kind kind : { Kind::File, Kind::Folder }) {
+        for (const char* file : { "a.cpp", "a.h", "CMakeLists.txt", "x" }) {
+            for (Badge badge : { Badge::Error, Badge::Warning, Badge::NotBuilt, Badge::Unreferenced }) {
+                const ExplorerIcon icon = explorerIconFor(node(kind, kind == Kind::Folder ? "src" : file, badge));
+                for (bool dark : { false, true }) {
+                    EXPECT_TRUE(fs::exists(resources / explorerIconPath(icon, dark))) << explorerIconPath(icon, dark);
+                }
+            }
         }
     }
 }

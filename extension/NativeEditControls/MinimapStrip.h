@@ -56,6 +56,7 @@ namespace CodeToolsVsix
         static constexpr newui::DisplayValue kCurrentTickHeight{5.0f, newui::DisplayUnit::Dip};
         static constexpr newui::DisplayValue kCaretWidth{3.0f, newui::DisplayUnit::Dip};
         static constexpr newui::DisplayValue kCaretHeight{6.0f, newui::DisplayUnit::Dip};
+        static constexpr std::uint32_t kBackgroundAlpha = 128;   // of 255: the strip's wash over the code text
 
         newui::SyncReturn handleMouseDown(newui::View& sender, const newui::Point& pt, std::uint32_t btnMask,
             std::uint32_t keyMask);

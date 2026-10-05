@@ -44,6 +44,11 @@ struct IndexedFile {
     std::uint64_t flagsHash = 0; // of the compile flags it was parsed with
     bool parsed = false;         // false: libclang produced nothing (see `error`)
     std::string error;
+    // Diagnostics libclang reported in this file itself (not in a header it includes): errors include fatal ones,
+    // but not "file not found", which says more about the compile flags than about the code: those are counted apart.
+    std::uint32_t errors = 0;
+    std::uint32_t warnings = 0;
+    std::uint32_t unresolvedIncludes = 0;
     std::vector<IndexedSymbol> symbols;
     std::vector<IncludeEdge> includes;
     // USR -> how often this file's own code refers to it. Only declarations inside the project roots.
@@ -96,6 +101,10 @@ public:
     bool hasFile(const std::string& path) const;
     std::vector<IndexedSymbol> symbolsIn(const std::string& path) const;
     std::vector<IncludeEdge> includesOf(const std::string& path) const;
+
+    // How many errors and warnings the last parse of `path` reported in that file; zeros for a file not indexed.
+    struct Problems { std::uint32_t errors = 0; std::uint32_t warnings = 0; std::uint32_t unresolvedIncludes = 0; };
+    Problems problemsIn(const std::string& path) const;
 
     // Classes, structs and class templates that have a definition somewhere, once per USR, whose
     // qualified name contains `filter` (any case); names that start with it first, then alphabetical.

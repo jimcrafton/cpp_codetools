@@ -7,6 +7,7 @@
 #include <cctype>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <map>
 #include <mutex>
@@ -58,12 +59,47 @@ namespace CodeToolsVsix
             return buffer;
         }
 
+        // 1204 -> "1,204"
+        std::string countText(std::uint64_t n)
+        {
+            std::string digits = std::to_string(n);
+            for (int at = static_cast<int>(digits.size()) - 3; at > 0; at -= 3) digits.insert(static_cast<std::size_t>(at), ",");
+            return digits;
+        }
+
+        // Files whose line count means something to a C++ developer: source, headers, CMake.
+        bool countsLines(const std::string& name)
+        {
+            const std::string lower = lowered(name);
+            if (lower == "cmakelists.txt") return true;
+            static const std::set<std::string> kExt = { ".h", ".hpp", ".hh", ".hxx", ".inl", ".c", ".cc", ".cpp", ".cxx", ".cmake" };
+            return kExt.count(lowered(fs::path(name).extension().string())) != 0;
+        }
+
+        // Newlines in the file, plus one for a last line with none; 0 for an empty or unreadable file or one over
+        // 4 MB (read on every folder open, so not unbounded).
+        std::size_t countLines(const std::string& path, std::uintmax_t bytes)
+        {
+            if (bytes == 0 || bytes > 4u * 1024 * 1024) return 0;
+            std::ifstream in(path, std::ios::binary);
+            if (!in) return 0;
+            std::vector<char> buffer(64 * 1024);
+            std::size_t lines = 0;
+            char last = 0;
+            while (in.read(buffer.data(), static_cast<std::streamsize>(buffer.size())) || in.gcount() > 0) {
+                const std::size_t got = static_cast<std::size_t>(in.gcount());
+                lines += static_cast<std::size_t>(std::count(buffer.data(), buffer.data() + got, 0x0A));
+                last = buffer[got - 1];
+            }
+            return last != 0x0A ? lines + 1 : lines;
+        }
+
         bool lessNoCase(const ExplorerNode& a, const ExplorerNode& b)
         {
             return lowered(a.text) < lowered(b.text);
         }
 
-        void fillFolder(ExplorerNode& folder, const std::string& path, const FileDetailProvider& detail)
+        void fillFolder(ExplorerNode& folder, const std::string& path, const FileDetailProvider& detail, const FileBadgeProvider& badge)
         {
             std::vector<ExplorerNode> dirs;
             std::vector<ExplorerNode> files;
@@ -85,8 +121,9 @@ namespace CodeToolsVsix
                     if (isSkippedFolder(name)) continue;
                     child.kind = ExplorerNode::Kind::Folder;
                     child.detail = detail ? detail(full, true) : std::string();
+                    child.badge = badge ? badge(full, true) : ExplorerNode::Badge::None;
                     child.loaded = false;
-                    child.loader = [full, detail](ExplorerNode& node) { fillFolder(node, full, detail); };
+                    child.loader = [full, detail, badge](ExplorerNode& node) { fillFolder(node, full, detail, badge); };
                     dirs.push_back(std::move(child));
                 } else {
                     if (isSkippedFile(name)) continue;
@@ -95,7 +132,15 @@ namespace CodeToolsVsix
                     std::error_code sizeEc;
                     const auto bytes = entry.file_size(sizeEc);
                     const std::string extra = detail ? detail(full, false) : std::string();
-                    child.detail = extra.empty() ? (sizeEc ? std::string() : sizeText(bytes)) : extra;
+                    child.detail = extra;   // "cpptools", "not built": beside the name; the size and lines are columns
+                    if (!sizeEc) {
+                        const std::size_t lines = countsLines(name) ? countLines(full, bytes) : 0;
+                        child.cells = { lines > 0 ? countText(lines) + (lines == 1 ? " line" : " lines") : std::string(), sizeText(bytes) };
+                        child.cellTones = { lines >= 2000 ? ExplorerNode::Tone::Warn : ExplorerNode::Tone::Muted,
+                                            bytes >= 1024 * 1024 ? ExplorerNode::Tone::Warn : ExplorerNode::Tone::Muted };
+                    }
+                    child.badge = badge ? badge(full, false) : ExplorerNode::Badge::None;
+                    if (child.badge == ExplorerNode::Badge::None && extra == "not built") child.badge = ExplorerNode::Badge::NotBuilt;
                     files.push_back(std::move(child));
                 }
             }
@@ -213,20 +258,23 @@ namespace CodeToolsVsix
         return shown;
     }
 
-    ExplorerIcon explorerIconFor(const ExplorerNode& node)
+    static ExplorerIcon baseIconFor(const ExplorerNode& node)
     {
         using Kind = ExplorerNode::Kind;
-        auto themed = [](const char* name) { return ExplorerIcon{ name, true }; };
-        auto plain = [](const char* path) { return ExplorerIcon{ path, false }; };
+        auto themed = [](const std::string& name) { return ExplorerIcon{ name, true }; };
         switch (node.kind) {
-            case Kind::Folder: return plain("Images/icons/resource-editor/folder.svg");
+            case Kind::Folder: return themed("folders/folder");
             case Kind::File: {
                 const std::string name = lowered(node.text);
                 const std::string ext = lowered(fs::path(node.text).extension().string());
-                if (name == "cmakelists.txt" || ext == ".cmake") return themed("files-actions/project");
+                if (name == "cmakelists.txt" || ext == ".cmake") return themed("files/cmake");
                 if (ext == ".h" || ext == ".hpp" || ext == ".hh" || ext == ".hxx" || ext == ".inl") return themed("files-actions/header");
                 if (ext == ".cpp" || ext == ".cc" || ext == ".cxx" || ext == ".c") return themed("files-actions/source");
-                return plain("Images/icons/files/document.svg");
+                if (ext == ".json") return themed("files/json");
+                if (ext == ".md") return themed("files/markdown");
+                if (ext == ".newui") return themed("files/newui");
+                if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".gif" || ext == ".bmp" || ext == ".ico" || ext == ".svg") return themed("files/image");
+                return themed("files/document");
             }
             case Kind::Namespace: return themed("symbols/namespace");
             case Kind::Class: return themed("symbols/class");
@@ -235,14 +283,46 @@ namespace CodeToolsVsix
             case Kind::Function: return themed("symbols/function");
             case Kind::Field: return themed("symbols/field");
             case Kind::Variable: return themed("symbols/variable");
-            case Kind::Product:
-                return node.detail.find("executable") != std::string::npos ? plain("Images/icons/resource-editor/exe.svg")
-                                                                           : themed("files-actions/module");
+            case Kind::Product: {
+                if (!node.iconHint.empty()) return themed("products/" + node.iconHint);
+                auto has = [&](const char* word) { return node.detail.find(word) != std::string::npos; };
+                if (has("executable")) return themed("products/executable");
+                if (has("shared") || has("module")) return themed("products/shared-library");
+                if (has("object")) return themed("products/object-library");
+                if (has("interface")) return themed("products/interface-library");
+                if (has("utility")) return themed("products/custom-command");
+                return themed("products/static-library");
+            }
             case Kind::Link: return themed("statements/include");
             case Kind::Note: return ExplorerIcon();
             case Kind::Group: return ExplorerIcon();
         }
         return ExplorerIcon();
+    }
+
+    ExplorerIcon explorerIconFor(const ExplorerNode& node)
+    {
+        ExplorerIcon icon = baseIconFor(node);
+        if (node.badge == ExplorerNode::Badge::None || !icon.themed) return icon;
+
+        // Which bases have a composed icon for which badge (see the set's readme).
+        struct Composed { const char* base; const char* stem; const char* badges; };   // badges: e, w, n, u
+        static const Composed kComposed[] = {
+            { "files-actions/source", "source", "ewnu" },
+            { "files-actions/header", "header", "ewu" },
+            { "files/cmake", "cmake", "ewn" },
+            { "folders/folder", "folder", "ew" },
+        };
+        using Badge = ExplorerNode::Badge;
+        const char letter = node.badge == Badge::Error ? 'e' : node.badge == Badge::Warning ? 'w' : node.badge == Badge::NotBuilt ? 'n' : 'u';
+        const char* suffix = node.badge == Badge::Error ? "error" : node.badge == Badge::Warning ? "warning"
+                           : node.badge == Badge::NotBuilt ? "notbuilt" : "unreferenced";
+        for (const Composed& composed : kComposed) {
+            if (icon.name == composed.base && std::string(composed.badges).find(letter) != std::string::npos) {
+                return ExplorerIcon{ std::string("badged/") + composed.stem + "-" + suffix, true };
+            }
+        }
+        return icon;
     }
 
     std::string explorerIconPath(const ExplorerIcon& icon, bool dark)
@@ -293,14 +373,14 @@ namespace CodeToolsVsix
         return node == nullptr ? std::string() : node->display();
     }
 
-    ExplorerNode buildFilesTree(const std::string& root, const FileDetailProvider& detail)
+    ExplorerNode buildFilesTree(const std::string& root, const FileDetailProvider& detail, const FileBadgeProvider& badge)
     {
         ExplorerNode top;
         top.kind = ExplorerNode::Kind::Folder;
         top.text = fs::path(root).filename().string();
         const std::string path = fs::path(root).generic_string();
         top.loaded = false;
-        top.loader = [path, detail](ExplorerNode& node) { fillFolder(node, path, detail); };
+        top.loader = [path, detail, badge](ExplorerNode& node) { fillFolder(node, path, detail, badge); };
         return top;
     }
 
@@ -451,7 +531,9 @@ namespace CodeToolsVsix
                 product.kind = K::Product;
                 product.text = target->name;
                 product.detail = describe(target->type);
-                product.path = target->defined.valid() ? absoluteIn(model.sourceDir, target->defined.file) : std::string();
+                product.iconHint = section.kind == cmakemodel::ProductKind::Test ? "test"
+                                 : section.kind == cmakemodel::ProductKind::Tool ? "custom-command" : std::string();
+                product.path =target->defined.valid() ? absoluteIn(model.sourceDir, target->defined.file) : std::string();
                 product.line = static_cast<std::size_t>(target->defined.line);
                 product.search = lowered(target->name);
 
@@ -547,14 +629,6 @@ namespace CodeToolsVsix
 
     namespace
     {
-        // 1204 -> "1,204"
-        std::string countText(std::uint64_t n)
-        {
-            std::string digits = std::to_string(n);
-            for (int at = static_cast<int>(digits.size()) - 3; at > 0; at -= 3) digits.insert(static_cast<std::size_t>(at), ",");
-            return digits;
-        }
-
         std::string millisText(double ms)
         {
             char buffer[32];
@@ -745,6 +819,15 @@ namespace CodeToolsVsix
         addCells(index, "Read this time", { countText(stats.parsed) }, { stats.parsed > 0 ? Tone::Accent : Tone::Muted });
         addCells(index, "Up to date in the cache", { countText(stats.upToDate) }, { Tone::Good });
         if (stats.failed > 0) addCells(index, "Could not be read", { countText(stats.failed) }, { Tone::Bad });
+        addCells(index, "Files with errors", { countText(stats.filesWithErrors) }, { stats.filesWithErrors > 0 ? Tone::Bad : Tone::Muted });
+        addCells(index, "Files with warnings", { countText(stats.filesWithWarnings) }, { stats.filesWithWarnings > 0 ? Tone::Warn : Tone::Muted });
+        addCells(index, "Files with unresolved includes", { countText(stats.filesWithUnresolvedIncludes) },
+                 { stats.filesWithUnresolvedIncludes > 0 ? Tone::Warn : Tone::Muted });
+        if (stats.filesWithUnresolvedIncludes > 0) {
+            index.children.back().detail = countText(stats.unresolvedIncludes) + " includes";
+            // a lot of these means the compile flags are missing, not that the code is wrong
+            addNote(index, "Usually missing include paths: check compile_commands.json");
+        }
         root.children.push_back(std::move(index));
 
         ExplorerNode cmake = group("CMake");

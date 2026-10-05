@@ -40,6 +40,12 @@ namespace CodeToolsVsix
         std::map<std::string, std::vector<std::string>> byPath;   // lower-case normalized path -> product names
     };
 
+    // The worst problem of each file with one, and of each folder above such a file (lower-case normalized path).
+    struct ProjectExplorer::FileProblems
+    {
+        std::map<std::string, ExplorerNode::Badge> worst;
+    };
+
     // What the background work hands the UI thread: the CMake model once it is read, then progress, then
     // the final counts.
     struct ProjectExplorer::Found
@@ -342,6 +348,7 @@ namespace CodeToolsVsix
         root_ = folder;
         cmake_.reset();
         products_ = std::make_shared<FileProducts>();
+        problems_.reset();
         buildDir_.clear();
         note_.clear();
         stats_ = ProjectStats();
@@ -441,6 +448,10 @@ namespace CodeToolsVsix
                         auto it = products->byPath.find(lowered(cpptools::ProjectIndex::normalizePath(path)));
                         if (it == products->byPath.end()) return isCppSourceExtension(ext) ? "not built" : std::string();
                         return it->second.front() + (it->second.size() > 1 ? " +" + std::to_string(it->second.size() - 1) : std::string());
+                    }, [problems = problems_](const std::string& path, bool) {
+                        if (problems == nullptr) return ExplorerNode::Badge::None;
+                        auto it = problems->worst.find(lowered(cpptools::ProjectIndex::normalizePath(path)));
+                        return it == problems->worst.end() ? ExplorerNode::Badge::None : it->second;
                     });
                 } else {
                     top = buildFileSearch(root_, text);
@@ -531,7 +542,33 @@ namespace CodeToolsVsix
             }
             setStatus(text);
         }
-        if (found->final) rebuild();
+        if (found->final) {
+            collectProblems();
+            rebuild();
+        }
+    }
+
+    void ProjectExplorer::collectProblems()
+    {
+        using Badge = ExplorerNode::Badge;
+        auto problems = std::make_shared<FileProblems>();
+        const std::string rootKey = lowered(cpptools::ProjectIndex::normalizePath(root_));
+        for (const std::string& file : index_->files()) {
+            const cpptools::ProjectIndex::Problems found = index_->problemsIn(file);
+            if (found.errors == 0 && found.warnings == 0 && found.unresolvedIncludes == 0) continue;
+            // A header libclang cannot find leaves its names undeclared, and every use of one is another error, so
+            // a file with an unresolved include is only a warning: the cause is the flags, not the code.
+            const Badge badge = found.errors > 0 && found.unresolvedIncludes == 0 ? Badge::Error : Badge::Warning;
+            std::string key = lowered(cpptools::ProjectIndex::normalizePath(file));
+            while (key.size() >= rootKey.size()) {   // the file, then each folder up to the root
+                Badge& slot = problems->worst[key];
+                if (badge == Badge::Error || slot == Badge::None) slot = badge;
+                const std::size_t slash = key.find_last_of('/');
+                if (slash == std::string::npos) break;
+                key.resize(slash);
+            }
+        }
+        problems_ = std::move(problems);
     }
 
     void ProjectExplorer::startWork()
@@ -667,11 +704,23 @@ namespace CodeToolsVsix
                 stats.indexThreads);
             if (alive->cancel.load()) return;
             stats.indexMs = since(indexStart);
+            stats.filesToIndex = result.total;   // CMake lists a shared source once per target; the index counts it once
             if (!cache.empty()) index->save(cache);
 
             std::size_t symbols = 0;
             for (const std::string& file : index->files()) symbols += index->symbolsIn(file).size();
             stats.symbols = symbols;
+            for (const std::string& file : index->files()) {
+                const cpptools::ProjectIndex::Problems found = index->problemsIn(file);
+                if (found.unresolvedIncludes > 0) {   // its other errors are most likely knock-on, so they count here
+                    ++stats.filesWithUnresolvedIncludes;
+                    stats.unresolvedIncludes += found.unresolvedIncludes;
+                } else if (found.errors > 0) {
+                    ++stats.filesWithErrors;
+                } else if (found.warnings > 0) {
+                    ++stats.filesWithWarnings;
+                }
+            }
             stats.parsed = result.parsed;
             stats.upToDate = result.skipped;
             stats.failed = result.failed;

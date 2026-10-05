@@ -255,6 +255,32 @@ IndexedFile indexOne(CXIndex index, const std::string& path, const std::vector<s
     clang_visitChildren(root, &collectReferences, &context);
     InclusionContext inclusions{ &context };
     clang_getInclusions(unit, &collectInclusion, &inclusions);
+
+    // Only the diagnostics located in this file itself: a header's own problems belong to the header's entry.
+    const unsigned diagnosticCount = clang_getNumDiagnostics(unit);
+    for (unsigned i = 0; i < diagnosticCount; ++i) {
+        CXDiagnostic diagnostic = clang_getDiagnostic(unit, i);
+        const CXDiagnosticSeverity severity = clang_getDiagnosticSeverity(diagnostic);
+        if (severity == CXDiagnostic_Warning || severity == CXDiagnostic_Error || severity == CXDiagnostic_Fatal) {
+            CXFile where = nullptr;
+            clang_getSpellingLocation(clang_getDiagnosticLocation(diagnostic), &where, nullptr, nullptr, nullptr);
+            if (where != nullptr) {
+                CXString name = clang_getFileName(where);
+                const char* text = clang_getCString(name);
+                if (text != nullptr && keyOf(ProjectIndex::normalizePath(text)) == keyOf(path)) {
+                    if (severity == CXDiagnostic_Warning) {
+                        ++file.warnings;
+                    } else {
+                        // "'x.h' file not found": the include path is missing, which is the flags' problem, not the code's
+                        const std::string message = toStdString(clang_getDiagnosticSpelling(diagnostic));
+                        if (message.find("file not found") != std::string::npos) ++file.unresolvedIncludes; else ++file.errors;
+                    }
+                }
+                clang_disposeString(name);
+            }
+        }
+        clang_disposeDiagnostic(diagnostic);
+    }
     clang_disposeTranslationUnit(unit);
     file.parsed = true;
     return file;
@@ -263,7 +289,7 @@ IndexedFile indexOne(CXIndex index, const std::string& path, const std::vector<s
 // --- persistence helpers -------------------------------------------------------------------------
 
 constexpr char kMagic[8] = { 'C', 'P', 'T', 'O', 'O', 'L', 'I', 'X' };
-constexpr std::uint32_t kFormatVersion = 1;
+constexpr std::uint32_t kFormatVersion = 3;   // 2: per-file error and warning counts; 3: and unresolved includes
 
 void put(std::ostream& out, std::uint64_t value) { out.write(reinterpret_cast<const char*>(&value), sizeof value); }
 void put(std::ostream& out, const std::string& text) {
@@ -459,6 +485,18 @@ std::vector<IndexedSymbol> ProjectIndex::symbolsIn(const std::string& path) cons
     return it == impl_->files.end() ? std::vector<IndexedSymbol>() : it->second.symbols;
 }
 
+ProjectIndex::Problems ProjectIndex::problemsIn(const std::string& path) const {
+    std::lock_guard<std::mutex> lock(impl_->mutex);
+    auto it = impl_->files.find(keyOf(normalizePath(path)));
+    Problems problems;
+    if (it != impl_->files.end()) {
+        problems.errors = it->second.errors;
+        problems.warnings = it->second.warnings;
+        problems.unresolvedIncludes = it->second.unresolvedIncludes;
+    }
+    return problems;
+}
+
 std::vector<IncludeEdge> ProjectIndex::includesOf(const std::string& path) const {
     std::lock_guard<std::mutex> lock(impl_->mutex);
     auto it = impl_->files.find(keyOf(normalizePath(path)));
@@ -562,6 +600,9 @@ bool ProjectIndex::save(const std::string& cachePath) const {
         put(out, file.flagsHash);
         put(out, static_cast<std::uint64_t>(file.parsed ? 1 : 0));
         put(out, file.error);
+        put(out, static_cast<std::uint64_t>(file.errors));
+        put(out, static_cast<std::uint64_t>(file.warnings));
+        put(out, static_cast<std::uint64_t>(file.unresolvedIncludes));
         put(out, static_cast<std::uint64_t>(file.symbols.size()));
         for (const IndexedSymbol& s : file.symbols) {
             put(out, s.usr);
@@ -612,6 +653,9 @@ bool ProjectIndex::load(const std::string& cachePath) {
         file.flagsHash = reader.number();
         file.parsed = reader.number() != 0;
         file.error = reader.text();
+        file.errors = static_cast<std::uint32_t>(reader.number());
+        file.warnings = static_cast<std::uint32_t>(reader.number());
+        file.unresolvedIncludes = static_cast<std::uint32_t>(reader.number());
         const std::uint64_t symbols = reader.number();
         for (std::uint64_t i = 0; i < symbols && reader.good; ++i) {
             IndexedSymbol s;

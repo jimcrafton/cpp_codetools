@@ -387,3 +387,37 @@ TEST(ProjectIndexRepository, DISABLED_TimesIndexingTheWholeProject) {
         symbols, index.findClasses().size());
     EXPECT_EQ(warm.parsed, 0u);
 }
+
+TEST_F(ProjectIndexTest, CountsTheErrorsAndWarningsEachFileReportsInItself) {
+    write("bad.cpp", "int broken() { return missing_name; }\n");                       // an error in this file
+    write("warn.cpp", "int fine() { int unused; return 0; }\n");                       // -Wall: an unused variable
+    write("hdr_user.cpp", "#include \"bad_header.h\"\nint ok() { return 1; }\n");      // the problem is in the header
+    write("bad_header.h", "int header_broken() { return also_missing; }\n");
+    write("noinc.cpp", "#include \"does_not_exist.h\"\nint fine2() { return 2; }\n");   // only a missing include
+    ProjectIndex local;
+    local.setFlagsProvider([](const std::string&) { return std::vector<std::string>{ "-x", "c++", "-std=c++17", "-Wall" }; });
+    local.indexFiles({ path("bad.cpp"), path("warn.cpp"), path("hdr_user.cpp"), path("bad_header.h"), path("a.h"), path("noinc.cpp") }, {}, 1);
+
+    // a header that cannot be found is the flags' problem, not an error in the code
+    EXPECT_EQ(local.problemsIn(path("noinc.cpp")).errors, 0u);
+    EXPECT_GE(local.problemsIn(path("noinc.cpp")).unresolvedIncludes, 1u);
+    EXPECT_EQ(local.problemsIn(path("bad.cpp")).unresolvedIncludes, 0u);
+
+    EXPECT_GE(local.problemsIn(path("bad.cpp")).errors, 1u);
+    EXPECT_EQ(local.problemsIn(path("bad.cpp")).warnings, 0u);
+    EXPECT_EQ(local.problemsIn(path("warn.cpp")).errors, 0u);
+    EXPECT_GE(local.problemsIn(path("warn.cpp")).warnings, 1u);
+    EXPECT_EQ(local.problemsIn(path("hdr_user.cpp")).errors, 0u) << "a header's problem is the header's own";
+    EXPECT_GE(local.problemsIn(path("bad_header.h")).errors, 1u) << "indexed as a file of its own";
+    EXPECT_EQ(local.problemsIn(path("a.h")).errors, 0u);
+    EXPECT_EQ(local.problemsIn(path("not_indexed.cpp")).errors, 0u);
+
+    // and they survive the cache
+    const std::string cache = path("problems.bin");
+    ASSERT_TRUE(local.save(cache));
+    ProjectIndex loaded;
+    ASSERT_TRUE(loaded.load(cache));
+    EXPECT_EQ(loaded.problemsIn(path("bad.cpp")).errors, local.problemsIn(path("bad.cpp")).errors);
+    EXPECT_EQ(loaded.problemsIn(path("warn.cpp")).warnings, local.problemsIn(path("warn.cpp")).warnings);
+    EXPECT_EQ(loaded.problemsIn(path("noinc.cpp")).unresolvedIncludes, local.problemsIn(path("noinc.cpp")).unresolvedIncludes);
+}

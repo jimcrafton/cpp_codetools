@@ -44,6 +44,25 @@ namespace CodeToolsVsix
             return metrics.advance.x;
         }
 
+        // `text` as it fits in `available` pixels: itself, or cut at a whole character with an ellipsis.
+        std::string fitText(BLFont& font, const std::string& text, double available)
+        {
+            const double width = textWidth(font, text);
+            if (width <= available) return text;
+            const std::string ellipsis = "\xE2\x80\xA6";
+            if (available <= 0.0) return std::string();
+
+            // a first guess from the proportion, then shorter until it fits
+            std::size_t length = std::min(text.size(), static_cast<std::size_t>(double(text.size()) * available / width));
+            for (;;) {
+                while (length > 0 && (static_cast<unsigned char>(text[length]) & 0xC0) == 0x80) --length;   // not mid-character
+                if (length == 0) return ellipsis;
+                const std::string candidate = text.substr(0, length) + ellipsis;
+                if (textWidth(font, candidate) <= available) return candidate;
+                --length;
+            }
+        }
+
         void drawText(BLContext& ctx, BLFont& font, double x, const newui::Rect& row, const std::string& text, BLRgba32 color)
         {
             if (text.empty()) return;
@@ -134,14 +153,19 @@ namespace CodeToolsVsix
             }
         }
 
-        // Cells fill the right edge, so the name and its detail get what is left of the left side.
-        const double cellsLeft = right - kEdgePad - kCellWidth * double(node->cells.size());
-        const double limit = node->cells.empty() ? right : cellsLeft - kNameGap;
+        // Cells fill the right edge, so the name and its detail get what is left of the left side. A column whose
+        // cell is empty on this row (no line count on a text file) gives its room back to the name.
+        std::size_t firstShown = 0;
+        while (firstShown < node->cells.size() && node->cells[firstShown].empty()) ++firstShown;
+        const std::size_t shownCells = node->cells.size() - firstShown;
+        const double cellsLeft = right - kEdgePad - kCellWidth * double(shownCells);
+        const double limit = shownCells == 0 ? right : cellsLeft - kNameGap;
         ctx.clip_to_rect(BLRect(x, row.top(), std::max(0.0, limit - x), row.size().height));
 
-        drawText(ctx, *font, x, row, node->text, nameColor);
-        if (!node->detail.empty()) {
-            drawText(ctx, *font, x + textWidth(*font, node->text) + kNameGap, row, node->detail, toneColor(node->detailTone, selected));
+        const std::string name = fitText(*font, node->text, limit - x);
+        drawText(ctx, *font, x, row, name, nameColor);
+        if (!node->detail.empty() && name == node->text) {   // a shortened name leaves no room for its detail
+            drawText(ctx, *font, x + textWidth(*font, name) + kNameGap, row, node->detail, toneColor(node->detailTone, selected));
         }
         ctx.restore_clipping();
 

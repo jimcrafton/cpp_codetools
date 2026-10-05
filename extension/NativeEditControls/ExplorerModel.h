@@ -34,7 +34,11 @@ namespace CodeToolsVsix
         // folder that is most of the project); the rest are the theme's own colors.
         enum class Tone { Normal, Muted, Accent, Good, Warn, Bad };
 
+        // A mark on the icon. One per row, in this order of importance.
+        enum class Badge { None, Error, Warning, NotBuilt, Unreferenced };
+
         Kind kind = Kind::Note;
+        Badge badge = Badge::None;
         std::string text;        // the name
         std::string detail;      // muted text after it ("parser.h", "1.2 KB", "static library")
         Tone detailTone = Tone::Muted;
@@ -45,6 +49,7 @@ namespace CodeToolsVsix
         std::string path;        // what a double-click opens; empty for nothing
         std::size_t line = 0;    // 1-based; 0 = open the file without moving the caret
         std::string search;      // lower case text a filter is matched against (a qualified name, a path)
+        std::string iconHint;    // a product's finer kind the type does not say: "test", "custom-command"
         std::vector<ExplorerNode> children;
 
         // For a node whose children are found when it is first opened (a folder on disk): fills
@@ -96,10 +101,13 @@ namespace CodeToolsVsix
     // Extra text for a file row ("cpptools +2", "not built"), or empty. Called when a folder is opened.
     using FileDetailProvider = std::function<std::string(const std::string& path, bool isDirectory)>;
 
+    // The mark for a file or folder row (an error, a warning), or Badge::None. Called when a folder is opened.
+    using FileBadgeProvider = std::function<ExplorerNode::Badge(const std::string& path, bool isDirectory)>;
+
     // The folder `root` on disk, one level at a time as folders are opened. Skips what a user does not
     // browse: dot-files and folders, build output, fetched dependencies. Folders first, then files, each
     // in name order (any case).
-    ExplorerNode buildFilesTree(const std::string& root, const FileDetailProvider& detail = {});
+    ExplorerNode buildFilesTree(const std::string& root, const FileDetailProvider& detail = {}, const FileBadgeProvider& badge = {});
 
     // Every file under `root` whose name contains `filter` (any case), as a flat list, relative path as
     // the detail. At most `limit` of them (the list says so if it was cut).
@@ -164,6 +172,10 @@ namespace CodeToolsVsix
         std::size_t upToDate = 0;      // found current in the cache
         std::size_t failed = 0;
         std::size_t symbols = 0;
+        std::size_t filesWithErrors = 0;
+        std::size_t filesWithWarnings = 0;   // with no errors
+        std::size_t filesWithUnresolvedIncludes = 0;   // "file not found": usually the compile flags, not the code
+        std::size_t unresolvedIncludes = 0;
         unsigned indexThreads = 0;
         bool complete = false;         // every step has run
     };
