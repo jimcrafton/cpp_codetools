@@ -43,4 +43,37 @@ C++ Editor Find
 C++ Editor Replace
 <img width="925" height="727" alt="sc14" src="https://github.com/user-attachments/assets/c6a44020-1849-4499-b051-0ed9dc2cc76f" />
 
+Menu Designer
+<img width="1162" height="756" alt="sc15" src="https://github.com/user-attachments/assets/300dfb52-cf98-45dd-8478-ce434c4d8f69" />
+
+<img width="774" height="736" alt="sc16" src="https://github.com/user-attachments/assets/57854423-5cd4-4f39-bf9c-93ae4c533b9e" />
+
+Event handling with Delegates:
+
+<img width="919" height="645" alt="sc17" src="https://github.com/user-attachments/assets/b742bfc8-97da-409c-a909-59752d57fcfd" />
+
+<img width="657" height="209" alt="sc18" src="https://github.com/user-attachments/assets/dd2e5866-f922-4495-838e-994d3ad71215" />
+
+<img width="904" height="465" alt="sc19" src="https://github.com/user-attachments/assets/3a73b674-95fc-40e9-9adc-ce2a9fef2a78" />
+
+
+Jump to handler code:
+<img width="405" height="183" alt="sc20" src="https://github.com/user-attachments/assets/e1aae3f6-bb9b-4759-9367-1458b4e704ba" />
+
+<img width="851" height="727" alt="sc21" src="https://github.com/user-attachments/assets/ffdbe496-1a31-4798-b36b-e94abf5691c7" />
+
+The VS IDE Solution Explorer replacement
+
+<img width="596" height="1105" alt="sc24" src="https://github.com/user-attachments/assets/c9ed0001-1b92-4bb7-8612-752951964f6a" />
+
+<img width="593" height="1104" alt="sc23" src="https://github.com/user-attachments/assets/3bbf5d2f-970e-485e-be94-6e1821d168d2" />
+
+<img width="597" height="1107" alt="sc22" src="https://github.com/user-attachments/assets/64a00fe8-117c-4bae-aa1f-baee510b1e32" />
+
+warnings:
+<img width="2021" height="1038" alt="sc25" src="https://github.com/user-attachments/assets/b4ad279c-d661-4581-8a39-b90db2254899" />
+
+
+
+
 
