@@ -43,4 +43,26 @@ C++ Editor Find
 C++ Editor Replace
 <img width="925" height="727" alt="sc14" src="https://github.com/user-attachments/assets/c6a44020-1849-4499-b051-0ed9dc2cc76f" />
 
+Menu Designer
+<img width="1162" height="756" alt="sc15" src="https://github.com/user-attachments/assets/300dfb52-cf98-45dd-8478-ce434c4d8f69" />
+
+<img width="774" height="736" alt="sc16" src="https://github.com/user-attachments/assets/57854423-5cd4-4f39-bf9c-93ae4c533b9e" />
+
+Event handling with Delegates:
+
+<img width="919" height="645" alt="sc17" src="https://github.com/user-attachments/assets/b742bfc8-97da-409c-a909-59752d57fcfd" />
+
+<img width="657" height="209" alt="sc18" src="https://github.com/user-attachments/assets/dd2e5866-f922-4495-838e-994d3ad71215" />
+
+<img width="904" height="465" alt="sc19" src="https://github.com/user-attachments/assets/3a73b674-95fc-40e9-9adc-ce2a9fef2a78" />
+
+
+Jump to handler code:
+<img width="405" height="183" alt="sc20" src="https://github.com/user-attachments/assets/e1aae3f6-bb9b-4759-9367-1458b4e704ba" />
+
+<img width="851" height="727" alt="sc21" src="https://github.com/user-attachments/assets/ffdbe496-1a31-4798-b36b-e94abf5691c7" />
+
+
+
+
 
