@@ -70,6 +70,10 @@ The VS IDE Solution Explorer replacement
 
 <img width="597" height="1107" alt="sc22" src="https://github.com/user-attachments/assets/64a00fe8-117c-4bae-aa1f-baee510b1e32" />
 
+warnings:
+<img width="2021" height="1038" alt="sc25" src="https://github.com/user-attachments/assets/b4ad279c-d661-4581-8a39-b90db2254899" />
+
+
 
 
 
