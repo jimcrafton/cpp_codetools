@@ -3,6 +3,7 @@
 #include <Windows.h>
 
 #include "ExplorerItem.h"
+#include "IncludeGraphPopup.h"
 #include "Logging.h"
 #include "Settings.h"
 #include "TextEncoding.h"
@@ -288,6 +289,12 @@ namespace CodeToolsVsix
         cardTitle_->setVisible(true);
         cardTitle_->setDesiredSize(newui::Size(1.0f, 20.0f));
         cardHost->addChild(cardTitle_);
+        cardGraph_ = new newui::Button();
+        cardGraph_->setName("cardGraph");
+        cardGraph_->setText("Open include graph");
+        cardGraph_->setVisible(false);
+        cardGraph_->setDesiredSize(newui::Size(1.0f, 28.0f));
+        cardHost->addChild(cardGraph_);
         cardSteps_ = new newui::SegmentedControl();
         cardSteps_->setName("cardSteps");
         cardSteps_->setVisible(false);
@@ -337,6 +344,10 @@ namespace CodeToolsVsix
         includeViewConnection_ = includeViewControl_->onSelectionChanged.add(this, &ProjectExplorer::handleIncludeViewChanged);
         macroScopeConnection_ = macroScopeControl_->onSelectionChanged.add(this, &ProjectExplorer::handleMacroScopeChanged);
         cardStepConnection_ = cardSteps_->onSelectionChanged.add(this, &ProjectExplorer::handleCardStepChanged);
+        cardGraphConnection_ = cardGraph_->onClick.add([this](newui::Control&) {
+            openIncludeGraph();
+            return newui::SyncReturn::Handled;
+        });
         tree_->onSelectionChanged.add(this, &ProjectExplorer::handleSelectionChanged);
         tree_->onMouseDblClick.add(this, &ProjectExplorer::handleDoubleClick);
         infoButton_->onCheckedChanged.add(this, &ProjectExplorer::handleInfoToggled);
@@ -366,6 +377,7 @@ namespace CodeToolsVsix
         if (includeViewControl_ != nullptr) includeViewControl_->onSelectionChanged.remove(includeViewConnection_);
         if (macroScopeControl_ != nullptr) macroScopeControl_->onSelectionChanged.remove(macroScopeConnection_);
         if (cardSteps_ != nullptr) cardSteps_->onSelectionChanged.remove(cardStepConnection_);
+        if (cardGraph_ != nullptr) cardGraph_->onClick.remove(cardGraphConnection_);
         stopMacroWork();
     }
 
@@ -614,7 +626,20 @@ namespace CodeToolsVsix
         const std::optional<std::vector<std::size_t>> selected = tree_->selectedPath();
         const ExplorerNode* node = selected.has_value() && model_ != nullptr ? model_->nodeAt(*selected) : nullptr;
         showCard(node != nullptr ? node->card : nullptr);
+        if (node != nullptr && node->swatch >= 0 && !node->children.empty()) expandAll(*selected, *node);   // a use: its macros, open
+        if (node != nullptr && node->openOnSelect) activate(*selected);
         return newui::SyncReturn::Handled;
+    }
+
+    void ProjectExplorer::expandAll(const std::vector<std::size_t>& path, const ExplorerNode& node)
+    {
+        tree_->controller().setExpanded(path, true);
+        std::vector<std::size_t> child = path;
+        child.push_back(0);
+        for (std::size_t i = 0; i < node.children.size(); ++i) {
+            child.back() = i;
+            if (!node.children[i].children.empty()) expandAll(child, node.children[i]);
+        }
     }
 
     newui::SyncReturn ProjectExplorer::handleCardStepChanged(newui::SegmentedControl& sender)
@@ -635,7 +660,13 @@ namespace CodeToolsVsix
         for (const std::string& warning : card->warnings) warnings += (warnings.empty() ? "" : "  ") + warning;
         cardWarning_->setText(warnings);
         cardWarning_->setVisible(!warnings.empty());
+        cardGraph_->setVisible(!card->graphFile.empty());
 
+        if (!card->spans.empty()) {
+            cardSteps_->setVisible(false);
+            showCardSpans(*card);
+            return;
+        }
         cardSteps_->setVisible(!card->steps.empty());
         if (card->steps.empty()) {
             showCardStep(0);
@@ -649,11 +680,60 @@ namespace CodeToolsVsix
         showCardStep(labels.size() - 1);
     }
 
+    void ProjectExplorer::openIncludeGraph()
+    {
+        if (card_ == nullptr || card_->graphFile.empty() || includeGraph_ == nullptr || cardGraph_ == nullptr) return;
+        const newui::Rect anchor = cardGraph_->localToScreen(cardGraph_->getClientBounds());
+        const std::string file = card_->graphFile;
+        // Posted, never inline: this runs inside the button's mouse dispatch, and the mouse-down tail would take
+        // focus straight back from a popup created now.
+        auto show = [this, alive = alive_, anchor, file]() {
+            if (!alive->alive.load() || cardGraph_ == nullptr) return;
+            IncludeGraphPopup::show(*cardGraph_, anchor, includeGraph_, file, [this, alive](const std::string& path) {
+                if (alive->alive.load() && open_) open_(path, 0);
+            });
+        };
+        if (loop_ != nullptr) loop_->post(std::move(show));
+        else show();
+    }
+
+    // The card's text in pieces, each tinted like the row with its swatch.
+    void ProjectExplorer::showCardSpans(const ExplorerCard& card)
+    {
+        const bool dark = newui::UIColorManager::isDarkMode();
+        auto sheet = std::make_shared<newui::TextStyleSheet>();
+        std::wstring text;
+        std::vector<newui::text::TextStyleRange> ranges;
+        for (const ExplorerCard::Span& span : card.spans) {
+            const std::wstring piece = utf8ToWide(span.text);
+            if (span.swatch >= 0) {
+                const std::string name = "swatch" + std::to_string(span.swatch % 6);
+                if (sheet->style(name) == nullptr) {
+                    auto* style = new newui::TextStyle(name);
+                    const std::uint32_t argb = explorerSwatchColor(span.swatch, dark);
+                    newui::Color tint(float((argb >> 16) & 0xFF) / 255.0f, float((argb >> 8) & 0xFF) / 255.0f, float(argb & 0xFF) / 255.0f, 0.30f);
+                    style->setBackgroundColor(tint);
+                    sheet->addStyle(style);
+                }
+                // a leading space stays outside the tint
+                const std::size_t lead = piece.empty() || piece.front() != L' ' ? 0 : 1;
+                ranges.push_back({ text.size() + lead, piece.size() - lead, name });
+            }
+            text += piece;
+        }
+        cardText_->inputTraits().setReadOnly(false);
+        cardText_->setText(text);
+        cardText_->setStyleSheet(sheet);
+        cardText_->setStyledRanges(std::move(ranges));
+        cardText_->inputTraits().setReadOnly(true);
+    }
+
     void ProjectExplorer::showCardStep(std::size_t index)
     {
         if (cardText_ == nullptr) return;
         std::string text;
         if (card_ != nullptr && index < card_->steps.size()) text = card_->steps[index].second;
+        else if (card_ != nullptr && card_->steps.empty()) text = card_->body;
         cardText_->inputTraits().setReadOnly(false);   // read-only also stops this program from setting it
         cardText_->setText(utf8ToWide(text));
         cardText_->inputTraits().setReadOnly(true);

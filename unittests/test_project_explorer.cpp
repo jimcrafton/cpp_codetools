@@ -279,24 +279,32 @@ TEST_F(ProjectExplorerTest, AnalysisMacrosListsTheMacrosOfTheActiveFileFirst) {
     EXPECT_TRUE(hasRow(groups, "Evaluated more than once"));
 
     const auto macros = rows({ 0 });
-    ASSERT_GE(macros.size(), 4u);
+    ASSERT_GE(macros.size(), 2u);
     EXPECT_NE(macros[0].find("CLAMP"), std::string::npos) << "first met: " << macros[0];
     EXPECT_NE(macros[0].find("1 use · 3 levels"), std::string::npos) << macros[0];
     EXPECT_NE(macros[1].find("MAX"), std::string::npos) << macros[1];
-    bool sawMin = false;
-    for (const std::string& row : macros) sawMin = sawMin || (row.compare(0, 3, "MIN") == 0 && row.find("via CLAMP") != std::string::npos);
-    EXPECT_TRUE(sawMin) << "MIN is only met inside CLAMP";
+    const auto dependencies = rows({ 0, 0, 0 });
+    ASSERT_EQ(dependencies.size(), 2u) << "under the CLAMP use: the macros its body brought in";
+    EXPECT_EQ(dependencies[0].compare(0, 3, "MAX"), 0) << dependencies[0];
+    EXPECT_EQ(dependencies[1].compare(0, 3, "MIN"), 0) << dependencies[1];
+    EXPECT_EQ(explorer_->model()->nodeAt({ 0, 0, 0, 1 })->line, 1u) << "MIN opens its #define";
+    EXPECT_TRUE(explorer_->model()->nodeAt({ 0, 0, 0, 1 })->openOnSelect);
     const auto uses = rows({ 0, 1 });
     ASSERT_EQ(uses.size(), 1u);
     EXPECT_NE(uses[0].find("MAX(i++, j)"), std::string::npos) << uses[0];
 
     ExplorerTreeModel* model = explorer_->model();
+    EXPECT_EQ(model->nodeAt({ 0, 1 })->line, 2u) << "a macro opens its #define";
+    EXPECT_TRUE(model->nodeAt({ 0, 1 })->openOnSelect);
+    EXPECT_EQ(explorerIconFor(*model->nodeAt({ 0, 1 })).name, "symbols/macro");
     EXPECT_EQ(model->nodeAt({ 0, 1, 0 })->line, 7u) << "a use opens its file at its line";
+    EXPECT_TRUE(model->nodeAt({ 0, 1, 0 })->openOnSelect) << "one click, like the rest";
+    EXPECT_TRUE(model->nodeAt({ 1, 0 })->openOnSelect) << "an inactive region";
     EXPECT_EQ(model->nodeAt({ 0, 1, 0 })->path, (dir_ / "macros.cpp").generic_string());
     EXPECT_NE(rows({ 1 })[0].find("#if FEATURE"), std::string::npos);
 }
 
-TEST_F(ProjectExplorerTest, SelectingAUseShowsItsExpansionStepsInTheDetailPane) {
+TEST_F(ProjectExplorerTest, SelectingAUseShowsWhatItBecameTintedByMacroAndOpensItsMacros) {
     write("macros.cpp",
         "#define MIN(a, b) ((a) < (b) ? (a) : (b))\n"
         "#define MAX(a, b) ((a) > (b) ? (a) : (b))\n"
@@ -312,12 +320,12 @@ TEST_F(ProjectExplorerTest, SelectingAUseShowsItsExpansionStepsInTheDetailPane) 
     EXPECT_FALSE(explorer_->cardHost()->isVisible()) << "nothing selected";
     explorer_->treeView()->setSelectedPath(std::vector<std::size_t>{ 0, 0, 0 });   // the CLAMP use
     EXPECT_TRUE(explorer_->cardHost()->isVisible());
-    ASSERT_EQ(explorer_->cardStepsControl()->selectedIndex(), 3u) << "Source, CLAMP, MAX, MIN: the last is selected";
-    EXPECT_NE(explorer_->cardText()->model().text().find(L"width"), std::wstring::npos);
-    EXPECT_EQ(explorer_->cardText()->model().text().find(L"MIN"), std::wstring::npos) << "fully expanded";
-
-    explorer_->cardStepsControl()->setSelectedIndex(0);
-    EXPECT_EQ(explorer_->cardText()->model().text(), L"CLAMP(width, 0, 9)");
+    EXPECT_FALSE(explorer_->cardStepsControl()->isVisible());
+    const std::wstring text = explorer_->cardText()->model().text();
+    EXPECT_NE(text.find(L"width"), std::wstring::npos);
+    EXPECT_EQ(text.find(L"MIN"), std::wstring::npos) << "fully expanded";
+    EXPECT_FALSE(explorer_->cardText()->styledRanges().empty()) << "parts tinted by the macro that wrote them";
+    EXPECT_TRUE(explorer_->treeView()->controller().isExpanded({ 0, 0, 0 })) << "its macros open";
 
     explorer_->treeView()->clearSelection();
     EXPECT_FALSE(explorer_->cardHost()->isVisible());

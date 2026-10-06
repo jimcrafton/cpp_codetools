@@ -44,6 +44,24 @@
 			"description": "Wrap long lines instead of scrolling sideways",
 			"default": false
 		},
+		"CodeTools.editor.inactiveNotes": {
+			"type": "boolean",
+			"title": "Notes on inactive code",
+			"description": "Show a short note, such as \"inactive: depends on FEATURE_X\", at the end of the first line of code the preprocessor skips",
+			"default": true
+		},
+		"CodeTools.editor.fadeInactive": {
+			"type": "boolean",
+			"title": "Fade inactive code",
+			"description": "Keep the syntax colors in code the preprocessor skips, but fade them toward the background. Off leaves the colors as they are",
+			"default": true
+		},
+		"CodeTools.editor.fadeStrength": {
+			"type": "integer",
+			"title": "Inactive code fade (%)",
+			"description": "How far the colors of inactive code move toward the background when it is faded, 0 to 100",
+			"default": 70
+		},
 		"CodeTools.editor.peekTabWidth": {
 			"type": "integer",
 			"title": "Tab width in problem previews",

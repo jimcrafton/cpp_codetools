@@ -1,7 +1,9 @@
 #include "CppDiagnostics.h"
+#include "Settings.h"
 #include "TextEncoding.h"
 #include "WorkspaceInfo.h"
 
+#include <cpptools_analysis/macroanalysis.h>
 #include <lex/cpp_lexer.h>
 
 #include <algorithm>
@@ -245,6 +247,38 @@ namespace CodeToolsVsix
         }
     }
 
+    std::vector<newui::text::TextStyleRange> inactiveRanges(const std::wstring& text, const std::string& path, const std::string& utf8,
+        const std::vector<std::string>& args, bool notes)
+    {
+        std::vector<newui::text::TextStyleRange> ranges;
+        const cpptools_analysis::MacroAnalysis analysis = cpptools_analysis::analyzeMacros(utf8, path, args);
+        if (!analysis.ok || analysis.inactive.empty()) {
+            return ranges;
+        }
+        // where each 1-based line starts, and how long it is without its line break
+        std::vector<std::pair<std::size_t, std::size_t>> lines;
+        for (std::size_t start = 0; start <= text.size();) {
+            std::size_t end = text.find(L'\n', start);
+            const std::size_t next = end == std::wstring::npos ? text.size() + 1 : end + 1;
+            if (end == std::wstring::npos) end = text.size();
+            std::size_t length = end - start;
+            if (length > 0 && text[start + length - 1] == L'\r') --length;
+            lines.emplace_back(start, length);
+            start = next;
+        }
+        for (const cpptools_analysis::InactiveRegion& region : analysis.inactive) {
+            // said once, at the end of the region's first line
+            std::string reason = "inactive";
+            for (std::size_t i = 0; i < region.macros.size(); ++i) reason += (i == 0 ? ": depends on " : ", ") + region.macros[i];
+            for (std::size_t line = region.startLine; line <= region.endLine && line >= 1 && line <= lines.size(); ++line) {
+                const auto [start, length] = lines[line - 1];
+                // an empty line still carries the tint, on its break
+                ranges.push_back({ start, length == 0 ? 1 : length, kInactiveStyleName, notes && line == region.startLine ? reason : std::string() });
+            }
+        }
+        return ranges;
+    }
+
     HighlightOverlay analyzeCppDiagnostics(const std::wstring& text, const std::shared_ptr<CppDocument>& document,
         const DiagnosticFilter& filter)
     {
@@ -259,6 +293,9 @@ namespace CodeToolsVsix
                 effective.syntaxOnly = false;
             }
             overlay.ranges = diagnosticRanges(text, utf8, result.diagnostics, effective);
+            const std::vector<newui::text::TextStyleRange> skipped = inactiveRanges(text, document->path(), utf8, flags.args,
+                Settings::instance().getBool(Settings::kInactiveNotes));
+            overlay.ranges.insert(overlay.ranges.end(), skipped.begin(), skipped.end());
             overlay.extra = formatOutline(result, flags.origin);
         } catch (...) {
             // A failed parse: no squiggles and no outline this time.

@@ -295,6 +295,7 @@ namespace CodeToolsVsix
                 return themed("products/static-library");
             }
             case Kind::Link: return themed("statements/include");
+            case Kind::Macro: return themed("symbols/macro");
             case Kind::Note: return ExplorerIcon();
             case Kind::Group: return ExplorerIcon();
         }
@@ -324,6 +325,15 @@ namespace CodeToolsVsix
             }
         }
         return icon;
+    }
+
+    std::uint32_t explorerSwatchColor(int index, bool dark)
+    {
+        static const std::uint32_t kDark[] = { 0xFF58A6FFu, 0xFF6CC47Fu, 0xFFE3B341u, 0xFFBC8CFFu, 0xFF39C5CFu, 0xFFFF7EB6u };
+        static const std::uint32_t kLight[] = { 0xFF0969DAu, 0xFF1E7B34u, 0xFF9A6700u, 0xFF8250DFu, 0xFF1B7C83u, 0xFFBF3989u };
+        const int count = 6;
+        const int i = ((index % count) + count) % count;
+        return dark ? kDark[i] : kLight[i];
     }
 
     std::string explorerIconPath(const ExplorerIcon& icon, bool dark)

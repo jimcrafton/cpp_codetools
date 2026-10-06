@@ -37,8 +37,18 @@ namespace CodeToolsVsix
         std::string headline;                // "87"
         std::string headlineDetail;          // "of 412 translation units include this header"
         std::vector<std::pair<std::string, std::string>> steps;   // label, text
+        // A text shown in pieces, each tinted by `swatch` (explorerSwatchColor) so it matches the row with that swatch;
+        // -1 for plain. When there are any, they replace the steps.
+        struct Span
+        {
+            std::string text;
+            int swatch = -1;
+        };
+        std::vector<Span> spans;
         std::vector<std::string> warnings;
         std::vector<Section> sections;
+        std::string body;                    // plain text shown in the text area when there are no steps or spans
+        std::string graphFile;               // a file the "Open include graph" button shows the graph of; empty: no button
     };
 
     // What the project explorer's tree shows, for any of its views: a tree of rows, each with what a
@@ -52,6 +62,7 @@ namespace CodeToolsVsix
             Group,       // a heading: "Applications", "Build Time", "Sources"
             Product,     // an output: an exe, a library
             Link,        // a library or target a product links
+            Macro,       // a preprocessor macro
             Note,        // explanatory text, not something to open
         };
 
@@ -79,6 +90,8 @@ namespace CodeToolsVsix
         // column so the bars line up down the tree; barTone colors it (Accent low, Warn middle, Bad high).
         float bar = -1.0f;
         Tone barTone = Tone::Accent;
+        int swatch = -1;         // a small chip of explorerSwatchColor(swatch) before the name; -1 for none
+        bool openOnSelect = false;   // selecting the row (a click) opens `path`, not only a double-click
         std::shared_ptr<const ExplorerCard> card;   // what the detail pane shows while this row is selected; null for none
         std::string path;        // what a double-click opens; empty for nothing
         std::size_t line = 0;    // 1-based; 0 = open the file without moving the caret
@@ -127,6 +140,10 @@ namespace CodeToolsVsix
         bool themed = false;
         bool empty() const { return name.empty(); }
     };
+
+    // A categorical color (ARGB) for tying a row to the part of a text it stands for; the index wraps. These hues are
+    // fixed (the theme has no categorical palette), a lighter variant on a dark theme.
+    std::uint32_t explorerSwatchColor(int index, bool dark);
 
     // The icon for a row, from its kind, a file's extension, and what a product is.
     ExplorerIcon explorerIconFor(const ExplorerNode& node);

@@ -35,9 +35,20 @@ namespace CodeToolsVsix
     // Find's own matches so both can be shown at once.
     constexpr const char* kOccurrenceStyleName = "occurrence";
 
+    // A line tint for code the preprocessor skipped: one neutral shade, whatever skipped it.
+    constexpr const char* kInactiveStyleName = "inactive";
+
+    // kInactiveStyleName with the text faded: the theme background over it at half strength (TextStyle::overlayColor).
+    constexpr const char* kInactiveFadedStyleName = "inactiveFaded";
+
+    // `ranges` with the skipped-code lines (kInactiveStyleName) switched to the faded look when `fade`.
+    std::vector<newui::text::TextStyleRange> withInactiveLook(const std::vector<newui::text::TextStyleRange>& ranges, bool fade);
+
     // lex's theme as a sheet: one style per highlightStyleName(), plus "problem" and "warning"
     // (squiggles) and "match" / "matchCurrent" (Find).
-    std::shared_ptr<const newui::TextStyleSheet> highlightStyleSheet(const lex::Theme& theme);
+    // `fadeStrength` (percent) is how far kInactiveFadedStyleName moves the text's colors toward the theme's background.
+    constexpr int kDefaultFadeStrength = 70;
+    std::shared_ptr<const newui::TextStyleSheet> highlightStyleSheet(const lex::Theme& theme, int fadeStrength = kDefaultFadeStrength);
 
     // A squiggle (kProblemStyleName, or kWarningStyleName) over [start, start + length) of a text
     // textSize long - at least one character, so a zero-length problem (say "unexpected end of
@@ -118,6 +129,12 @@ namespace CodeToolsVsix
         // next pass. The second pass is removed by clearOverlayAnalyzer(), which also drops its squiggles.
         void setAnalyzer(HighlightAnalyzer analyzer) { analyzer_ = std::move(analyzer); }
         void clearOverlayAnalyzer();
+        // Runs the second pass again on the text as it is (a setting it reads changed), after its usual pause.
+        void rerunOverlay();
+        // Whether skipped code (the overlay's kInactiveStyleName lines) shows its colors faded; on by default.
+        void setFadeInactive(bool fade);
+        // How strong the fade is, 0 to 100 percent (clamped); restyles the control.
+        void setFadeStrength(int percent);
 
         // The second pass, and how long typing must pause before it starts (default 600 ms).
         void setOverlayAnalyzer(OverlayAnalyzer analyzer, std::chrono::milliseconds delay = std::chrono::milliseconds(600));
@@ -184,5 +201,8 @@ namespace CodeToolsVsix
         std::vector<newui::text::TextStyleRange> extra_;     // Find's matches (setExtraRanges)
         std::vector<newui::text::TextStyleRange> occurrences_;   // symbol-occurrence highlight (setOccurrenceRanges)
         newui::text::PieceTree overlayText_;
+        bool fadeInactive_ = true;
+        int fadeStrength_ = kDefaultFadeStrength;
+        std::shared_ptr<const newui::TextStyleSheet> currentSheet() const;
     };
 }

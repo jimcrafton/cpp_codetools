@@ -101,6 +101,7 @@ add_executable(nativeeditcontrols_tests
     test_document_tabs.cpp
     test_delegate_chips.cpp
     test_issue_peek.cpp
+    test_include_graph_layout.cpp
     test_host_location_opener.cpp
     test_settings.cpp
     test_explorer_model.cpp

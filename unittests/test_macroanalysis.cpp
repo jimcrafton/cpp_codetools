@@ -183,6 +183,87 @@ TEST(MacroAnalysisTest, StepsHandleObjectLikeStringizingAndPasting) {
     EXPECT_EQ(useOf(result, "GLUE")->steps[1].text, "foo1");
 }
 
+TEST(MacroAnalysisTest, StepsFillInFileAndLineForTheBuiltIns) {
+    const MacroAnalysis result = analyzeMacros(
+        "#define LOG(msg) report(__FILE__, __LINE__, msg)\n"
+        "\n"
+        "void f() { LOG(\"hi\"); }\n", kPath);
+
+    const MacroUseInfo* use = useOf(result, "LOG");
+    ASSERT_NE(use, nullptr);
+    ASSERT_EQ(use->steps.size(), 4u);
+    EXPECT_EQ(use->steps[2].macro, "__FILE__");
+    EXPECT_EQ(use->steps[2].text.find("__FILE__"), std::string::npos);
+    EXPECT_NE(use->steps[2].text.find(".cpp\""), std::string::npos);
+    EXPECT_EQ(use->steps[3].macro, "__LINE__");
+    EXPECT_NE(use->steps[3].text.find(", 3, \"hi\""), std::string::npos) << use->steps[3].text;
+}
+
+TEST(MacroAnalysisTest, AnInactiveRegionNamesTheMacrosThatDecidedIt) {
+    const MacroAnalysis result = analyzeMacros(
+        "#define A 1\n"
+        "#define F 1\n"
+        "#if A == 0 && defined(B)\n"
+        "int x;\n"
+        "#endif\n"
+        "#if F\n"
+        "int on;\n"
+        "#else\n"
+        "int off;\n"
+        "#endif\n"
+        "#ifdef NEVER\n"
+        "int z;\n"
+        "#endif\n"
+        "#if 0\n"
+        "int zero;\n"
+        "#endif\n", kPath);
+
+    ASSERT_EQ(result.inactive.size(), 4u);
+    EXPECT_EQ(result.inactive[0].macros, std::vector<std::string>({ "A", "B" }));
+    EXPECT_EQ(result.inactive[1].macros, std::vector<std::string>({ "F" })) << "the #else is the other side of #if F";
+    EXPECT_EQ(result.inactive[2].macros, std::vector<std::string>({ "NEVER" }));
+    EXPECT_TRUE(result.inactive[3].macros.empty()) << "#if 0 names no macro";
+}
+
+TEST(MacroAnalysisTest, AUseHasATreeOfTheMacrosItBroughtIn) {
+    const MacroAnalysis result = analyzeMacros(
+        "#define MIN(a, b) ((a) < (b) ? (a) : (b))\n"
+        "#define MAX(a, b) ((a) > (b) ? (a) : (b))\n"
+        "#define LIMIT 800\n"
+        "#define CLAMP(v, lo, hi) MAX((lo), MIN((v), (hi)))\n"
+        "int w = CLAMP(width, 0, LIMIT);\n", kPath);
+
+    const MacroUseInfo* use = useOf(result, "CLAMP");
+    ASSERT_NE(use, nullptr);
+    EXPECT_EQ(use->tree.name, "CLAMP");
+    EXPECT_TRUE(use->tree.definedHere);
+    EXPECT_EQ(use->tree.definedLine, 4u);
+    ASSERT_EQ(use->tree.children.size(), 3u);   // MAX and MIN from its body, LIMIT from the argument
+    std::vector<std::string> names;
+    for (const MacroTreeNode& child : use->tree.children) names.push_back(child.name);
+    EXPECT_NE(std::find(names.begin(), names.end(), "MAX"), names.end());
+    EXPECT_NE(std::find(names.begin(), names.end(), "MIN"), names.end());
+    EXPECT_NE(std::find(names.begin(), names.end(), "LIMIT"), names.end());
+}
+
+TEST(MacroAnalysisTest, TheFinalTextIsSplitByWhoWroteEachPart) {
+    const MacroAnalysis result = analyzeMacros(
+        "#define SQUARE(x) ((x) * (x))\n"
+        "int n = SQUARE(side);\n", kPath);
+
+    const MacroUseInfo* use = useOf(result, "SQUARE");
+    ASSERT_NE(use, nullptr);
+    std::string all;
+    bool sawArgument = false;
+    for (const MacroSpan& span : use->spans) {
+        all += span.text;
+        if (span.text == "side") { sawArgument = true; EXPECT_EQ(span.macro, ""); }
+        if (span.text.find('*') != std::string::npos) EXPECT_EQ(span.macro, "SQUARE");
+    }
+    EXPECT_EQ(all, use->steps.back().text);
+    EXPECT_TRUE(sawArgument);
+}
+
 TEST(MacroAnalysisTest, AMacroKnowsWhereItWasDefined) {
     const MacroAnalysis result = analyzeMacros(
         "#define LOCAL 1\n"

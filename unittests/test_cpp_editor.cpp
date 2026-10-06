@@ -1349,3 +1349,56 @@ TEST(CppEditorFind, EditingCommandsStillActOnTheSourcePane)
     EXPECT_TRUE(editor.execCommand(EditorCommand::Undo, 0, nullptr));
     EXPECT_EQ(editor.textControl()->text(), L"x");
 }
+
+TEST(CppEditor, LinesTheCompilerSkipsAreTintedAndSayWhyOnTheFirst) {
+    const std::wstring text = L"#define F 1\n#if F\nint on;\n#else\nint off;\n#endif\n#ifdef NEVER\nint a;\n\nint b;\n#endif\n";
+    const auto ranges = CodeToolsVsix::inactiveRanges(text, "inactive_test.cpp", CodeToolsVsix::wideToUtf8(text), { "-std=c++17" });
+
+    ASSERT_EQ(ranges.size(), 4u) << "int off; and the three lines under #ifdef NEVER (one empty)";
+    const std::size_t offLine = text.find(L"int off;");
+    EXPECT_EQ(ranges[0].start, offLine);
+    EXPECT_EQ(ranges[0].length, 8u);
+    for (const auto& range : ranges) EXPECT_EQ(range.style, std::string(CodeToolsVsix::kInactiveStyleName)) << "one tint for all";
+    EXPECT_EQ(ranges[0].annotation, "inactive: depends on F") << "the #else is the other side of #if F";
+    EXPECT_EQ(ranges[1].annotation, "inactive: depends on NEVER");
+    EXPECT_TRUE(ranges[2].annotation.empty()) << "said once per region";
+    EXPECT_EQ(ranges[2].length, 1u) << "an empty line still carries the tint";
+}
+
+TEST(CppEditor, TurningTheNotesOffKeepsTheTintAndDropsTheText) {
+    const std::wstring text = L"#ifdef NEVER\nint a;\n#endif\n";
+    const auto ranges = CodeToolsVsix::inactiveRanges(text, "inactive_notes.cpp", CodeToolsVsix::wideToUtf8(text), { "-std=c++17" }, false);
+
+    ASSERT_EQ(ranges.size(), 1u);
+    EXPECT_EQ(ranges[0].style, std::string(CodeToolsVsix::kInactiveStyleName));
+    EXPECT_TRUE(ranges[0].annotation.empty());
+}
+
+TEST(CppEditor, FadingSwitchesTheSkippedLinesToTheFadedStyleAndLeavesTheRest) {
+    using newui::text::TextStyleRange;
+    const std::vector<TextStyleRange> ranges = { { 0, 6, CodeToolsVsix::kInactiveStyleName }, { 7, 3, CodeToolsVsix::kProblemStyleName } };
+
+    const auto faded = CodeToolsVsix::withInactiveLook(ranges, true);
+    ASSERT_EQ(faded.size(), 2u);
+    EXPECT_EQ(faded[0].style, std::string(CodeToolsVsix::kInactiveFadedStyleName));
+    EXPECT_EQ(faded[1].style, std::string(CodeToolsVsix::kProblemStyleName));
+    EXPECT_EQ(CodeToolsVsix::withInactiveLook(ranges, false)[0].style, std::string(CodeToolsVsix::kInactiveStyleName));
+}
+
+TEST(CppEditor, TheFadedStyleOverlaysTheThemeBackgroundAndThePlainOneDoesNot) {
+    lex::Theme theme = lex::Theme::light();
+    auto sheet = CodeToolsVsix::highlightStyleSheet(theme);
+    const newui::TextStyle* plain = sheet->style(CodeToolsVsix::kInactiveStyleName);
+    const newui::TextStyle* faded = sheet->style(CodeToolsVsix::kInactiveFadedStyleName);
+    ASSERT_NE(plain, nullptr);
+    ASSERT_NE(faded, nullptr);
+    EXPECT_TRUE(plain->overlayColor().isNull());
+    EXPECT_FALSE(faded->overlayColor().isNull());
+    EXPECT_EQ(faded->overlayComposite(), newui::CompositeMode::SrcOver);
+    EXPECT_FLOAT_EQ(faded->overlayColor().a, CodeToolsVsix::kDefaultFadeStrength / 100.0f);
+    EXPECT_FLOAT_EQ(CodeToolsVsix::highlightStyleSheet(theme, 40)->style(CodeToolsVsix::kInactiveFadedStyleName)->overlayColor().a, 0.4f)
+        << "the strength is the overlay's alpha";
+    EXPECT_FLOAT_EQ(CodeToolsVsix::highlightStyleSheet(theme, 250)->style(CodeToolsVsix::kInactiveFadedStyleName)->overlayColor().a, 1.0f)
+        << "clamped to 100";
+    EXPECT_EQ(faded->lineBackgroundColor(), plain->lineBackgroundColor()) << "the same faint tint";
+}

@@ -410,6 +410,8 @@ add_library(nativeeditcontrols_core OBJECT
     extension/NativeEditControls/PropertyItem.cpp
     extension/NativeEditControls/PropertiesGrid.cpp
     extension/NativeEditControls/IssuesPopup.cpp
+    extension/NativeEditControls/IncludeGraphLayout.cpp
+    extension/NativeEditControls/IncludeGraphPopup.cpp
     extension/NativeEditControls/IssuePeek.cpp
     extension/NativeEditControls/ProblemList.cpp
     extension/NativeEditControls/EditorStatusBar.cpp

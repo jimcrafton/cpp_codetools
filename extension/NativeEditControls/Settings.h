@@ -27,6 +27,9 @@ namespace CodeToolsVsix
         static constexpr Def kHighlightDelayMs{ "CodeTools.editor.highlightDelayMs", "50" };
         static constexpr Def kDiagnosticsDelayMs{ "CodeTools.editor.diagnosticsDelayMs", "600" };
         static constexpr Def kWordWrap{ "CodeTools.editor.wordWrap", "false" };
+        static constexpr Def kInactiveNotes{ "CodeTools.editor.inactiveNotes", "true" };   // "inactive: depends on X" after skipped code
+        static constexpr Def kFadeInactive{ "CodeTools.editor.fadeInactive", "true" };   // skipped code keeps its colors, faded
+        static constexpr Def kFadeStrength{ "CodeTools.editor.fadeStrength", "70" };   // percent, 0..100
         static constexpr Def kPeekTabWidth{ "CodeTools.editor.peekTabWidth", "4" };
         static constexpr Def kMinimapWidth{ "CodeTools.editor.minimapWidth", "28" };   // DIP
 

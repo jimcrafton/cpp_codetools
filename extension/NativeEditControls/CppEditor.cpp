@@ -409,6 +409,9 @@ namespace CodeToolsVsix
         if (key.rfind("CodeTools.editor.", 0) == 0) {
             applySettings();
         }
+        if (key == Settings::kInactiveNotes.key && highlight_ != nullptr) {
+            highlight_->rerunOverlay();
+        }
         return newui::SyncReturn::Ignored;
     }
 
@@ -465,6 +468,8 @@ namespace CodeToolsVsix
             textControl_->setWordWrap(settings.getBool(Settings::kWordWrap));
         }
         if (highlight_ != nullptr) {
+            highlight_->setFadeInactive(settings.getBool(Settings::kFadeInactive));
+            highlight_->setFadeStrength(settings.getInt(Settings::kFadeStrength, 0, 100));
             highlight_->setDelay(std::chrono::milliseconds(settings.getInt(Settings::kHighlightDelayMs, 0, 5000)));
             highlight_->setOverlayDelay(std::chrono::milliseconds(settings.getInt(Settings::kDiagnosticsDelayMs, 0, 10000)));
         }

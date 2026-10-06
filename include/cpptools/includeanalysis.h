@@ -58,6 +58,9 @@ public:
 
     std::size_t fileCount() const { return nodes_.size(); }
 
+    // Whether the graph has this file at all.
+    bool contains(const std::string& path) const { return find(path) != static_cast<std::size_t>(-1); }
+
 private:
     struct Node {
         std::string path;

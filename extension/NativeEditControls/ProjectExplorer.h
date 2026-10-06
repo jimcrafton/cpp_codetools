@@ -125,6 +125,9 @@ namespace CodeToolsVsix
         newui::SyncReturn handleCardStepChanged(newui::SegmentedControl& sender);
         void showCard(const std::shared_ptr<const ExplorerCard>& card);
         void showCardStep(std::size_t index);
+        void showCardSpans(const ExplorerCard& card);
+        void openIncludeGraph();
+        void expandAll(const std::vector<std::size_t>& path, const ExplorerNode& node);
         // Starts analyzing the files for `key` on a worker (or here, with no run loop); rebuild() runs when it is done.
         // True when the result is already there (no worker: it ran here).
         bool requestMacros(const std::string& key, const std::vector<std::string>& files);
@@ -159,6 +162,8 @@ namespace CodeToolsVsix
         newui::View* cardHost_ = nullptr;
         newui::Label* cardTitle_ = nullptr;
         newui::SegmentedControl* cardSteps_ = nullptr;
+        newui::Button* cardGraph_ = nullptr;
+        newui::Connection cardGraphConnection_;
         newui::TextControl* cardText_ = nullptr;
         newui::Label* cardWarning_ = nullptr;
         std::shared_ptr<const ExplorerCard> card_;

@@ -67,6 +67,7 @@ std::vector<std::string> repeatedParamsOf(const MacroInfo& info) {
 struct Piece {
     std::string text;
     bool space = false;   // whitespace before it
+    std::string from;     // the macro whose replacement list wrote it; empty if the use itself did
 };
 
 bool isIdentStart(char c) { return std::isalpha(static_cast<unsigned char>(c)) || c == '_'; }
@@ -111,7 +112,7 @@ std::string joined(const std::vector<Piece>& pieces) {
 }
 
 // The text of `info`'s replacement list with `args` put in for its parameters.
-std::vector<Piece> substitute(Preprocessor& pp, const MacroInfo& info, const std::vector<std::vector<Piece>>& args) {
+std::vector<Piece> substitute(Preprocessor& pp, const MacroInfo& info, const std::string& macro, const std::vector<std::vector<Piece>>& args) {
     std::vector<Piece> out;
     bool paste = false;
     const auto tokens = info.tokens();
@@ -129,13 +130,13 @@ std::vector<Piece> substitute(Preprocessor& pp, const MacroInfo& info, const std
                 if (c == '"' || c == '\\') quoted += '\\';
                 quoted += c;
             }
-            piece.push_back(Piece{ quoted + "\"", space });
+            piece.push_back(Piece{ quoted + "\"", space, macro });
             ++i;
         } else if (paramOf(tok) >= 0) {
             piece = argOf(paramOf(tok));
             if (!piece.empty()) piece.front().space = space;
         } else {
-            piece.push_back(Piece{ pp.getSpelling(tok), space });
+            piece.push_back(Piece{ pp.getSpelling(tok), space, macro });
         }
         if (paste && !piece.empty() && !out.empty()) piece.front().space = false;
         for (Piece& p : piece) out.push_back(std::move(p));
@@ -144,12 +145,38 @@ std::vector<Piece> substitute(Preprocessor& pp, const MacroInfo& info, const std
     return out;
 }
 
+// What the built-in macros stand for at the use being expanded.
+struct UseSite {
+    std::string file;
+    unsigned line = 0;
+};
+
 // Expands the macro written at pieces[at] in place. How many pieces replaced it, or -1 if it is not a use of a macro.
-int expandAt(Preprocessor& pp, std::vector<Piece>& pieces, std::size_t at) {
+int expandAt(Preprocessor& pp, std::vector<Piece>& pieces, std::size_t at, const UseSite& site) {
     if (!isIdentStart(pieces[at].text[0])) return -1;
-    IdentifierInfo* name = pp.getIdentifierInfo(pieces[at].text);
+    const std::string macro = pieces[at].text;
+    IdentifierInfo* name = pp.getIdentifierInfo(macro);
     const MacroInfo* info = pp.getMacroInfo(name);
     if (info == nullptr) return -1;
+
+    if (info->isBuiltinMacro()) {
+        std::string value;
+        if (pieces[at].text == "__FILE__") {
+            value = "\"";
+            for (char c : site.file) {
+                if (c == '"' || c == '\\') value += '\\';
+                value += c;
+            }
+            value += '"';
+        } else if (pieces[at].text == "__LINE__") {
+            value = std::to_string(site.line);
+        } else {
+            return -1;   // __DATE__, __COUNTER__ ...: left as written
+        }
+        const bool space = pieces[at].space;
+        pieces[at] = Piece{ value, space, macro };
+        return 1;
+    }
 
     std::size_t end = at + 1;
     std::vector<std::vector<Piece>> args;
@@ -175,7 +202,7 @@ int expandAt(Preprocessor& pp, std::vector<Piece>& pieces, std::size_t at) {
         if (!closed) return -1;
         if (!current.empty() || info->params().size() > 0) args.push_back(std::move(current));
     }
-    std::vector<Piece> body = substitute(pp, *info, args);
+    std::vector<Piece> body = substitute(pp, *info, macro, args);
     if (!body.empty()) body.front().space = pieces[at].space;
     const int count = static_cast<int>(body.size());
     pieces.erase(pieces.begin() + at, pieces.begin() + end);
@@ -183,28 +210,80 @@ int expandAt(Preprocessor& pp, std::vector<Piece>& pieces, std::size_t at) {
     return count;
 }
 
-// `text` expanded a macro at a time: the leftmost one that can be, every place it is written. The first step is
-// `text` itself.
-std::vector<MacroStep> stepsOf(Preprocessor& pp, const std::string& text) {
-    std::vector<MacroStep> steps;
-    std::vector<Piece> pieces = piecesOf(text);
-    steps.push_back(MacroStep{ std::string(), joined(pieces) });
+// What a macro is and where it was defined, read from the preprocessor.
+MacroTreeNode describeMacro(Preprocessor& pp, const std::string& name) {
+    MacroTreeNode node;
+    node.name = name;
+    node.origin = MacroOrigin::BuiltIn;
+    const MacroInfo* info = pp.getMacroInfo(pp.getIdentifierInfo(name));
+    if (info == nullptr || info->isBuiltinMacro()) return node;
+    SourceManager& sm = pp.getSourceManager();
+    const SourceLocation at = info->getDefinitionLoc();
+    const PresumedLoc presumed = sm.getPresumedLoc(at);
+    if (presumed.isValid()) node.definedLine = presumed.getLine();
+    if (sm.isWrittenInMainFile(at)) {
+        node.origin = MacroOrigin::File;
+        node.definedHere = true;
+        return node;
+    }
+    const std::string where = presumed.isValid() ? presumed.getFilename() : std::string();
+    if (where == "<command line>") node.origin = MacroOrigin::CommandLine;
+    else if (where == "<built-in>" || where.empty()) node.origin = MacroOrigin::BuiltIn;
+    else { node.origin = MacroOrigin::Header; node.definedIn = where; }
+    return node;
+}
+
+// `use.written` expanded a macro at a time: the leftmost one that can be, every place it is written. Fills the
+// steps (the first is the text itself), the tree of which macro's replacement list brought in which, and the
+// final text split by the macro that wrote each part.
+void expandUse(Preprocessor& pp, MacroUseInfo& use, const UseSite& site) {
+    std::vector<Piece> pieces = piecesOf(use.written);
+    use.steps.push_back(MacroStep{ std::string(), joined(pieces) });
+
+    struct Flat { MacroTreeNode node; int parent; };
+    std::vector<Flat> flat;
+    auto record = [&](const std::string& name, const std::string& from) {
+        int parent = -1;
+        if (!flat.empty()) {
+            parent = 0;
+            for (std::size_t k = 0; k < flat.size(); ++k) {
+                if (flat[k].node.name == from) { parent = static_cast<int>(k); break; }
+            }
+        }
+        for (const Flat& f : flat) {
+            if (f.parent == parent && f.node.name == name) return;
+        }
+        flat.push_back(Flat{ describeMacro(pp, name), parent });
+    };
+
     for (int round = 0; round < 24; ++round) {
         bool expanded = false;
         for (std::size_t i = 0; i < pieces.size() && !expanded; ++i) {
             const std::string name = pieces[i].text;
-            int count = expandAt(pp, pieces, i);
+            const std::string from = pieces[i].from;
+            int count = expandAt(pp, pieces, i, site);
             if (count < 0) continue;
+            record(name, from);
             for (std::size_t j = i + static_cast<std::size_t>(count); j < pieces.size();) {
-                count = pieces[j].text == name ? expandAt(pp, pieces, j) : -1;
+                const std::string again = pieces[j].from;
+                count = pieces[j].text == name ? expandAt(pp, pieces, j, site) : -1;
+                if (count >= 0) record(name, again);
                 j += count >= 0 ? static_cast<std::size_t>(std::max(count, 1)) : 1;
             }
-            steps.push_back(MacroStep{ name, joined(pieces) });
+            use.steps.push_back(MacroStep{ name, joined(pieces) });
             expanded = true;
         }
         if (!expanded) break;
     }
-    return steps;
+
+    for (std::size_t k = flat.size(); k-- > 1;) {
+        flat[static_cast<std::size_t>(flat[k].parent)].node.children.insert(flat[static_cast<std::size_t>(flat[k].parent)].node.children.begin(),
+                                                                          std::move(flat[k].node));
+    }
+    if (!flat.empty()) use.tree = std::move(flat.front().node);
+    for (std::size_t k = 0; k < pieces.size(); ++k) {
+        use.spans.push_back(MacroSpan{ (k > 0 && pieces[k].space ? " " : "") + pieces[k].text, pieces[k].from });
+    }
 }
 
 class Collector : public PPCallbacks {
@@ -269,7 +348,8 @@ public:
                 else { use.origin = MacroOrigin::Header; use.definedIn = where; }
             }
         }
-        use.steps = stepsOf(pp_, use.written);
+        const PresumedLoc here = sm_.getPresumedLoc(range.getBegin());
+        expandUse(pp_, use, UseSite{ here.isValid() ? here.getFilename() : "", static_cast<unsigned>(use.line) });
         if (info != nullptr && info->isFunctionLike() && args != nullptr) {
             const std::vector<std::string> repeated = repeatedParamsOf(*info);
             const auto params = info->params();
@@ -318,6 +398,65 @@ std::string trimmed(const std::string& text) {
     return first == std::string::npos ? std::string() : text.substr(first, last - first + 1);
 }
 
+// The word after the '#' of a directive line ("if", "ifdef", "endif"), or empty if the line is not one.
+std::string directiveWord(const std::string& line) {
+    const std::string text = trimmed(line);
+    if (text.empty() || text[0] != '#') return std::string();
+    std::size_t at = 1;
+    while (at < text.size() && std::isspace(static_cast<unsigned char>(text[at]))) ++at;
+    std::size_t end = at;
+    while (end < text.size() && isIdentChar(text[end])) ++end;
+    return text.substr(at, end - at);
+}
+
+// Adds the identifiers a condition line names (not the directive word, `defined`, or what is in a comment).
+void addConditionMacros(const std::string& line, std::vector<std::string>& macros) {
+    std::string text = line;
+    const std::size_t comment = text.find("//");
+    if (comment != std::string::npos) text.resize(comment);
+    const std::string directive = directiveWord(text);
+    std::size_t at = text.find('#');
+    at = at == std::string::npos ? 0 : text.find(directive, at) + directive.size();
+    static const char* const kSkip[] = { "defined", "__has_include", "__has_include_next", "__has_cpp_attribute", "__has_feature",
+                                         "__has_builtin", "true", "false", "and", "or", "not" };
+    while (at < text.size()) {
+        if (!isIdentStart(text[at])) { ++at; continue; }
+        std::size_t end = at;
+        while (end < text.size() && isIdentChar(text[end])) ++end;
+        const std::string name = text.substr(at, end - at);
+        at = end;
+        bool skip = false;
+        for (const char* word : kSkip) skip = skip || name == word;
+        if (!skip && std::find(macros.begin(), macros.end(), name) == macros.end()) macros.push_back(name);
+    }
+}
+
+// The macros behind the region whose opening directive is on 1-based line `directiveLine`: that line's own condition and,
+// for an #else / #elif, the conditions before it in the same #if chain.
+std::vector<std::string> conditionMacros(const std::vector<std::string>& lines, std::size_t directiveLine) {
+    std::vector<std::string> macros;
+    if (directiveLine == 0 || directiveLine > lines.size()) return macros;
+    const std::string first = directiveWord(lines[directiveLine - 1]);
+    if (first == "if" || first == "ifdef" || first == "ifndef" || first == "elif") addConditionMacros(lines[directiveLine - 1], macros);
+    if (first != "else" && first != "elif") return macros;
+    int depth = 0;
+    for (std::size_t line = directiveLine - 1; line >= 1; --line) {
+        const std::string word = directiveWord(lines[line - 1]);
+        if (word == "endif") {
+            ++depth;
+        } else if (word == "if" || word == "ifdef" || word == "ifndef") {
+            if (depth == 0) {
+                addConditionMacros(lines[line - 1], macros);
+                break;
+            }
+            --depth;
+        } else if (word == "elif" && depth == 0) {
+            addConditionMacros(lines[line - 1], macros);
+        }
+    }
+    return macros;
+}
+
 class MacroAction : public PreprocessorFrontendAction {
 public:
     MacroAction(MacroAnalysis& out, const std::string& content) : out_(out), content_(content) {}
@@ -360,6 +499,7 @@ protected:
                 const std::string text = trimmed(lines[line - 1]);
                 if (!text.empty() && text[0] == '#') {
                     region.directive = text;
+                    region.macros = conditionMacros(lines, line);
                     break;
                 }
             }

@@ -3,6 +3,7 @@
 #include <newui/uicolormanager.h>
 
 #include <algorithm>
+#include <map>
 #include <thread>
 
 namespace CodeToolsVsix
@@ -35,7 +36,7 @@ namespace CodeToolsVsix
         }
     }
 
-    std::shared_ptr<const newui::TextStyleSheet> highlightStyleSheet(const lex::Theme& theme)
+    std::shared_ptr<const newui::TextStyleSheet> highlightStyleSheet(const lex::Theme& theme, int fadeStrength)
     {
         auto sheet = std::make_shared<newui::TextStyleSheet>();
         for (std::size_t i = 0; i < lex::kStyleCount; ++i) {
@@ -96,6 +97,21 @@ namespace CodeToolsVsix
         auto* occurrence = new newui::TextStyle(kOccurrenceStyleName);
         occurrence->setBackgroundColor(occurrenceColor);
         sheet->addStyle(occurrence);
+
+        // Code the preprocessor skipped: a faint tint over the whole line.
+        auto* inactive = new newui::TextStyle(kInactiveStyleName);
+        inactive->setLineBackgroundColor(dark ? newui::Color(1.0f, 1.0f, 1.0f, 0.07f) : newui::Color(0.0f, 0.0f, 0.0f, 0.06f));
+        // the note after the line is drawn in the decoration color (no decoration is set): a muted one
+        inactive->setDecorationColor(newui::UIColorManager::colorFor(newui::UIColorRole::DisabledText));
+        sheet->addStyle(inactive);
+        // The same, with the text faded: the theme background laid over it keeps each token's hue.
+        auto* inactiveFaded = new newui::TextStyle(kInactiveFadedStyleName);
+        inactiveFaded->setLineBackgroundColor(inactive->lineBackgroundColor());
+        inactiveFaded->setDecorationColor(inactive->decorationColor());
+        newui::Color wash = colorFromArgb(theme.background);
+        wash.a = static_cast<float>(std::clamp(fadeStrength, 0, 100)) / 100.0f;
+        inactiveFaded->setOverlayColor(wash);
+        sheet->addStyle(inactiveFaded);
         return sheet;
     }
 
@@ -228,6 +244,14 @@ namespace CodeToolsVsix
         });
     }
 
+    void HighlightController::rerunOverlay()
+    {
+        newui::RunLoop& loop = newui::RunLoop::current();
+        if (overlayAnalyzer_ && loop) {
+            schedule(kOverlayPass, loop);
+        }
+    }
+
     void HighlightController::refresh()
     {
         const newui::text::PieceTree text = control_.model().snapshot();
@@ -295,10 +319,7 @@ namespace CodeToolsVsix
 
     void HighlightController::applyColors(HighlightResult&& result, const newui::text::PieceTree& text, std::size_t generation)
     {
-        // lex's light and dark themes as style sheets, built once; which one follows the system.
-        static const std::shared_ptr<const newui::TextStyleSheet> lightSheet = highlightStyleSheet(lex::Theme::light());
-        static const std::shared_ptr<const newui::TextStyleSheet> darkSheet = highlightStyleSheet(lex::Theme::dark());
-        const std::shared_ptr<const newui::TextStyleSheet>& sheet = newui::UIColorManager::isDarkMode() ? darkSheet : lightSheet;
+        const std::shared_ptr<const newui::TextStyleSheet> sheet = currentSheet();
 
         if (control_.styleSheet() != sheet) {
             control_.setStyleSheet(sheet);
@@ -346,10 +367,50 @@ namespace CodeToolsVsix
         }
     }
 
+    std::vector<newui::text::TextStyleRange> withInactiveLook(const std::vector<newui::text::TextStyleRange>& ranges, bool fade)
+    {
+        std::vector<newui::text::TextStyleRange> out = ranges;
+        if (fade) {
+            for (newui::text::TextStyleRange& range : out) {
+                if (range.style == kInactiveStyleName) range.style = kInactiveFadedStyleName;
+            }
+        }
+        return out;
+    }
+
+    // lex's light and dark themes as style sheets, one of each per fade strength in use; which follows the system.
+    std::shared_ptr<const newui::TextStyleSheet> HighlightController::currentSheet() const
+    {
+        static std::map<std::pair<bool, int>, std::shared_ptr<const newui::TextStyleSheet>> sheets;   // UI thread only
+        const bool dark = newui::UIColorManager::isDarkMode();
+        auto found = sheets.find({ dark, fadeStrength_ });
+        if (found == sheets.end()) {
+            found = sheets.emplace(std::make_pair(dark, fadeStrength_),
+                                   highlightStyleSheet(dark ? lex::Theme::dark() : lex::Theme::light(), fadeStrength_)).first;
+        }
+        return found->second;
+    }
+
+    void HighlightController::setFadeStrength(int percent)
+    {
+        percent = std::clamp(percent, 0, 100);
+        if (percent == fadeStrength_) return;
+        fadeStrength_ = percent;
+        control_.setStyleSheet(currentSheet());
+    }
+
+    void HighlightController::setFadeInactive(bool fade)
+    {
+        if (fade == fadeInactive_) return;
+        fadeInactive_ = fade;
+        publishRanges();
+    }
+
     void HighlightController::publishRanges()
     {
         std::vector<newui::text::TextStyleRange> ranges = colors_;
-        ranges.insert(ranges.end(), overlay_.begin(), overlay_.end());
+        const std::vector<newui::text::TextStyleRange> overlay = withInactiveLook(overlay_, fadeInactive_);
+        ranges.insert(ranges.end(), overlay.begin(), overlay.end());
         ranges.insert(ranges.end(), extra_.begin(), extra_.end());
         ranges.insert(ranges.end(), occurrences_.begin(), occurrences_.end());
         control_.setStyledRanges(std::move(ranges));

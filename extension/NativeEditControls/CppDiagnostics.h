@@ -39,6 +39,11 @@ namespace CodeToolsVsix
     std::vector<newui::text::TextStyleRange> diagnosticRanges(const std::wstring& wide, const std::string& utf8,
         const std::vector<cpptools::Diagnostic>& diagnostics, const DiagnosticFilter& filter = {});
 
+    // A line tint (kInactiveStyleName) over every line the preprocessor skips in `text` (the file `path` with `args`); with `notes`, the
+    // first line of each region also says what it depends on. Runs the preprocessor, so call it from a worker.
+    std::vector<newui::text::TextStyleRange> inactiveRanges(const std::wstring& text, const std::string& path, const std::string& utf8,
+        const std::vector<std::string>& args, bool notes = true);
+
     // The symbol outline as text, "--- Outline (cpptools) ---", a line saying which compile flags
     // the parse used (flagsOrigin: cpptools::CompileFlags::origin), and an indented line per symbol.
     std::wstring formatOutline(const cpptools::ParseResult& result, const std::string& flagsOrigin = std::string());

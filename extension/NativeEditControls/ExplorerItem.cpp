@@ -153,6 +153,13 @@ namespace CodeToolsVsix
             }
         }
 
+        if (node->swatch >= 0) {
+            constexpr double kChip = 9.0;
+            ctx.set_fill_style(BLRgba32(explorerSwatchColor(node->swatch, newui::UIColorManager::isDarkMode())));
+            ctx.fill_round_rect(BLRoundRect(x, centerY - kChip * 0.5, kChip, kChip, 2.0, 2.0));
+            x += kChip + 6.0;
+        }
+
         // Cells fill the right edge, so the name and its detail get what is left of the left side. A column whose
         // cell is empty on this row (no line count on a text file) gives its room back to the name.
         const double cellWidth = node->cellWidth > 0.0f ? double(node->cellWidth) : double(kCellWidth);
