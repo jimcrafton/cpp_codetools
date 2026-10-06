@@ -125,3 +125,12 @@ build\unittests\Debug\cpptools_tests.exe
 Runs the `ParserTest` suite directly (9 cases: each symbol kind, tree nesting, `#include`
 exclusion, invalid-code diagnostics, and `parseFile`'s disk read) - **not** wired into `ctest`,
 matching `newui`'s own testing convention.
+
+
+##Fonts
+I've collected some fonts to use in the editor in the Resources/Fonts directory. 
+The fonts were downloaded from the following sites:
+https://github.com/githubnext/monaspace#editors
+https://github.com/be5invis/Iosevka/releases/tag/v34.9.0
+https://github.com/tonsky/FiraCode
+https://github.com/microsoft/cascadia-code/releases/tag/v2407.24
