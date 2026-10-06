@@ -471,6 +471,7 @@ namespace CodeToolsVsix
 
         std::vector<ExplorerNode> nodes;
         std::vector<std::string> parents;
+        std::vector<const cpptools::IndexedSymbol*> members;   // the symbol behind nodes[i], for i < its size
         std::map<std::string, std::size_t> indexOf;
         for (const auto& entry : chosen) {
             const cpptools::IndexedSymbol& symbol = entry.second;
@@ -487,8 +488,42 @@ namespace CodeToolsVsix
             indexOf[entry.first] = nodes.size();
             nodes.push_back(std::move(node));
             parents.push_back(symbol.parentUsr);
+            members.push_back(&symbol);
         }
 
+        // A member whose class is not indexed (its header was not parsed, or sits outside the project) would
+        // otherwise land at the top level as if it were a free function: give it a stand-in parent named from
+        // its qualified name, once per parent.
+        const std::size_t indexed = nodes.size();
+        // The scopes that are indexed, by qualified name: a member of an anonymous namespace has a parent that is
+        // never indexed, but its qualified name leaves the anonymous scope out and so names the enclosing one.
+        std::map<std::string, std::size_t> scopeByName;
+        for (std::size_t i = 0; i < indexed; ++i) {
+            if (isScopeKind(members[i]->kind)) scopeByName.emplace(members[i]->qualifiedName, i);
+        }
+        for (std::size_t i = 0; i < indexed; ++i) {
+            if (parents[i].empty() || indexOf.count(parents[i]) != 0) continue;
+            const cpptools::IndexedSymbol& symbol = *members[i];
+            const std::size_t cut = symbol.qualifiedName.rfind("::");
+            if (cut == std::string::npos) continue;   // nothing says where it belongs
+            const std::string owner = symbol.qualifiedName.substr(0, cut);
+            auto enclosing = scopeByName.find(owner);
+            if (enclosing != scopeByName.end() && enclosing->second != i) {
+                indexOf[parents[i]] = enclosing->second;
+                continue;
+            }
+            const bool ofClass = symbol.kind == cpptools::SymbolKind::Method || symbol.kind == cpptools::SymbolKind::Constructor
+                || symbol.kind == cpptools::SymbolKind::Destructor || symbol.kind == cpptools::SymbolKind::Field;
+            ExplorerNode stand;
+            stand.kind = ofClass ? ExplorerNode::Kind::Class : ExplorerNode::Kind::Namespace;
+            const std::size_t last = owner.rfind("::");
+            stand.text = last == std::string::npos ? owner : owner.substr(last + 2);
+            stand.search = lowered(owner);
+            if (owner.size() != stand.text.size()) stand.detail = owner;
+            indexOf[parents[i]] = nodes.size();
+            nodes.push_back(std::move(stand));
+            parents.push_back(std::string());
+        }
         std::vector<std::vector<std::size_t>> kids(nodes.size());
         std::vector<std::size_t> top;
         for (std::size_t i = 0; i < nodes.size(); ++i) {

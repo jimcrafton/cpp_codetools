@@ -7,12 +7,18 @@
 #include "../extension/NativeEditControls/HighlightController.h"
 #include "../extension/NativeEditControls/TextEncoding.h"
 
+#include <newui/bundle.h>
 #include <newui/clipboardmgr.h>
+#include <newui/text.h>
+#include <newui/utils.h>
+#include <newui/fontmanager.h>
 #include <newui/rootview.h>
 #include <newui/texthistory.h>
 #include <newui/uicolormanager.h>
 
 #include <lex/highlight.h>
+
+#include <dwrite.h>
 
 #include <gtest/gtest.h>
 
@@ -1401,4 +1407,36 @@ TEST(CppEditor, TheFadedStyleOverlaysTheThemeBackgroundAndThePlainOneDoesNot) {
     EXPECT_FLOAT_EQ(CodeToolsVsix::highlightStyleSheet(theme, 250)->style(CodeToolsVsix::kInactiveFadedStyleName)->overlayColor().a, 1.0f)
         << "clamped to 100";
     EXPECT_EQ(faded->lineBackgroundColor(), plain->lineBackgroundColor()) << "the same faint tint";
+}
+
+TEST(CppEditor, TheFontsShippedWithTheEditorGiveItsAnnotationAnItalicFace) {
+    newui::Bundle::instance().loadFonts();
+    BLFont italic;
+    EXPECT_TRUE(newui::FontManager::createFont("Cascadia Mono Italic", 14.0f, italic));
+    BLFont boldItalic;
+    EXPECT_TRUE(newui::FontManager::createFont("Cascadia Mono Bold Italic", 14.0f, boldItalic));
+    newui::Font family("Cascadia Mono", 14.0f);
+    family.setItalic(true);
+    EXPECT_NE(family.blFont(), nullptr) << "what the editor's annotation asks for";
+}
+
+TEST(CppEditor, TheEditorsDirectWriteTextCanUseTheFontsShippedWithIt) {
+    newui::Bundle::instance().loadFonts();
+    const newui::SystemFontInfo* shipped = nullptr;
+    for (const newui::SystemFontInfo& info : newui::FontManager::listFonts()) {
+        if (info.bundled) {
+            shipped = &info;
+            break;
+        }
+    }
+    ASSERT_NE(shipped, nullptr) << "Resources/Fonts has fonts in it";
+    BLFontFace face;
+    ASSERT_EQ(face.create_from_file(shipped->filePath.c_str()), BL_SUCCESS);
+
+    IDWriteFontCollection* collection = newui::text::DirectWriteResources::fontCollection();
+    ASSERT_NE(collection, nullptr);
+    UINT32 index = 0;
+    BOOL exists = FALSE;
+    ASSERT_TRUE(SUCCEEDED(collection->FindFamilyName(newui::utf8ToWide(face.family_name().data()).c_str(), &index, &exists)));
+    EXPECT_TRUE(exists) << face.family_name().data();
 }

@@ -191,7 +191,23 @@ namespace CodeToolsVsix
                         if (fs::is_regular_file(path, ec)) files.push_back(path);
                     }
                 }
-                if (!files.empty()) return files;
+                if (!files.empty()) {
+                    // A target lists the headers it happens to name; the rest of the project's headers hold classes
+                    // too (and the definitions of their methods live in the .cpp files above).
+                    std::set<std::string> known;
+                    for (const std::string& file : files) known.insert(lowered(cpptools::ProjectIndex::normalizePath(file)));
+                    for (fs::recursive_directory_iterator it(root, fs::directory_options::skip_permission_denied, ec), end; !ec && it != end; it.increment(ec)) {
+                        const std::string name = it->path().filename().string();
+                        std::error_code typeEc;
+                        if (it->is_directory(typeEc)) {
+                            if (name.empty() || name.front() == '.' || isSkippedExplorerFolder(name)) it.disable_recursion_pending();
+                        } else if (isIndexedExtension(extensionOf(name)) && !isCppSourceExtension(extensionOf(name)) && files.size() < 20000) {
+                            const std::string path = it->path().generic_string();
+                            if (known.insert(lowered(cpptools::ProjectIndex::normalizePath(path))).second) files.push_back(path);
+                        }
+                    }
+                    return files;
+                }
             }
             for (fs::recursive_directory_iterator it(root, fs::directory_options::skip_permission_denied, ec), end; !ec && it != end; it.increment(ec)) {
                 const std::string name = it->path().filename().string();

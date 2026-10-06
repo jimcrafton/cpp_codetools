@@ -343,6 +343,12 @@ namespace CodeToolsVsix
         selectionOverlay_->setReparentTargetProvider([this]() { return reparentTargets(); });
         selectionOverlay_->setDropGhostProvider([this]() { return toolboxHoverGhostRect(); });
         root->setOverlay(std::move(selectionOverlay));
+        // The handles and tags belong to the canvas; another surface covers it, so they go too.
+        workspace_->onSurfaceChanged.add([this](Workspace&) {
+            selectionOverlay_->setVisible(designerSurfaceShown());
+            if (newui::RootView* shown = getRootView()) shown->redraw();
+            return newui::SyncReturn::Handled;
+        });
         root->onMouseDown.add(this, &DesignerEditor::handleMouseDownForSelection);
         root->onMouseMove.add(this, &DesignerEditor::handleMouseMove);
         root->onMouseUp.add(this, &DesignerEditor::handleMouseUp);
@@ -747,8 +753,8 @@ namespace CodeToolsVsix
     newui::SyncReturn DesignerEditor::handleMouseDblClick(newui::View& /*sender*/, const newui::Point& pt,
         std::uint32_t btnMask, std::uint32_t /*keyMask*/)
     {
-        if (sourceMode_) {
-            return newui::SyncReturn::Ignored;   // the canvas is hidden - its area belongs to the Source text
+        if (sourceMode_ || !designerSurfaceShown()) {
+            return newui::SyncReturn::Ignored;   // the canvas is hidden - its area belongs to the Source text or another surface
         }
         newui::SubView* target = nullptr;
         if ((btnMask & newui::mbmLeftButton) == 0 || !hitTestDesignSurface(pt, target) || target == nullptr) {
@@ -784,8 +790,8 @@ namespace CodeToolsVsix
     newui::SyncReturn DesignerEditor::handleMouseDownForSelection(newui::View& /*sender*/, const newui::Point& pt,
         std::uint32_t btnMask, std::uint32_t keyMask)
     {
-        if (sourceMode_) {
-            return newui::SyncReturn::Ignored;   // the canvas is hidden - its area belongs to the Source text
+        if (sourceMode_ || !designerSurfaceShown()) {
+            return newui::SyncReturn::Ignored;   // the canvas is hidden - its area belongs to the Source text or another surface
         }
         // A click on the menu designer's own columns belongs to them, not the canvas.
         if (menuDesigner_ != nullptr && menuDesigner_->contains(pt)) {
@@ -1165,7 +1171,7 @@ namespace CodeToolsVsix
     newui::SyncReturn DesignerEditor::handleKeyDown(newui::View& /*sender*/, std::uint32_t keyMask,
         int /*keyCharVal*/, int /*repeatCount*/, std::uint32_t VKeyCode)
     {
-        if (workspace_ == nullptr || !canvasOwnsKeyboard()) {
+        if (workspace_ == nullptr || !designerSurfaceShown() || !canvasOwnsKeyboard()) {
             return newui::SyncReturn::Ignored;
         }
         // While a menu item is selected, keys belong to the menu designer - the canvas commands
@@ -1200,6 +1206,11 @@ namespace CodeToolsVsix
             handled = deleteSelection();
         }
         return handled ? newui::SyncReturn::Handled : newui::SyncReturn::Ignored;
+    }
+
+    bool DesignerEditor::designerSurfaceShown() const
+    {
+        return workspace_ == nullptr || workspace_->surface() == DesignerSurface::Designer;
     }
 
     bool DesignerEditor::canvasOwnsKeyboard() const
@@ -1279,8 +1290,8 @@ namespace CodeToolsVsix
     newui::SyncReturn DesignerEditor::handleMouseMove(newui::View& /*sender*/, const newui::Point& pt,
         std::uint32_t /*btnMask*/, std::uint32_t /*keyMask*/)
     {
-        if (sourceMode_) {
-            return newui::SyncReturn::Ignored;   // the canvas is hidden - its area belongs to the Source text
+        if (sourceMode_ || !designerSurfaceShown()) {
+            return newui::SyncReturn::Ignored;   // the canvas is hidden - its area belongs to the Source text or another surface
         }
         if (menuDesigner_ != nullptr && menuDesigner_->isDragging()) {
             menuDesigner_->dragTo(pt);

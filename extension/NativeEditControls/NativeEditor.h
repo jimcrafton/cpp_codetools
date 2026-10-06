@@ -149,6 +149,9 @@ namespace CodeToolsVsix
 					newui::Bundle::instance().setExecutableDirOverride(path.substr(0, pos));
 				}
 			}
+			// The fonts shipped in Resources/Fonts, for text blend2d draws (a line annotation's italic face needs
+			// them); finding none just leaves the system fonts.
+			newui::Bundle::instance().loadFonts();
 		}
         static void setServiceProvider(IServiceProviderPtr svcProvPtr) {
             instance().svcProvPtr_ = svcProvPtr;

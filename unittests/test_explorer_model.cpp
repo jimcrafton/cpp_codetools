@@ -248,6 +248,48 @@ TEST_F(SymbolsTest, AMethodDeclaredInAHeaderAndDefinedInASourceIsOneRowThatOpens
     EXPECT_EQ(area->line, 11u);
 }
 
+TEST_F(SymbolsTest, AMethodWhoseClassIsNotIndexedStillSitsUnderItsClass) {
+    // only b.cpp: the classes live in a.h, which was not parsed
+    cpptools::ProjectIndex partial;
+    partial.setFlagsProvider([](const std::string&) { return std::vector<std::string>{ "-std=c++17", "-xc++" }; });
+    partial.indexFiles({ (dir_ / "b.cpp").string() }, {}, 1);
+
+    ExplorerTreeModel model;
+    model.setRoot(buildSymbolsTree(partial));
+
+    const ExplorerNode* circle = nullptr;
+    for (std::size_t i = 0; i < model.childCount({}); ++i) {
+        const ExplorerNode* node = model.nodeAt({ i });
+        if (node != nullptr && node->kind == ExplorerNode::Kind::Class && node->text == "Circle") circle = node;
+        EXPECT_FALSE(node != nullptr && node->kind == ExplorerNode::Kind::Function && node->text == "area()")
+            << "a member must not be listed as a free function";
+    }
+    ASSERT_NE(circle, nullptr) << "a stand-in class named from the qualified name";
+    EXPECT_EQ(circle->detail, "shapes::Circle");
+    ASSERT_EQ(circle->children.size(), 1u);
+    EXPECT_EQ(circle->children[0].text, "area()");
+}
+
+TEST_F(SymbolsTest, MembersOfAnAnonymousNamespaceSitInTheEnclosingNamespaceNotInASecondOne) {
+    write("anon.cpp",
+        "namespace shapes {\n"
+        "namespace {\n"
+        "int quiet() { return 1; }\n"
+        "struct Hidden { int x; };\n"
+        "}\n"
+        "}\n");
+    cpptools::ProjectIndex anon;
+    anon.setFlagsProvider([](const std::string&) { return std::vector<std::string>{ "-std=c++17", "-xc++" }; });
+    anon.indexFiles({ (dir_ / "anon.cpp").string() }, {}, 1);
+
+    ExplorerTreeModel model;
+    model.setRoot(buildSymbolsTree(anon));
+
+    ASSERT_EQ(model.childCount({}), 1u) << "one 'shapes', not a second made up for the anonymous scope";
+    EXPECT_EQ(model.nodeAt({ 0 })->text, "shapes");
+    EXPECT_EQ(model.childCount({ 0 }), 2u);   // Hidden, quiet()
+}
+
 TEST_F(SymbolsTest, ATypeOpensItsDefinition) {
     ExplorerTreeModel model;
     model.setRoot(buildSymbolsTree(index_));

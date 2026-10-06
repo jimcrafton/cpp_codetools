@@ -1,6 +1,9 @@
 #include "Workspace.h"
 
+#include "SelectionOverlay.h"
+
 #include <newui/layout.h>
+#include <newui/menus.h>
 #include <newui/reflection.h>
 #include <newui/uicolormanager.h>
 #include <newui/viewbuilder.h>
@@ -198,6 +201,23 @@ namespace CodeToolsVsix
             .layoutParams(std::make_unique<newui::FlexLayoutParams>(1.0f));
         newui::SubView* toolbarSpacer = toolbarSpacerBuilder.build();
 
+        // The surface switcher, first in the bar; its text and chevron are set by refreshSurfaceButton().
+        newui::ViewBuilder<newui::ToolbarButton> surfaceButtonBuilder;
+        surfaceButtonBuilder.name("workspaceSurfaceButton").desiredSize(newui::Size(kSurfaceButtonWidth, 24.0f))
+            .configure([](newui::ToolbarButton& btn) { btn.setIcon(kSurfaceButtonIcon); });
+        surfaceButton_ = surfaceButtonBuilder.build();
+        surfaceButton_->onClick.add([this](newui::Control&) {
+            showSurfaceMenu();
+            return newui::SyncReturn::Handled;
+        });
+        refreshSurfaceButton();
+
+        newui::ViewBuilder<newui::ToolbarSeparator> surfaceSepBuilder;
+        surfaceSepBuilder.name("workspaceToolbarSurfaceSep");
+        newui::ToolbarSeparator* surfaceSep = surfaceSepBuilder.build();
+
+        topBar_->addChild(surfaceButton_);
+        topBar_->addChild(surfaceSep);
         topBar_->addChild(newButton_);
         topBar_->addChild(openButton_);
         topBar_->addChild(saveButton_);
@@ -492,8 +512,93 @@ namespace CodeToolsVsix
         statusBuilder.layout<newui::AnchorLayout>().child(undoRedoStatusLabel_).child(issuesLabel_);
         statusBar_ = statusBuilder.build();
 
-        self.child(topBar_).child(middle).child(statusBar_);
-    }    
+        // The Designer proper (docks and status bar) is one page of bodyViews_; the other surfaces are the
+        // other pages, each filling everything under the toolbar.
+        newui::ViewBuilder<newui::SubView> designerPageBuilder;
+        designerPageBuilder.name("workspaceDesignerPage")
+            .visible(true)
+            .layout<newui::FlexLayout>([](newui::FlexLayout& l) {
+                l.setOrientation(newui::Orientation::Vertical);
+                l.setSpacing(0.0f);
+                l.setPadding(0.0f);
+            });
+        designerPageBuilder.child(middle).child(statusBar_);
+        newui::SubView* designerPage = designerPageBuilder.build();
+
+        fontsSurface_ = new FontsSurface();
+
+        newui::ViewBuilder<newui::SubView> bodyBuilder;
+        bodyBuilder.name("workspaceBody")
+            .visible(true)
+            .layoutParams(std::make_unique<newui::FlexLayoutParams>(1.0f))
+            .layout<newui::CardLayout>();
+        bodyViews_ = bodyBuilder.build();
+        bodyViews_->addChild(designerPage);
+        bodyViews_->addChild(fontsSurface_);
+        static_cast<newui::CardLayout*>(bodyViews_->layout())->show(0);
+
+        self.child(topBar_).child(bodyViews_);
+    }
+
+    std::string Workspace::surfaceButtonText() const
+    {
+        // a small down triangle (U+25BE) as UTF-8: the narrow literal must not depend on the compiler's code page
+        return designerSurfaceTitle(surface_) + "  \xE2\x96\xBE";
+    }
+
+    void Workspace::refreshSurfaceButton()
+    {
+        surfaceButton_->setText(surfaceButtonText());
+    }
+
+    bool Workspace::showSurface(DesignerSurface surface)
+    {
+        if (!designerSurfaceInfo(surface).available) {
+            return false;
+        }
+        if (surface == DesignerSurface::Fonts && !fontsSurface_->loaded()) {
+            fontsSurface_->refresh();
+        }
+        surface_ = surface;
+        static_cast<newui::CardLayout*>(bodyViews_->layout())->show(surface == DesignerSurface::Fonts ? 1 : 0);
+        refreshSurfaceButton();
+        bodyViews_->updateLayout();
+        bodyViews_->redraw();
+        surfaceButton_->redraw();
+        onSurfaceChanged(*this);
+        return true;
+    }
+
+    void Workspace::showSurfaceMenu()
+    {
+        newui::RootView* root = rootView();
+        HWND hwnd = root != nullptr ? root->windowHandle() : nullptr;
+        if (hwnd == nullptr) {
+            return;
+        }
+
+        newui::MenuItem menu;
+        for (const DesignerSurfaceInfo& info : designerSurfaces()) {
+            std::string text = info.name;
+            if (!info.available) {
+                text += "   (coming)";
+            }
+            newui::MenuItem* item = menu.addChild(std::make_unique<newui::MenuItem>(text));
+            item->state().setEnabled(info.available);
+            item->setChecked(info.id == surface_);
+            const DesignerSurface id = info.id;
+            item->onClick.add([this, id](newui::MenuItem&) {
+                showSurface(id);
+                return newui::SyncReturn::Handled;
+            });
+        }
+
+        const newui::Rect button = SelectionOverlay::boundsInRootView(surfaceButton_);
+        POINT screenPt = { static_cast<LONG>(button.left()), static_cast<LONG>(button.top() + button.height()) };
+        ::ClientToScreen(hwnd, &screenPt);
+        newui::ContextMenu contextMenu;
+        contextMenu.show(hwnd, menu, screenPt.x, screenPt.y);
+    }
 
     void Workspace::showMode(std::size_t mode)
     {

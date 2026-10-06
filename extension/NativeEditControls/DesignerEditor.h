@@ -377,6 +377,8 @@ namespace CodeToolsVsix
 
         // The selectable control under root-local pt on the design surface (nullptr on empty
         // canvas); false when pt isn't on the design surface at all.
+        // False while the Fonts (or another) surface covers the canvas: no selecting, dragging or canvas keys then.
+        bool designerSurfaceShown() const;
         bool hitTestDesignSurface(const newui::Point& pt, newui::SubView*& target) const;
 
         // Left double-click on a control: editComponent().

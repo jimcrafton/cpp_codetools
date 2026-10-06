@@ -412,6 +412,10 @@ add_library(nativeeditcontrols_core OBJECT
     extension/NativeEditControls/IssuesPopup.cpp
     extension/NativeEditControls/IncludeGraphLayout.cpp
     extension/NativeEditControls/IncludeGraphPopup.cpp
+    extension/NativeEditControls/FontCatalog.cpp
+    extension/NativeEditControls/FontsModel.cpp
+    extension/NativeEditControls/FontsSurface.cpp
+    extension/NativeEditControls/DesignerSurface.cpp
     extension/NativeEditControls/IssuePeek.cpp
     extension/NativeEditControls/ProblemList.cpp
     extension/NativeEditControls/EditorStatusBar.cpp

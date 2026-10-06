@@ -1,7 +1,9 @@
 #pragma once
 
 #include "CanvasWell.h"
+#include "DesignerSurface.h"
 #include "DocumentOutline.h"
+#include "FontsSurface.h"
 #include "PropertiesGrid.h"
 #include "SourceView.h"
 #include "PropertiesPanel.h"
@@ -198,7 +200,30 @@ namespace CodeToolsVsix
         // page - what entering or leaving Source means for the document is DesignerEditor's job.
         void showMode(std::size_t mode);
         SourceView* sourceView() const { return sourceView_; }
+
+        // The surface switcher at the toolbar's far left: logo, "codetools++ - <surface>" and a chevron. A click
+        // lists every surface (showSurfaceMenu()); picking one calls showSurface(). A surface other than Designer
+        // replaces everything under the toolbar.
+        static constexpr float kSurfaceButtonWidth = 230.0f;
+        static constexpr const char* kSurfaceButtonIcon = "Images/icons/app/codetools.svg";
+
+        newui::ToolbarButton* surfaceButton() const { return surfaceButton_; }
+        DesignerSurface surface() const { return surface_; }
+        // False, and nothing changes, for a surface not built yet.
+        bool showSurface(DesignerSurface surface);
+        // The list as a native popup under the button; blocks until a choice or dismissal.
+        void showSurfaceMenu();
+        FontsSurface* fontsSurface() const { return fontsSurface_; }
+        // What the button says now: "codetools++ - Fonts" and a chevron.
+        std::string surfaceButtonText() const;
+
+        newui::Delegate<Workspace> onSurfaceChanged;
     private:
+        void refreshSurfaceButton();
+        newui::ToolbarButton* surfaceButton_ = nullptr;
+        newui::SubView* bodyViews_ = nullptr;
+        FontsSurface* fontsSurface_ = nullptr;
+        DesignerSurface surface_ = DesignerSurface::Designer;
         newui::Toolbar* topBar_ = nullptr;
         CanvasWell* canvasWell_ = nullptr;
         Toolbox* toolboxPane_ = nullptr;
