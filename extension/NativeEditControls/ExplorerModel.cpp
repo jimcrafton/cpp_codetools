@@ -278,8 +278,8 @@ namespace CodeToolsVsix
                 return themed("files/document");
             }
             case Kind::Namespace: return themed("symbols/namespace");
-            case Kind::Class: return themed("symbols/class");
-            case Kind::Struct: return themed("symbols/struct");
+            case Kind::Class: return themed(node.forwardDeclared ? "symbols/class-forward" : "symbols/class");
+            case Kind::Struct: return themed(node.forwardDeclared ? "symbols/struct-forward" : "symbols/struct");
             case Kind::Enum: return themed("symbols/enum");
             case Kind::Function: return themed("symbols/function");
             case Kind::Field: return themed("symbols/field");
@@ -484,6 +484,8 @@ namespace CodeToolsVsix
                 node.line = symbol.location.line;
             }
             node.search = lowered(symbol.qualifiedName);
+            // `chosen` kept a definition when there was one, so this one has only forward declarations.
+            node.forwardDeclared = !symbol.isDefinition && (node.kind == ExplorerNode::Kind::Class || node.kind == ExplorerNode::Kind::Struct);
             if (isScopeKind(symbol.kind) && symbol.kind != cpptools::SymbolKind::Namespace) node.detail = fileNameOf(symbol.location.file);
             indexOf[entry.first] = nodes.size();
             nodes.push_back(std::move(node));

@@ -258,6 +258,9 @@ namespace CodeToolsVsix
         // Trees built from a finished index, by view: showing one again costs a copy, not a rebuild. Dropped whenever the
         // index changes.
         std::map<std::string, std::shared_ptr<const ExplorerNode>> treeCache_;
+        std::shared_ptr<const ExplorerNode> productsTree_;   // the Products tree for productsModel_ and productsFilter_
+        std::shared_ptr<cmakemodel::Model> productsModel_;
+        std::string productsFilter_;
         static constexpr long long kSaveEveryMs = 15000;   // how often a long index is written out while it runs
         unsigned treeEpoch_ = 0;              // bumped by dropTrees(), so a tree built from an older index is not kept
         std::string symbolsRunningKey_;        // the Symbols tree being built on symbolsThread_, if any

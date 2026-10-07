@@ -248,6 +248,22 @@ TEST_F(SymbolsTest, AMethodDeclaredInAHeaderAndDefinedInASourceIsOneRowThatOpens
     EXPECT_EQ(area->line, 11u);
 }
 
+TEST_F(SymbolsTest, AClassOrStructOnlyDeclaredIsFlaggedAndOneWithABodyIsNot) {
+    write("fwd.h", "class OnlyDeclared;\nstruct AlsoOnly;\nclass Defined;\nclass Defined { public: int x; };\n");
+    cpptools::ProjectIndex fwd;
+    fwd.setFlagsProvider([](const std::string&) { return std::vector<std::string>{ "-std=c++17", "-xc++" }; });
+    fwd.indexFiles({ (dir_ / "fwd.h").string() }, {}, 1);
+
+    const ExplorerNode root = buildSymbolsTree(fwd);
+    bool sawDeclared = false, sawStruct = false, sawDefined = false;
+    for (const ExplorerNode& row : root.children) {
+        if (row.text == "OnlyDeclared") { sawDeclared = true; EXPECT_TRUE(row.forwardDeclared); }
+        if (row.text == "AlsoOnly") { sawStruct = true; EXPECT_TRUE(row.forwardDeclared); }
+        if (row.text == "Defined") { sawDefined = true; EXPECT_FALSE(row.forwardDeclared) << "its definition is what is shown"; }
+    }
+    EXPECT_TRUE(sawDeclared && sawStruct && sawDefined);
+}
+
 TEST_F(SymbolsTest, AMethodWhoseClassIsNotIndexedStillSitsUnderItsClass) {
     // only b.cpp: the classes live in a.h, which was not parsed
     cpptools::ProjectIndex partial;
@@ -654,6 +670,13 @@ TEST(ExplorerIcons, EachKindOfRowGetsAnIconThatExistsOnDisk) {
     EXPECT_EQ(explorerIconPath(explorerIconFor(node(Kind::Class, "X")), false), "Images/icons/cpp-symbol-icons-32/light/symbols/class.svg");
     EXPECT_EQ(explorerIconPath(explorerIconFor(node(Kind::Class, "X")), true), "Images/icons/cpp-symbol-icons-32/dark/symbols/class.svg");
 
+    ExplorerNode declaredClass = node(Kind::Class, "X");
+    declaredClass.forwardDeclared = true;
+    ExplorerNode declaredStruct = node(Kind::Struct, "X");
+    declaredStruct.forwardDeclared = true;
+    EXPECT_EQ(explorerIconFor(declaredClass).name, "symbols/class-forward");
+    EXPECT_EQ(explorerIconFor(declaredStruct).name, "symbols/struct-forward");
+
     // every icon it can name is a real file under Resources, in both themes
     const fs::path repo = fs::path(EXPLORER_TEST_FIXTURES).parent_path().parent_path().parent_path();   // .../unittests/fixtures/cmake_fileapi
     const fs::path resources = repo / "extension" / "NativeEditControls" / "Resources";
@@ -671,6 +694,8 @@ TEST(ExplorerIcons, EachKindOfRowGetsAnIconThatExistsOnDisk) {
         n.iconHint = hint;
         nodes.push_back(n);
     }
+    nodes.push_back(declaredClass);
+    nodes.push_back(declaredStruct);
     for (const ExplorerNode& n : nodes) {
         const ExplorerIcon icon = explorerIconFor(n);
         ASSERT_FALSE(icon.empty()) << n.text << " " << n.detail;

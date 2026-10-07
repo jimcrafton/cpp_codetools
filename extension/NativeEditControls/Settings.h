@@ -42,6 +42,7 @@ namespace CodeToolsVsix
 
         // Project explorer
         static constexpr Def kExplorerDefaultView{ "CodeTools.explorer.defaultView", "Symbols" };
+        static constexpr Def kCacheCompileDatabase{ "CodeTools.explorer.cacheCompileDatabase", "true" };   // pushed on to cpptools
 
         static Settings& instance();
 

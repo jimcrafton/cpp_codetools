@@ -843,7 +843,7 @@ TEST(ProjectExplorerWatchIgnores, BuildOutputAndTempFilesAreIgnored) {
 
 TEST(ProjectExplorerWatchIgnores, ProjectFilesAreNot) {
     EXPECT_FALSE(ProjectExplorer::watchIgnores("C:/p", "C:/p/src/a.cpp"));
-    EXPECT_FALSE(ProjectExplorer::watchIgnores("C:\p\\", "C:/p/CMakeLists.txt"));
+    EXPECT_FALSE(ProjectExplorer::watchIgnores("C:\\p\\", "C:/p/CMakeLists.txt"));   // a root spelled with backslashes
     EXPECT_FALSE(ProjectExplorer::watchIgnores("C:/p", "C:/p/docs/readme.md"));
 }
 

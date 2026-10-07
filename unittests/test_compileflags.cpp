@@ -259,6 +259,24 @@ TEST(CompileFlagsFor, TheNewestBuildDirectoryWinsAndACloserDatabaseBeatsAFarther
     EXPECT_TRUE(contains(compileFlagsFor(source.string()).args, "-DNEAR"));
 }
 
+TEST(CompileFlagsFor, ADatabaseKeptFromTheLastLookupIsReadAgainWhenItsFileChanges) {
+    Tree tree;
+    const fs::path source = tree.write("proj/src/a.cpp", "int a;\n");
+    auto entry = [&](const std::string& define) {
+        return "[{\"directory\": " + json(tree.root / "proj") + ", \"file\": " + json(source) +
+               ", \"arguments\": [\"clang++\", \"-D" + define + "\", " + json(source) + "]}]\n";
+    };
+    const fs::path database = tree.write("proj/build/compile_commands.json", entry("FIRST"));
+    EXPECT_TRUE(contains(compileFlagsFor(source.string()).args, "-DFIRST"));
+    EXPECT_TRUE(contains(compileFlagsFor(source.string()).args, "-DFIRST"));   // the second answer comes from what was kept
+
+    tree.write("proj/build/compile_commands.json", entry("SECOND"));
+    fs::last_write_time(database, fs::last_write_time(database) + std::chrono::seconds(5));   // a coarse clock could repeat the time
+    const CompileFlags flags = compileFlagsFor(source.string());
+    EXPECT_TRUE(contains(flags.args, "-DSECOND"));
+    EXPECT_FALSE(contains(flags.args, "-DFIRST"));
+}
+
 TEST(CompileFlagsFor, CompileFlagsTxtIsTheFallback) {
     Tree tree;
     const fs::path file = tree.write("proj/src/a.cpp", "int a;\n");
@@ -314,3 +332,32 @@ TEST(CompileFlagsFor, TheStandardLibraryParsesWithAnMsvcCommandLine) {
     }
 }
 #endif
+
+TEST(CompileFlagsFor, TheKeptDatabaseAnswersLikeALookupMadeFresh) {
+    // Files the database lists, and ones it does not (a header, a source in another folder): libclang infers flags for
+    // those, and the kept database must give the same answers.
+    Tree tree;
+    const fs::path a = tree.write("proj/a.cpp", "int a;\n");
+    const fs::path b = tree.write("proj/sub/b.cpp", "int b;\n");
+    const fs::path header = tree.write("proj/sub/b.h", "int h;\n");
+    const fs::path stray = tree.write("proj/other/c.cpp", "int c;\n");
+    auto entry = [&](const fs::path& source, const std::string& define) {
+        return "{\"directory\": " + json(tree.root / "proj") + ", \"file\": " + json(source) +
+               ", \"arguments\": [\"clang++\", \"-D" + define + "\", " + json(source) + "]}";
+    };
+    tree.write("proj/build/compile_commands.json", "[" + entry(a, "A") + "," + entry(b, "B") + "]\n");
+
+    const std::vector<fs::path> files{ a, b, header, stray };
+    std::vector<CompileFlags> kept, fresh;
+    for (const fs::path& file : files) kept.push_back(compileFlagsFor(file.string()));
+    cpptools::setCompileDatabaseCacheEnabled(false);
+    for (const fs::path& file : files) fresh.push_back(compileFlagsFor(file.string()));
+    cpptools::setCompileDatabaseCacheEnabled(true);
+
+    for (std::size_t i = 0; i < files.size(); ++i) {
+        EXPECT_EQ(kept[i].args, fresh[i].args) << files[i].string();
+        EXPECT_EQ(kept[i].origin, fresh[i].origin) << files[i].string();
+    }
+    EXPECT_TRUE(contains(kept[0].args, "-DA"));
+    EXPECT_TRUE(contains(kept[1].args, "-DB"));
+}

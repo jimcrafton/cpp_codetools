@@ -92,6 +92,7 @@ namespace CodeToolsVsix
         Tone barTone = Tone::Accent;
         int swatch = -1;         // a small chip of explorerSwatchColor(swatch) before the name; -1 for none
         bool openOnSelect = false;   // selecting the row (a click) opens `path`, not only a double-click
+        bool forwardDeclared = false;   // a class or struct only declared (never defined) in the project: a dashed icon
         std::shared_ptr<const ExplorerCard> card;   // what the detail pane shows while this row is selected; null for none
         std::string path;        // what a double-click opens; empty for nothing
         std::size_t line = 0;    // 1-based; 0 = open the file without moving the caret

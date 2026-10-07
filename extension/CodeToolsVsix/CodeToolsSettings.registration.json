@@ -117,6 +117,12 @@
 			"description": "Folders to search for compile_commands.json, relative to the workspace root, separated by semicolons. Not yet active",
 			"default": "build-ninja;build;out/build/*"
 		},
+		"CodeTools.explorer.cacheCompileDatabase": {
+			"type": "boolean",
+			"title": "Keep compile_commands.json in memory",
+			"description": "Read each compile_commands.json once and reuse it, instead of again for every file. Turn off to rule it out when a file's compile flags look wrong",
+			"default": true
+		},
 		"CodeTools.explorer.dimUnreferenced": {
 			"type": "boolean",
 			"title": "Dim unreferenced symbols",

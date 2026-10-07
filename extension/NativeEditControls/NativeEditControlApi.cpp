@@ -4,6 +4,7 @@
 #include "TextEncoding.h"
 #include "WorkspaceInfo.h"
 
+#include <cpptools/compileflags.h>
 #include <cpptools/version.h>
 #include <newui/version.h>
 
@@ -164,6 +165,12 @@ void __stdcall NativeEditControl_SettingChanged(const wchar_t* settingName, cons
         key += static_cast<char>(*c);   // keys are ASCII
     }
     Settings::instance().set(key, value != nullptr ? std::wstring(value) : std::wstring());
+    if (key == Settings::kCacheCompileDatabase.key) {   // a library setting, not a view's: handed down here
+        const bool keep = Settings::instance().getBool(Settings::kCacheCompileDatabase);
+        cpptools::setCompileDatabaseCacheEnabled(keep);
+        // A Warning so it shows in the default log: lets the setting be seen arriving, as it is a switch for troubleshooting.
+        CodeToolsVsix::log(cpptools::Severity::Warning, std::string("compile_commands.json kept in memory: ") + (keep ? "on" : "off"));
+    }
 }
 
 void __stdcall NativeEditControl_HostGetTextReply(

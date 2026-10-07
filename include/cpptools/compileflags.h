@@ -30,6 +30,11 @@ struct CompileFlags {
 // A header is parsed as C++ whatever the language of the entry it borrowed flags from. Never throws.
 CompileFlags compileFlagsFor(const std::string& filePath);
 
+// Whether compileFlagsFor() keeps each compile_commands.json opened between calls (valid while the file's modification
+// time is unchanged) instead of opening it again for every file. On by default; off is for troubleshooting, to rule the
+// kept copy out. Any thread.
+void setCompileDatabaseCacheEnabled(bool enabled);
+
 // The part of compileFlagsFor() that turns one compile command into parse arguments: commandLine is
 // the whole command (compiler first), directory what its relative paths are relative to, and
 // sourceFile the file it compiles (dropped from the result).

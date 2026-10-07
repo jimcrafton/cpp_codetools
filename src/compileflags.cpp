@@ -4,10 +4,13 @@
 #include <clang-c/CXCompilationDatabase.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <memory>
+#include <mutex>
 #include <system_error>
 
 namespace cpptools {
@@ -227,14 +230,88 @@ std::size_t commonDepth(const fs::path& a, const fs::path& b) {
     return depth;
 }
 
+std::atomic<bool>& databaseCacheEnabled() {
+    static std::atomic<bool> enabled{ true };
+    return enabled;
+}
+
+// A compile_commands.json opened once and kept: libclang's fromDirectory() re-reads and re-parses the whole JSON, and an
+// editor or an index asks for hundreds of files. Valid while the JSON's modification time is the one it was opened at.
+// The lookups are libclang's own (it also infers flags for a file the database does not list), so answers are the same.
+struct KeptDatabase {
+    fs::file_time_type stamp;
+    std::unique_ptr<void, DatabaseDeleter> database;
+    std::mutex mutex;   // one lookup at a time: libclang does not promise a database is safe to ask from several threads
+};
+
+// Null when the directory is not a plain compile_commands.json one (a compile_flags.txt there wins in libclang, and
+// answers for every file), or it cannot be opened.
+std::shared_ptr<KeptDatabase> keptDatabase(const fs::path& databaseDir) {
+    static std::mutex mutex;
+    static std::map<std::string, std::shared_ptr<KeptDatabase>> kept;
+
+    if (!databaseCacheEnabled().load()) return nullptr;
+    std::error_code ec;
+    if (fs::is_regular_file(databaseDir / "compile_flags.txt", ec)) return nullptr;
+    const fs::file_time_type stamp = fs::last_write_time(databaseDir / "compile_commands.json", ec);
+    if (ec) return nullptr;
+
+    std::lock_guard<std::mutex> lock(mutex);
+    const std::string key = databaseDir.string();
+    auto found = kept.find(key);
+    if (found != kept.end() && found->second->stamp == stamp) return found->second;
+
+    CXCompilationDatabase_Error error = CXCompilationDatabase_NoError;
+    CXCompilationDatabase database = clang_CompilationDatabase_fromDirectory(key.c_str(), &error);
+    if (error != CXCompilationDatabase_NoError || database == nullptr) return nullptr;
+    auto entry = std::make_shared<KeptDatabase>();
+    entry->stamp = stamp;
+    entry->database.reset(database);
+    kept[key] = entry;   // one still being asked by another thread lives on in its shared_ptr
+    return entry;
+}
+
+// The command whose source is closest to `file`: same folder first, then the most folders in common.
+bool closestCommand(const std::vector<Command>& commands, const fs::path& file, Command& result) {
+    std::size_t bestDepth = 0;
+    bool bestSameDirectory = false;
+    bool found = false;
+    for (const Command& candidate : commands) {
+        const fs::path source = absolutize(candidate.file, candidate.directory);
+        const std::size_t depth = commonDepth(source.parent_path(), file.parent_path());
+        const bool sameDirectory = lower(source.parent_path().generic_string()) == lower(file.parent_path().generic_string());
+        if (depth < 2) {
+            continue;   // nothing but a drive in common
+        }
+        const bool better = !found || (sameDirectory && !bestSameDirectory) ||
+                            (sameDirectory == bestSameDirectory && depth > bestDepth);
+        if (better) {
+            result = candidate;
+            bestDepth = depth;
+            bestSameDirectory = sameDirectory;
+            found = true;
+        }
+    }
+    return found;
+}
+
 // The entry for `file`: its own, or the closest source file's. False when the database has neither.
 bool findCommand(const fs::path& databaseDir, const fs::path& file, Command& result, bool& borrowed) {
-    CXCompilationDatabase_Error error = CXCompilationDatabase_NoError;
-    CXCompilationDatabase database = clang_CompilationDatabase_fromDirectory(databaseDir.string().c_str(), &error);
-    if (error != CXCompilationDatabase_NoError || database == nullptr) {
-        return false;
+    std::shared_ptr<KeptDatabase> kept = keptDatabase(databaseDir);
+    std::unique_lock<std::mutex> lock;
+    std::unique_ptr<void, DatabaseDeleter> opened;   // when nothing is kept: opened for this lookup alone
+    CXCompilationDatabase database = nullptr;
+    if (kept != nullptr) {
+        lock = std::unique_lock<std::mutex>(kept->mutex);
+        database = static_cast<CXCompilationDatabase>(kept->database.get());
+    } else {
+        CXCompilationDatabase_Error error = CXCompilationDatabase_NoError;
+        database = clang_CompilationDatabase_fromDirectory(databaseDir.string().c_str(), &error);
+        if (error != CXCompilationDatabase_NoError || database == nullptr) {
+            return false;
+        }
+        opened.reset(database);
     }
-    std::unique_ptr<void, DatabaseDeleter> guard(database);
 
     for (const std::string& spelling : { file.string(), file.generic_string() }) {
         CXCompileCommands commands = clang_CompilationDatabase_getCompileCommands(database, spelling.c_str());
@@ -257,29 +334,11 @@ bool findCommand(const fs::path& databaseDir, const fs::path& file, Command& res
         return false;
     }
     const unsigned size = clang_CompileCommands_getSize(all);
-    std::size_t bestDepth = 0;
-    bool bestSameDirectory = false;
-    bool found = false;
-    for (unsigned i = 0; i < size; ++i) {
-        Command candidate = readCommand(clang_CompileCommands_getCommand(all, i));
-        const fs::path source = absolutize(candidate.file, candidate.directory);
-        const std::size_t depth = commonDepth(source.parent_path(), file.parent_path());
-        const bool sameDirectory = lower(source.parent_path().generic_string()) == lower(file.parent_path().generic_string());
-        if (depth < 2) {
-            continue;   // nothing but a drive in common
-        }
-        const bool better = !found || (sameDirectory && !bestSameDirectory) ||
-                            (sameDirectory == bestSameDirectory && depth > bestDepth);
-        if (better) {
-            result = std::move(candidate);
-            bestDepth = depth;
-            bestSameDirectory = sameDirectory;
-            found = true;
-        }
-    }
+    std::vector<Command> commands;
+    for (unsigned i = 0; i < size; ++i) commands.push_back(readCommand(clang_CompileCommands_getCommand(all, i)));
     clang_CompileCommands_dispose(all);
     borrowed = true;
-    return found;
+    return closestCommand(commands, file, result);
 }
 
 // compile_commands.json files "beside" dir: in dir, then in build*/, cmake-build*/ and out/... below it.
@@ -355,6 +414,10 @@ std::vector<std::string> readFlagsFile(const fs::path& file) {
 }
 
 } // namespace
+
+void setCompileDatabaseCacheEnabled(bool enabled) {
+    databaseCacheEnabled().store(enabled);
+}
 
 std::vector<std::string> cleanCommandLine(const std::vector<std::string>& commandLine, const std::string& directory,
                                           const std::string& sourceFile) {

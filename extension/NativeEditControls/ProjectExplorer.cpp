@@ -206,6 +206,34 @@ namespace CodeToolsVsix
             return ec ? std::string() : (folder / name).string();
         }
 
+        // The index's side of the info view: symbol and problem counts, read from what is indexed now.
+        void summarizeIndex(const cpptools::ProjectIndex& index, ProjectStats& stats)
+        {
+            std::size_t symbols = 0;
+            for (const std::string& file : index.files()) symbols += index.symbolsIn(file).size();
+            stats.symbols = symbols;
+            stats.problemFiles.clear();
+            stats.filesWithErrors = stats.filesWithWarnings = stats.filesWithUnresolvedIncludes = stats.unresolvedIncludes = 0;
+            for (const std::string& file : index.files()) {
+                const cpptools::ProjectIndex::Problems found = index.problemsIn(file);
+                if (found.errors > 0 || found.warnings > 0 || found.unresolvedIncludes > 0) {
+                    ProblemFile problem{ file, found.errors, found.warnings, found.unresolvedIncludes, {} };
+                    for (const cpptools::IndexedDiagnostic& sample : found.samples) {
+                        problem.samples.push_back({ sample.file, sample.line, sample.message });
+                    }
+                    stats.problemFiles.push_back(std::move(problem));
+                }
+                if (found.unresolvedIncludes > 0) {   // its other errors are most likely knock-on, so they count here
+                    ++stats.filesWithUnresolvedIncludes;
+                    stats.unresolvedIncludes += found.unresolvedIncludes;
+                } else if (found.errors > 0) {
+                    ++stats.filesWithErrors;
+                } else if (found.warnings > 0) {
+                    ++stats.filesWithWarnings;
+                }
+            }
+        }
+
         // The files worth indexing: what the build compiles, or failing that whatever is under the root.
         std::vector<std::string> filesToIndex(const std::string& root, const cmakemodel::Model* model)
         {
@@ -486,6 +514,8 @@ namespace CodeToolsVsix
         setProgress(0.0f);
         root_ = folder;
         cmake_.reset();
+        productsTree_.reset();
+        productsModel_.reset();
         products_ = std::make_shared<FileProducts>();
         problems_.reset();
         includeGraph_.reset();
@@ -738,7 +768,13 @@ namespace CodeToolsVsix
                 break;
             case ExplorerMode::Products:
                 if (cmake_ != nullptr) {
-                    top = buildProductsTree(*cmake_, text);
+                    // From the model alone, so it can be kept while a load runs (it is not read again until the model is replaced).
+                    if (productsTree_ == nullptr || productsModel_ != cmake_ || productsFilter_ != text) {
+                        productsTree_ = std::make_shared<const ExplorerNode>(buildProductsTree(*cmake_, text));
+                        productsModel_ = cmake_;
+                        productsFilter_ = text;
+                    }
+                    top = *productsTree_;
                 } else {
                     top = buildMessageTree(root_.empty() ? "Open a folder or solution."
                                          : note_.empty() ? "Reading the CMake build tree..." : note_);
@@ -1255,13 +1291,19 @@ namespace CodeToolsVsix
         stopWork();
         alive_->cancel.store(false);
         loading_ = true;
-        worker_ = std::thread([this, files, index = index_, alive = alive_, loop = loop_]() {
+        worker_ = std::thread([this, files, stats = stats_, index = index_, alive = alive_, loop = loop_]() mutable {
             for (const std::string& file : files) {
                 if (alive->cancel.load()) return;
                 index->updateFile(file);
             }
+            // The info view's counts follow what was just read.
+            summarizeIndex(*index, stats);
+            stats.parsed = files.size();
+            stats.upToDate = index->fileCount() > files.size() ? index->fileCount() - files.size() : 0;
+            stats.failed = 0;
             auto done = std::make_shared<Found>();
             done->final = true;
+            done->stats = std::make_shared<ProjectStats>(std::move(stats));
             loop->post([this, alive, done]() {
                 if (alive->alive.load()) applyFound(done);
             });
@@ -1531,27 +1573,8 @@ namespace CodeToolsVsix
             stats.filesToIndex = result.total;   // CMake lists a shared source once per target; the index counts it once
             if (!cache.empty()) index->save(cache);
 
-            std::size_t symbols = 0;
-            for (const std::string& file : index->files()) symbols += index->symbolsIn(file).size();
-            stats.symbols = symbols;
-            for (const std::string& file : index->files()) {
-                const cpptools::ProjectIndex::Problems found = index->problemsIn(file);
-                if (found.errors > 0 || found.warnings > 0 || found.unresolvedIncludes > 0) {
-                    ProblemFile problem{ file, found.errors, found.warnings, found.unresolvedIncludes, {} };
-                    for (const cpptools::IndexedDiagnostic& sample : found.samples) {
-                        problem.samples.push_back({ sample.file, sample.line, sample.message });
-                    }
-                    stats.problemFiles.push_back(std::move(problem));
-                }
-                if (found.unresolvedIncludes > 0) {   // its other errors are most likely knock-on, so they count here
-                    ++stats.filesWithUnresolvedIncludes;
-                    stats.unresolvedIncludes += found.unresolvedIncludes;
-                } else if (found.errors > 0) {
-                    ++stats.filesWithErrors;
-                } else if (found.warnings > 0) {
-                    ++stats.filesWithWarnings;
-                }
-            }
+            summarizeIndex(*index, stats);
+            const std::size_t symbols = stats.symbols;
             stats.parsed = result.parsed;
             stats.upToDate = result.skipped;
             stats.failed = result.failed;

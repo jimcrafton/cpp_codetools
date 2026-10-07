@@ -31,6 +31,7 @@ public class OptionsStorage
         "CodeTools.designer.newControlWidth",
         "CodeTools.designer.handleSize",
         "CodeTools.explorer.defaultView",
+        "CodeTools.explorer.cacheCompileDatabase",
     };
 
     /// <summary>Raised when a CodeTools.explorer.* setting changes - the managed side of the explorer
