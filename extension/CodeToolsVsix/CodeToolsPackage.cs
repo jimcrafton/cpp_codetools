@@ -6,6 +6,7 @@ using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
 using Task = System.Threading.Tasks.Task;
 using Microsoft.VisualStudio.Settings;
+using Microsoft.Internal.VisualStudio.Shell.Interop;
 
 namespace CodeToolsVsix
 {
@@ -58,12 +59,17 @@ namespace CodeToolsVsix
             RegisterEditorFactory(new CodeToolsEditorFactory(this));
 
             // 1. Fetch the Visual Studio Settings Manager service
-            ISettingsManager settingsManager = await GetServiceAsync(typeof(SVsSettingsManager)) as ISettingsManager;
+            // ISettingsManager is served by SVsSettingsPersistenceManager (SVsSettingsManager is the older COM service).
+            ISettingsManager settingsManager = await GetServiceAsync(typeof(SVsSettingsPersistenceManager)) as ISettingsManager;
 
             if (settingsManager != null)
             {
                 // 2. Instantiate your storage wrapper
                 Options = new OptionsStorage(settingsManager);
+            }
+            else
+            {
+                OutputWindowLogger.Write("options: no ISettingsManager, so no codetools++ option reaches the editor");
             }
 
             // The project explorer: its command, the open workspace, hiding the built-in explorer.

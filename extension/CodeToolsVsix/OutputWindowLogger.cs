@@ -37,6 +37,14 @@ namespace CodeToolsVsix
             }).Task.FileAndForget("codetools/outputlogger");
         }
 
+        /// <summary>A line from the managed side, to the same pane.</summary>
+        internal static void Write(string text)
+        {
+            IntPtr ptr = Marshal.StringToHGlobalUni(text);
+            try { OnLog(Severity.Warning, ptr, (UIntPtr)text.Length); }
+            finally { Marshal.FreeHGlobal(ptr); }
+        }
+
         private static string Prefix(Severity severity)
         {
             switch (severity)
