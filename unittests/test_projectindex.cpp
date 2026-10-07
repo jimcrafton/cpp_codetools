@@ -239,6 +239,38 @@ TEST_F(ProjectIndexTest, AChangedFileIsParsedAgainAndTheRestAreNot) {
     EXPECT_TRUE(has(index_.findClasses(), "Newcomer"));
 }
 
+TEST_F(ProjectIndexTest, ATouchedFileWithTheSameTextIsNotParsedAgain) {
+    indexAll();
+    const fs::path file = dir_ / "c.h";
+    fs::last_write_time(file, fs::last_write_time(file) + std::chrono::hours(1));   // newer, same bytes
+
+    const IndexProgress again = indexAll();
+    EXPECT_EQ(again.parsed, 0u);
+    EXPECT_EQ(again.skipped, 5u);
+    EXPECT_EQ(indexAll().skipped, 5u);   // and the new time was remembered
+}
+
+TEST_F(ProjectIndexTest, ATouchedFileWithOtherTextOfTheSameSizeIsParsedAgain) {
+    indexAll();
+    write("c.h", "class Orphan { public: int valux; };\n");   // one letter different, same length
+    fs::last_write_time(dir_ / "c.h", fs::last_write_time(dir_ / "c.h") + std::chrono::hours(1));
+
+    EXPECT_EQ(indexAll().parsed, 1u);
+}
+
+TEST_F(ProjectIndexTest, TheContentHashSurvivesTheCache) {
+    indexAll();
+    const std::string cache = path("index.bin");
+    ASSERT_TRUE(index_.save(cache));
+    ASSERT_FALSE(fs::exists(cache + ".tmp"));   // written aside and moved over
+
+    ProjectIndex loaded;
+    loaded.setFlagsProvider(plainFlags);
+    ASSERT_TRUE(loaded.load(cache));
+    fs::last_write_time(dir_ / "c.h", fs::last_write_time(dir_ / "c.h") + std::chrono::hours(1));
+    EXPECT_EQ(loaded.indexFiles(all(), {}, 2).parsed, 0u);
+}
+
 TEST_F(ProjectIndexTest, ChangedCompileFlagsMakeEveryFileStale) {
     indexAll();
     index_.setFlagsProvider([](const std::string&) { return std::vector<std::string>{ "-std=c++17", "-xc++", "-DEXTRA=1" }; });

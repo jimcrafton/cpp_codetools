@@ -49,6 +49,7 @@ struct IndexedFile {
     std::int64_t modified = 0;   // last write time when it was parsed
     std::uint64_t size = 0;
     std::uint64_t flagsHash = 0; // of the compile flags it was parsed with
+    std::uint64_t contentHash = 0;   // of the file's bytes when it was parsed; 0: unknown (a buffer, not the file)
     bool parsed = false;         // false: libclang produced nothing (see `error`)
     std::string error;
     // Diagnostics libclang reported in this file itself (not in a header it includes): errors include fatal ones,
@@ -70,6 +71,7 @@ struct IndexProgress {
     std::size_t skipped = 0;     // already up to date
     std::size_t failed = 0;
     std::string current;         // the file that finished last
+    std::vector<std::string> reread;   // the files parsed (or tried) this run: what was not up to date
 };
 
 class ProjectIndex {
@@ -140,6 +142,7 @@ public:
     std::size_t referencingFileCount(const std::string& usr) const;
 
     // --- persistence ---------------------------------------------------------------------------------
+    // Safe to call while indexing runs: it writes what is in at that moment.
     bool save(const std::string& cachePath) const;
     // Replaces what is indexed. False (and nothing changes) if the file is missing or not in this format.
     bool load(const std::string& cachePath);
@@ -148,6 +151,7 @@ public:
     static std::string normalizePath(const std::string& path);
 
 private:
+    bool write(const std::string& path) const;
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

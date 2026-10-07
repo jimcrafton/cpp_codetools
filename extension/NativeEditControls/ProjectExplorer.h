@@ -8,6 +8,7 @@
 #include <newui/segmentedcontrol.h>
 
 #include <atomic>
+#include <optional>
 #include <mutex>
 #include <cstddef>
 #include <functional>
@@ -95,6 +96,9 @@ namespace CodeToolsVsix
             std::set<std::string> modified;
             bool any() const { return full || !modified.empty(); }
         };
+        // Where the index caches are kept: the folder given here, else %LOCALAPPDATA%/codetools++/index. Tests point it
+        // somewhere they delete after.
+        static void setCacheFolder(const std::string& folder);
         static DiskChanges summarizeChanges(const newui::FileWatcher::Changes& changes);
         // Whether a change at `path` under `root` is of no interest: inside a dot, build or dependency
         // folder, or a build-output or temp file.
@@ -181,7 +185,14 @@ namespace CodeToolsVsix
         // The rows open and the one selected, by name, so a rebuild of the same view can put them back.
         TreeState saveTreeState();
         void restoreTreeState(const TreeState& state, bool sameView);
-        void buildTree();   // the tree for the current mode, filter and data
+        // The tree for the current mode, filter and data. Empty while it is being built on a worker (Symbols) and the
+        // tree shown is already this view's: it stays until the new one is in, rather than flash a message.
+        std::optional<ExplorerNode> buildTree(bool sameView);
+        // The Symbols tree for `filter`: from the cache, else built on a worker (rebuild() runs when it is in; nullptr
+        // meanwhile), else here when there is no run loop.
+        std::shared_ptr<const ExplorerNode> symbolsTree(const std::string& filter);
+        void stopSymbolsWork();
+        void dropTrees();   // the index changed: forget the trees built from it
         // The tree for view `key`: the one built before from this index, or `build()`'s (kept, unless a load is running).
         ExplorerNode cachedTree(const std::string& key, const std::function<ExplorerNode()>& build);
 
@@ -247,6 +258,11 @@ namespace CodeToolsVsix
         // Trees built from a finished index, by view: showing one again costs a copy, not a rebuild. Dropped whenever the
         // index changes.
         std::map<std::string, std::shared_ptr<const ExplorerNode>> treeCache_;
+        static constexpr long long kSaveEveryMs = 15000;   // how often a long index is written out while it runs
+        unsigned treeEpoch_ = 0;              // bumped by dropTrees(), so a tree built from an older index is not kept
+        std::string symbolsRunningKey_;        // the Symbols tree being built on symbolsThread_, if any
+        std::shared_ptr<std::atomic<bool>> symbolsCancel_;
+        std::thread symbolsThread_;
         bool loading_ = false;                 // startWork()'s job has not delivered its final result
         bool refreshFull_ = false;             // changes that came in during a load, applied when it ends
         std::set<std::string> refreshModified_;

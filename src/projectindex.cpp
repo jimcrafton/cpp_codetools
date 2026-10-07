@@ -47,6 +47,20 @@ std::uint64_t hashArgs(const std::vector<std::string>& args) {
     return hash;
 }
 
+// FNV-1a of the file's bytes; 0 if it cannot be read.
+std::uint64_t hashFile(const std::string& path) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) return 0;
+    std::uint64_t hash = 1469598103934665603ull;
+    char buffer[1 << 15];
+    while (in) {
+        in.read(buffer, sizeof buffer);
+        const std::streamsize got = in.gcount();
+        for (std::streamsize i = 0; i < got; ++i) hash = (hash ^ static_cast<unsigned char>(buffer[i])) * 1099511628211ull;
+    }
+    return hash == 0 ? 1 : hash;
+}
+
 bool statFile(const std::string& path, std::int64_t& modified, std::uint64_t& size) {
     std::error_code ec;
     const auto time = fs::last_write_time(path, ec);
@@ -255,6 +269,7 @@ IndexedFile indexOne(CXIndex index, const std::string& path, const std::vector<s
     file.path = path;
     file.flagsHash = hashArgs(args);
     statFile(path, file.modified, file.size);
+    if (content == nullptr) file.contentHash = hashFile(path);
 
     std::vector<const char*> argv;
     argv.reserve(args.size());
@@ -326,7 +341,7 @@ IndexedFile indexOne(CXIndex index, const std::string& path, const std::vector<s
 // --- persistence helpers -------------------------------------------------------------------------
 
 constexpr char kMagic[8] = { 'C', 'P', 'T', 'O', 'O', 'L', 'I', 'X' };
-constexpr std::uint32_t kFormatVersion = 5;   // 2: per-file error and warning counts; 3: and unresolved includes; 4: those counted through headers; 5: sample diagnostics
+constexpr std::uint32_t kFormatVersion = 6;   // 6: content hash; 2: per-file error and warning counts; 3: and unresolved includes; 4: those counted through headers; 5: sample diagnostics
 
 void put(std::ostream& out, std::uint64_t value) { out.write(reinterpret_cast<const char*>(&value), sizeof value); }
 void put(std::ostream& out, const std::string& text) {
@@ -443,6 +458,24 @@ IndexProgress ProjectIndex::indexFiles(const std::vector<std::string>& requested
                             && it->second.size == size && it->second.flagsHash == flagsHash;
                 }
                 if (!fresh) {
+                    // Touched but not changed (a checkout, a formatter that wrote the same text): the bytes say so.
+                    std::uint64_t known = 0;
+                    {
+                        std::lock_guard<std::mutex> lock(impl_->mutex);
+                        auto it = impl_->files.find(keyOf(path));
+                        if (it != impl_->files.end() && it->second.parsed && it->second.flagsHash == flagsHash) known = it->second.contentHash;
+                    }
+                    if (known != 0 && hashFile(path) == known) {
+                        std::lock_guard<std::mutex> lock(impl_->mutex);
+                        auto it = impl_->files.find(keyOf(path));
+                        if (it != impl_->files.end()) {
+                            it->second.modified = modified;
+                            it->second.size = size;
+                            fresh = true;
+                        }
+                    }
+                }
+                if (!fresh) {
                     IndexedFile result = indexOne(index.get(), path, args, roots, nullptr);
                     outcome = result.parsed ? Outcome::Parsed : Outcome::Failed;
                     std::lock_guard<std::mutex> lock(impl_->mutex);
@@ -460,6 +493,7 @@ IndexProgress ProjectIndex::indexFiles(const std::vector<std::string>& requested
             if (outcome == Outcome::Parsed) ++summary.parsed;
             else if (outcome == Outcome::Skipped) ++summary.skipped;
             else ++summary.failed;
+            if (outcome != Outcome::Skipped) summary.reread.push_back(path);
             if (progress && !progress(summary)) stop.store(true);
         }
     };
@@ -643,6 +677,20 @@ std::size_t ProjectIndex::referencingFileCount(const std::string& usr) const {
 }
 
 bool ProjectIndex::save(const std::string& cachePath) const {
+    // Written beside the cache and moved over it, so a save cut short never leaves half a file in the way.
+    const std::string partial = cachePath + ".tmp";
+    if (!write(partial)) {
+        std::error_code ec;
+        fs::remove(partial, ec);
+        return false;
+    }
+    std::error_code ec;
+    fs::rename(partial, cachePath, ec);   // replaces an existing file on Windows and POSIX alike
+    if (ec) fs::remove(partial, ec);
+    return !ec;
+}
+
+bool ProjectIndex::write(const std::string& cachePath) const {
     std::ofstream out(cachePath, std::ios::binary | std::ios::trunc);
     if (!out) return false;
     out.write(kMagic, sizeof kMagic);
@@ -655,6 +703,7 @@ bool ProjectIndex::save(const std::string& cachePath) const {
         put(out, static_cast<std::uint64_t>(file.modified));
         put(out, file.size);
         put(out, file.flagsHash);
+        put(out, file.contentHash);
         put(out, static_cast<std::uint64_t>(file.parsed ? 1 : 0));
         put(out, file.error);
         put(out, static_cast<std::uint64_t>(file.errors));
@@ -714,6 +763,7 @@ bool ProjectIndex::load(const std::string& cachePath) {
         file.modified = static_cast<std::int64_t>(reader.number());
         file.size = reader.number();
         file.flagsHash = reader.number();
+        file.contentHash = reader.number();
         file.parsed = reader.number() != 0;
         file.error = reader.text();
         file.errors = static_cast<std::uint32_t>(reader.number());

@@ -187,14 +187,20 @@ namespace CodeToolsVsix
             return configured;
         }
 
+        std::string& cacheFolderOverride()
+        {
+            static std::string folder;
+            return folder;
+        }
+
         std::string cachePathFor(const std::string& root)
         {
             const char* local = std::getenv("LOCALAPPDATA");
-            if (local == nullptr || *local == '\0') return std::string();
+            if (cacheFolderOverride().empty() && (local == nullptr || *local == '\0')) return std::string();
             const std::size_t hash = std::hash<std::string>()(lowered(root));
             char name[32];
             std::snprintf(name, sizeof name, "%016llx.bin", static_cast<unsigned long long>(hash));
-            const fs::path folder = fs::path(local) / "codetools++" / "index";
+            const fs::path folder = cacheFolderOverride().empty() ? fs::path(local) / "codetools++" / "index" : fs::path(cacheFolderOverride());
             std::error_code ec;
             fs::create_directories(folder, ec);
             return ec ? std::string() : (folder / name).string();
@@ -419,6 +425,7 @@ namespace CodeToolsVsix
         if (cardSteps_ != nullptr) cardSteps_->onSelectionChanged.remove(cardStepConnection_);
         if (cardGraph_ != nullptr) cardGraph_->onClick.remove(cardGraphConnection_);
         stopMacroWork();
+        stopSymbolsWork();
     }
 
     std::wstring ProjectExplorer::filter() const
@@ -467,7 +474,8 @@ namespace CodeToolsVsix
         stopWork();
         watcher_.reset();
         pendingReplyDir_.clear();
-        treeCache_.clear();
+        stopSymbolsWork();
+        dropTrees();
         replyDir_.clear();
         replyWatch_ = newui::FileWatcher::kInvalidWatch;
         loadedReplyIndex_.clear();
@@ -676,22 +684,24 @@ namespace CodeToolsVsix
     {
         if (model_ == nullptr) return;
         StallLog stall("rebuild(mode " + std::to_string(static_cast<int>(mode_)) + ")");
+        const std::string viewKey = std::to_string(static_cast<int>(mode_)) + "|" + wideToUtf8(filter()) + (showInfo_ ? "|info" : "");
+        const bool sameView = viewKey == treeViewKey_;
+        std::optional<ExplorerNode> built = buildTree(sameView);
+        if (!built.has_value()) return;   // the tree on show stays until the new one is built
         showCard(nullptr);   // the rows it described are about to go
         const TreeState state = saveTreeState();
         for (const std::vector<std::size_t>& path : state.expandedPaths) tree_->controller().setExpanded(path, false);
-        const std::string viewKey = std::to_string(static_cast<int>(mode_)) + "|" + wideToUtf8(filter()) + (showInfo_ ? "|info" : "");
-        buildTree();
-        restoreTreeState(state, viewKey == treeViewKey_);
+        model_->setRoot(std::move(*built));
+        if (showInfo_ && !root_.empty()) {
+            for (std::size_t i = 0; i < 4; ++i) tree_->controller().setExpanded({ i }, true);   // its groups, open
+        }
+        restoreTreeState(state, sameView);
         treeViewKey_ = viewKey;
     }
 
-    void ProjectExplorer::buildTree()
+    std::optional<ExplorerNode> ProjectExplorer::buildTree(bool sameView)
     {
-        if (showInfo_ && !root_.empty()) {
-            model_->setRoot(buildStatsTree(stats_));
-            for (std::size_t i = 0; i < 4; ++i) tree_->controller().setExpanded({ i }, true);   // its groups, open
-            return;
-        }
+        if (showInfo_ && !root_.empty()) return buildStatsTree(stats_);
         const std::string text = wideToUtf8(filter());
         ExplorerNode top;
         switch (mode_) {
@@ -720,7 +730,10 @@ namespace CodeToolsVsix
                 if (root_.empty()) {
                     top = buildMessageTree("Open a folder or solution.");
                 } else {
-                    top = cachedTree("symbols|" + text, [&]() { return buildSymbolsTree(*index_, text); });
+                    const std::shared_ptr<const ExplorerNode> symbols = symbolsTree(text);
+                    if (symbols != nullptr) top = *symbols;
+                    else if (sameView) return std::nullopt;
+                    else top = buildMessageTree(loading_ ? "Reading the project; symbols appear when indexing is done." : "Reading the symbols...");
                 }
                 break;
             case ExplorerMode::Products:
@@ -735,7 +748,56 @@ namespace CodeToolsVsix
                 top = buildAnalysisTree(text);
                 break;
         }
-        model_->setRoot(std::move(top));
+        return top;
+    }
+
+    void ProjectExplorer::setCacheFolder(const std::string& folder)
+    {
+        cacheFolderOverride() = folder;
+    }
+
+    void ProjectExplorer::dropTrees()
+    {
+        treeCache_.clear();
+        ++treeEpoch_;
+    }
+
+    void ProjectExplorer::stopSymbolsWork()
+    {
+        if (symbolsCancel_ != nullptr) symbolsCancel_->store(true);
+        if (symbolsThread_.joinable()) symbolsThread_.join();
+        symbolsRunningKey_.clear();
+    }
+
+    std::shared_ptr<const ExplorerNode> ProjectExplorer::symbolsTree(const std::string& filter)
+    {
+        const std::string key = "symbols|" + filter;
+        newui::RunLoop& current = newui::RunLoop::current();
+        newui::RunLoop* loop = current ? &current : nullptr;
+        if (!background_ || loop == nullptr) return std::make_shared<const ExplorerNode>(buildSymbolsTree(*index_, filter));
+        if (loading_) return nullptr;   // a half-built index is not worth a tree, and the load's end rebuilds
+        auto found = treeCache_.find(key);
+        if (found != treeCache_.end()) return found->second;
+        if (!symbolsRunningKey_.empty()) return nullptr;   // one at a time; the finish of that one rebuilds, and asks again
+        if (symbolsThread_.joinable()) symbolsThread_.join();
+
+        auto cancel = std::make_shared<std::atomic<bool>>(false);
+        symbolsCancel_ = cancel;
+        symbolsRunningKey_ = key;
+        symbolsThread_ = std::thread([this, loop, cancel, key, filter, epoch = treeEpoch_, index = index_, alive = alive_]() {
+            auto tree = std::make_shared<const ExplorerNode>(buildSymbolsTree(*index, filter));
+            if (cancel->load()) return;
+            loop->post([this, alive, cancel, key, tree, epoch]() {
+                if (!alive->alive.load() || cancel->load()) return;
+                symbolsRunningKey_.clear();
+                if (epoch == treeEpoch_) {
+                    if (treeCache_.size() >= 8) treeCache_.clear();
+                    treeCache_[key] = tree;
+                }
+                if (mode_ == ExplorerMode::Symbols) rebuild();   // the index changed meanwhile: this asks for a fresh one
+            });
+        });
+        return nullptr;
     }
 
     void ProjectExplorer::setActiveFile(const std::string& path)
@@ -1072,7 +1134,7 @@ namespace CodeToolsVsix
         }
         if (found->final) {
             loading_ = false;
-            treeCache_.clear();   // the index changed
+            dropTrees();   // the index changed
             // Watching starts once the first load is done, so indexing is never competing with (or redone for) events.
             startWatching();
             if (!pendingReplyDir_.empty()) watchReply(pendingReplyDir_);
@@ -1420,12 +1482,19 @@ namespace CodeToolsVsix
             };
             borrowHeaders();
 
+            // Half the cores: with all but one busy, the UI thread was starved (gaps of up to 2 s on a cold load).
             const unsigned cores = std::thread::hardware_concurrency();
-            stats.indexThreads = std::max(1u, std::min<unsigned>(cores > 1 ? cores - 1 : 1, static_cast<unsigned>(std::max<std::size_t>(files.size(), 1))));
+            stats.indexThreads = std::max(1u, std::min<unsigned>(cores / 2, static_cast<unsigned>(std::max<std::size_t>(files.size(), 1))));
             const Clock::time_point indexStart = Clock::now();
+            Clock::time_point lastSave = indexStart;
             cpptools::IndexProgress result = index->indexFiles(files,
                 [&](const cpptools::IndexProgress& progress) {
                     if (alive->cancel.load() || !alive->alive.load()) return false;
+                    // A long first read is saved as it goes, so closing the app part way does not start over.
+                    if (!cache.empty() && progress.done != progress.total && since(lastSave) >= kSaveEveryMs) {
+                        index->save(cache);
+                        lastSave = Clock::now();
+                    }
                     if (progress.done % 5 == 0 && progress.done != progress.total) {
                         auto update = std::make_shared<Found>();
                         update->status = "Indexing " + std::to_string(progress.done) + " of " + std::to_string(progress.total) +
@@ -1452,9 +1521,13 @@ namespace CodeToolsVsix
                     stats.indexThreads);
                 result.parsed += again.parsed;
                 result.failed += again.failed;
+                result.reread.insert(result.reread.end(), again.reread.begin(), again.reread.end());
                 if (alive->cancel.load()) return;
             }
             stats.indexMs = since(indexStart);
+            if (result.reread.size() <= 5) {   // a warm open reads next to nothing: say what it did read
+                for (const std::string& file : result.reread) log(cpptools::Severity::Note, "ProjectExplorer: index read " + file);
+            }
             stats.filesToIndex = result.total;   // CMake lists a shared source once per target; the index counts it once
             if (!cache.empty()) index->save(cache);
 

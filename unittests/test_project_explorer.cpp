@@ -33,6 +33,25 @@ namespace fs = std::filesystem;
 
 namespace {
 
+// Every explorer in these tests would otherwise save its index under the real %LOCALAPPDATA%, one file per temp folder.
+class PrivateCacheFolder : public ::testing::Environment {
+public:
+    void SetUp() override {
+        folder_ = fs::temp_directory_path() / ("explorer_test_cache_" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        ProjectExplorer::setCacheFolder(folder_.string());
+    }
+    void TearDown() override {
+        ProjectExplorer::setCacheFolder(std::string());
+        std::error_code ec;
+        fs::remove_all(folder_, ec);
+    }
+
+private:
+    fs::path folder_;
+};
+
+const ::testing::Environment* const privateCacheFolder = ::testing::AddGlobalTestEnvironment(new PrivateCacheFolder);
+
 struct Opened
 {
     std::string path;
