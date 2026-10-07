@@ -119,6 +119,13 @@ namespace cmakemodel
         return best != nullptr ? &settings_[best->second] : nullptr;
     }
 
+    void CompileSettingsIndex::borrow(const std::string& header, const std::string& from)
+    {
+        const CompileSettings* source = find(from);
+        if (source == nullptr) return;
+        bySource_[canonical(header)] = static_cast<std::size_t>(source - settings_.data());
+    }
+
     const char* toString(TargetType type)
     {
         switch (type) {

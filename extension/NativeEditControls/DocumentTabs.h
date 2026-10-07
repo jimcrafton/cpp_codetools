@@ -3,8 +3,10 @@
 #include "NativeEditor.h"
 
 #include <newui/controls.h>
+#include <newui/filewatcher.h>
 #include <newui/subview.h>
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -67,17 +69,57 @@ namespace CodeToolsVsix
 
         newui::TabControl* tabControl() const { return tabControl_; }
 
+        // A tab's file against what is on disk: the editor shows it as loaded or saved (InSync), the file has
+        // since been changed by something else and the editor kept its own text (Changed), or it is gone (Deleted).
+        enum class DiskState { InSync, Changed, Deleted };
+        DiskState diskStateAt(std::size_t index) const;
+
+        // Asked when a tab's file changes on disk while its editor has unsaved edits: true reloads it (the edits are
+        // lost), false keeps them. With no handler they are kept. A tab without edits is simply reloaded.
+        using ChangedOnDiskHandler = std::function<bool(const std::wstring& path)>;
+        void setChangedOnDiskHandler(ChangedOnDiskHandler handler) { changedOnDiskHandler_ = std::move(handler); }
+
+        // What the file watcher reports, applied to the tabs. The watcher (one for every open file, once a run
+        // loop is pumping) calls this itself; it is public so a test can hand it changes. A change is acted on
+        // only if the file really differs from what the tab last loaded or saved, so the editor's own save is not
+        // taken for someone else's.
+        void applyDiskChanges(const newui::FileWatcher::Changes& changes);
+
+        // Tells the tabs `editor` has just written its file, so the change that write causes on disk is its own.
+        // Call it after a save (the editors do not all report one), then the titles are refreshed too.
+        void editorSaved(NativeEditor* editor);
+
         // Where a tab's label and dirty marker come from - exposed for tests.
         static std::string titleFor(const std::wstring& path, bool dirty);
+        static std::string titleFor(const std::wstring& path, bool dirty, DiskState state);
 
     private:
+        // What a file looked like on disk (modification time and size); two equal stamps mean it did not change.
+        struct DiskStamp
+        {
+            bool exists = false;
+            std::uintmax_t size = 0;
+            std::int64_t time = 0;
+            bool operator==(const DiskStamp& other) const { return exists == other.exists && size == other.size && time == other.time; }
+        };
+
         struct Tab
         {
             std::wstring path;
             DocumentType type = DocumentType::CppSource;
             std::unique_ptr<NativeEditor> editor;
             EditorPage* page = nullptr;   // owned by tabControl_
+            newui::FileWatcher::WatchId watchId = newui::FileWatcher::kInvalidWatch;
+            DiskStamp stamp;              // the file as the editor last loaded or saved it
+            DiskState state = DiskState::InSync;
+            bool wasDirty = false;
         };
+
+        static DiskStamp stampOf(const std::wstring& path);
+        void watchTab(Tab& tab);          // starts following the tab's file (once a run loop is pumping)
+        void unwatchTab(Tab& tab);
+        void reactToDiskChange(Tab& tab);
+        newui::SyncReturn handleDiskChanges(newui::FileWatcher& sender, const newui::FileWatcher::Changes& changes);
 
         newui::SyncReturn handleTabChanged(newui::TabControl& sender, std::size_t index);
         void syncWindows();
@@ -85,6 +127,9 @@ namespace CodeToolsVsix
 
         EditorFactory factory_;
         ActiveSourceHandler activeSourceHandler_;
+        ChangedOnDiskHandler changedOnDiskHandler_;
+        std::unique_ptr<newui::FileWatcher> watcher_;   // created with the first open file, if a loop is pumping
+        bool applyingDiskChanges_ = false;              // a prompt is up: its own events are not nested inside it
         newui::TabControl* tabControl_ = nullptr;
         std::vector<Tab> tabs_;   // index-aligned with tabControl_'s tabs
     };

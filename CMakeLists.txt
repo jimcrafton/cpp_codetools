@@ -428,6 +428,7 @@ add_library(nativeeditcontrols_core OBJECT
     extension/NativeEditControls/TextEncoding.cpp
     extension/NativeEditControls/Settings.cpp
     extension/NativeEditControls/ExplorerModel.cpp
+    extension/NativeEditControls/HeaderFlags.cpp
     extension/NativeEditControls/ExplorerItem.cpp
     extension/NativeEditControls/ExplorerAnalysis.cpp
     extension/NativeEditControls/WorkspaceInfo.cpp

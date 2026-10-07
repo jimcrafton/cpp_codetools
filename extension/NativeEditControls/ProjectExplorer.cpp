@@ -1,4 +1,5 @@
 #include "ProjectExplorer.h"
+#include "HeaderFlags.h"
 
 #include <Windows.h>
 
@@ -18,6 +19,7 @@
 #include <newui/bundle.h>
 #include <newui/layout.h>
 #include <newui/uicolormanager.h>
+#include <newui/utils.h>
 
 #include <algorithm>
 #include <cctype>
@@ -33,6 +35,26 @@ namespace fs = std::filesystem;
 
 namespace CodeToolsVsix
 {
+    namespace
+    {
+        // The UI thread should spend only moments in any one step of the explorer; one that takes long is logged.
+        class StallLog
+        {
+        public:
+            explicit StallLog(std::string what) : what_(std::move(what)), start_(std::chrono::steady_clock::now()) {}
+            ~StallLog()
+            {
+                const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_).count();
+                if (ms >= kThresholdMs) log(cpptools::Severity::Warning, "ProjectExplorer: " + what_ + " took " + std::to_string(ms) + " ms on the UI thread");
+            }
+
+        private:
+            static constexpr long long kThresholdMs = 20;
+            std::string what_;
+            std::chrono::steady_clock::time_point start_;
+        };
+    }
+
     struct ProjectExplorer::Alive
     {
         std::atomic<bool> alive{ true };
@@ -57,6 +79,7 @@ namespace CodeToolsVsix
     {
         std::shared_ptr<cmakemodel::Model> model;
         std::string buildDir;
+        std::string replyDir;  // <build>/.cmake/api/v1 of the build tree found, with or without a model
         std::string note;      // why there is no model, when there is none
         std::string status;
         bool final = false;
@@ -381,6 +404,7 @@ namespace CodeToolsVsix
     ProjectExplorer::~ProjectExplorer()
     {
         alive_->alive.store(false);
+        watcher_.reset();   // stops its workers before anything they post can go stale
         stopWork();
         stopProgressSweep();
         if (loop_ != nullptr && filterTimer_ != newui::RunLoop::kInvalidTimerHandle) {
@@ -441,6 +465,16 @@ namespace CodeToolsVsix
     {
         if (!loaded()) return;
         stopWork();
+        watcher_.reset();
+        pendingReplyDir_.clear();
+        treeCache_.clear();
+        replyDir_.clear();
+        replyWatch_ = newui::FileWatcher::kInvalidWatch;
+        loadedReplyIndex_.clear();
+        treeViewKey_.clear();
+        loading_ = false;
+        refreshFull_ = false;
+        refreshModified_.clear();
         setProgress(0.0f);
         root_ = folder;
         cmake_.reset();
@@ -465,10 +499,11 @@ namespace CodeToolsVsix
 
     void ProjectExplorer::setMode(ExplorerMode mode)
     {
+        const bool controlRebuilds = modeControl_ != nullptr && modeControl_->selectedIndex() != static_cast<std::size_t>(mode);
         mode_ = mode;
         if (modeControl_ != nullptr) modeControl_->setSelectedIndex(static_cast<std::size_t>(mode));
         showAnalysisControls();
-        rebuild();
+        if (!controlRebuilds) rebuild();   // otherwise handleModeChanged() just did
     }
 
     void ProjectExplorer::setAnalysisTab(AnalysisTab tab)
@@ -564,10 +599,94 @@ namespace CodeToolsVsix
         });
     }
 
+    // The tree's open rows and its selection as names from the top, and where the open ones were by position:
+    // positions mean nothing once the rows are rebuilt, so those are closed and the names are looked up afresh.
+    struct ProjectExplorer::TreeState
+    {
+        std::vector<std::vector<std::string>> expandedNames;   // parents before children
+        std::vector<std::vector<std::size_t>> expandedPaths;
+        std::vector<std::string> selectedNames;
+    };
+
+    ProjectExplorer::TreeState ProjectExplorer::saveTreeState()
+    {
+        TreeState state;
+        if (model_ == nullptr || tree_ == nullptr) return state;
+        newui::TreeController& controller = tree_->controller();
+        std::function<void(const std::vector<std::size_t>&, const std::vector<std::string>&)> walk =
+            [&](const std::vector<std::size_t>& parent, const std::vector<std::string>& parentNames) {
+                const std::size_t count = model_->childCount(parent);
+                for (std::size_t i = 0; i < count; ++i) {
+                    std::vector<std::size_t> path = parent;
+                    path.push_back(i);
+                    if (!controller.isExpanded(path)) continue;
+                    const ExplorerNode* node = model_->nodeAt(path);
+                    if (node == nullptr) continue;
+                    std::vector<std::string> names = parentNames;
+                    names.push_back(node->text);
+                    state.expandedNames.push_back(names);
+                    state.expandedPaths.push_back(path);
+                    walk(path, names);
+                }
+            };
+        walk({}, {});
+        if (auto selected = tree_->selectedPath()) {
+            std::vector<std::size_t> path;
+            for (std::size_t index : *selected) {
+                path.push_back(index);
+                const ExplorerNode* node = model_->nodeAt(path);
+                if (node == nullptr) {
+                    state.selectedNames.clear();
+                    break;
+                }
+                state.selectedNames.push_back(node->text);
+            }
+        }
+        return state;
+    }
+
+    void ProjectExplorer::restoreTreeState(const TreeState& state, bool sameView)
+    {
+        if (model_ == nullptr || tree_ == nullptr || !sameView) return;
+        newui::TreeController& controller = tree_->controller();
+        // The path of the row named `names` from the top, if the tree still has it.
+        auto find = [&](const std::vector<std::string>& names, std::vector<std::size_t>& path) {
+            path.clear();
+            for (const std::string& name : names) {
+                const std::size_t count = model_->childCount(path);
+                bool found = false;
+                for (std::size_t i = 0; i < count && !found; ++i) {
+                    path.push_back(i);
+                    const ExplorerNode* node = model_->nodeAt(path);
+                    if (node != nullptr && node->text == name) found = true;
+                    else path.pop_back();
+                }
+                if (!found) return false;
+            }
+            return true;
+        };
+        std::vector<std::size_t> path;
+        for (const std::vector<std::string>& names : state.expandedNames) {
+            if (find(names, path)) controller.setExpanded(path, true);
+        }
+        if (!state.selectedNames.empty() && find(state.selectedNames, path)) tree_->setSelectedPath(path);
+    }
+
     void ProjectExplorer::rebuild()
     {
         if (model_ == nullptr) return;
+        StallLog stall("rebuild(mode " + std::to_string(static_cast<int>(mode_)) + ")");
         showCard(nullptr);   // the rows it described are about to go
+        const TreeState state = saveTreeState();
+        for (const std::vector<std::size_t>& path : state.expandedPaths) tree_->controller().setExpanded(path, false);
+        const std::string viewKey = std::to_string(static_cast<int>(mode_)) + "|" + wideToUtf8(filter()) + (showInfo_ ? "|info" : "");
+        buildTree();
+        restoreTreeState(state, viewKey == treeViewKey_);
+        treeViewKey_ = viewKey;
+    }
+
+    void ProjectExplorer::buildTree()
+    {
         if (showInfo_ && !root_.empty()) {
             model_->setRoot(buildStatsTree(stats_));
             for (std::size_t i = 0; i < 4; ++i) tree_->controller().setExpanded({ i }, true);   // its groups, open
@@ -598,7 +717,11 @@ namespace CodeToolsVsix
                 }
                 break;
             case ExplorerMode::Symbols:
-                top = root_.empty() ? buildMessageTree("Open a folder or solution.") : buildSymbolsTree(*index_, text);
+                if (root_.empty()) {
+                    top = buildMessageTree("Open a folder or solution.");
+                } else {
+                    top = cachedTree("symbols|" + text, [&]() { return buildSymbolsTree(*index_, text); });
+                }
                 break;
             case ExplorerMode::Products:
                 if (cmake_ != nullptr) {
@@ -841,6 +964,20 @@ namespace CodeToolsVsix
         return buildMacroTree(*macroResult_, root_, folder, filter);
     }
 
+    ExplorerNode ProjectExplorer::cachedTree(const std::string& key, const std::function<ExplorerNode()>& build)
+    {
+        if (!loading_) {
+            auto found = treeCache_.find(key);
+            if (found != treeCache_.end()) return *found->second;
+        }
+        ExplorerNode tree = build();
+        if (!loading_) {
+            if (treeCache_.size() >= 8) treeCache_.clear();   // filters come and go: keep it small
+            treeCache_[key] = std::make_shared<const ExplorerNode>(tree);
+        }
+        return tree;
+    }
+
     ExplorerNode ProjectExplorer::buildAnalysisTree(const std::string& filter)
     {
         if (root_.empty()) return buildMessageTree("Open a folder or solution.");
@@ -848,8 +985,10 @@ namespace CodeToolsVsix
             case AnalysisTab::Includes:
                 if (!stats_.complete) return buildMessageTree("Reading the project; includes appear when indexing is done.");
                 if (includeGraph_ == nullptr) includeGraph_ = std::make_shared<const cpptools::IncludeGraph>(*index_);
-                return includeView_ == IncludeView::Impact ? buildIncludeImpactTree(includeGraph_, root_, filter)
-                                                           : buildIncludeFileTree(includeGraph_, root_, filter);
+                return cachedTree(std::string("includes|") + (includeView_ == IncludeView::Impact ? "impact|" : "files|") + filter, [&]() {
+                    return includeView_ == IncludeView::Impact ? buildIncludeImpactTree(includeGraph_, root_, filter)
+                                                               : buildIncludeFileTree(includeGraph_, root_, filter);
+                });
             case AnalysisTab::Macros:
                 return buildMacroView(filter);
             case AnalysisTab::Templates:
@@ -886,9 +1025,12 @@ namespace CodeToolsVsix
 
     void ProjectExplorer::applyFound(const std::shared_ptr<Found>& found)
     {
+        StallLog stall(std::string("applyFound(") + (found->final ? "final" : found->model != nullptr ? "model" : found->stats != nullptr ? "stats" : "progress") + ")");
+        if (!found->replyDir.empty()) pendingReplyDir_ = found->replyDir;
         if (found->model != nullptr) {
             cmake_ = found->model;
             buildDir_ = found->buildDir;
+            loadedReplyIndex_ = latestReplyIndex(found->replyDir);
             note_.clear();
             auto products = std::make_shared<FileProducts>();
             products->known = true;
@@ -929,14 +1071,144 @@ namespace CodeToolsVsix
             setStatus(text);
         }
         if (found->final) {
+            loading_ = false;
+            treeCache_.clear();   // the index changed
+            // Watching starts once the first load is done, so indexing is never competing with (or redone for) events.
+            startWatching();
+            if (!pendingReplyDir_.empty()) watchReply(pendingReplyDir_);
             includeGraph_.reset();   // the index is complete: the next Analysis view reads it afresh
             collectProblems();
             rebuild();
+            if (refreshFull_ || !refreshModified_.empty()) {   // changes that came in during the load
+                const bool full = refreshFull_;
+                std::set<std::string> modified = std::move(refreshModified_);
+                refreshFull_ = false;
+                refreshModified_.clear();
+                refresh(full, std::move(modified));
+            }
         }
+    }
+
+    ProjectExplorer::DiskChanges ProjectExplorer::summarizeChanges(const newui::FileWatcher::Changes& changes)
+    {
+        using Action = newui::FileWatcher::Action;
+        DiskChanges summary;
+        for (const newui::FileWatcher::Change& change : changes) {
+            if (change.action != Action::Modified) {
+                summary.full = true;   // a file came, went or moved (or events were lost): the listings changed
+                continue;
+            }
+            const std::string ext = extensionOf(change.path);
+            if (lowered(fs::path(change.path).filename().string()) == "cmakelists.txt" || ext == ".cmake") {
+                summary.full = true;   // the description of the build may be out of date
+            } else if (isIndexedExtension(ext)) {
+                summary.modified.insert(change.path);
+            }   // any other file's contents are not shown
+        }
+        return summary;
+    }
+
+    bool ProjectExplorer::watchIgnores(const std::string& root, const std::string& path)
+    {
+        const std::string base = newui::normalizePath(root);
+        if (path.size() <= base.size() + 1) return true;
+        std::size_t start = base.size() + 1;
+        while (start < path.size()) {
+            const std::size_t slash = path.find('/', start);
+            const std::string name = path.substr(start, slash == std::string::npos ? std::string::npos : slash - start);
+            if (!name.empty() && (name.front() == '.' || isSkippedExplorerFolder(name))) return true;
+            if (slash == std::string::npos) return isSkippedExplorerFile(name);
+            start = slash + 1;
+        }
+        return false;
+    }
+
+    std::string ProjectExplorer::latestReplyIndex(const std::string& replyDir)
+    {
+        std::string latest;
+        std::error_code ec;
+        for (fs::directory_iterator it(fs::path(replyDir) / "reply", ec), end; !ec && it != end; it.increment(ec)) {
+            const std::string name = it->path().filename().string();
+            if (name.compare(0, 6, "index-") == 0 && extensionOf(name) == ".json" && name > latest) latest = name;   // stamped names sort by time
+        }
+        return latest;
+    }
+
+    void ProjectExplorer::watchReply(const std::string& replyDir)
+    {
+        if (watcher_ == nullptr || replyDir == replyDir_) return;
+        if (replyWatch_ != newui::FileWatcher::kInvalidWatch) watcher_->unwatch(replyWatch_);
+        replyDir_ = replyDir;
+        newui::FileWatcher::Options options;
+        options.debounce = std::chrono::milliseconds(400);
+        replyWatch_ = watcher_->watch(replyDir, options);
+    }
+
+    void ProjectExplorer::startWatching()
+    {
+        if (watcher_ != nullptr || !background_ || loop_ == nullptr || root_.empty()) return;
+        watcher_ = std::make_unique<newui::FileWatcher>(*loop_);
+        watcherConnection_ = watcher_->onChanged.add(this, &ProjectExplorer::handleDiskChanges);
+        newui::FileWatcher::Options options;
+        options.debounce = std::chrono::milliseconds(400);   // a build or checkout is one batch, not hundreds
+        options.ignore = [root = root_](const std::string& path) { return watchIgnores(root, path); };
+        if (watcher_->watch(root_, options) == newui::FileWatcher::kInvalidWatch) watcher_.reset();
+    }
+
+    newui::SyncReturn ProjectExplorer::handleDiskChanges(newui::FileWatcher&, const newui::FileWatcher::Changes& changes)
+    {
+        newui::FileWatcher::Changes projectChanges;
+        bool replyTouched = false;
+        for (const newui::FileWatcher::Change& change : changes) {
+            if (!replyDir_.empty() && change.path.compare(0, replyDir_.size(), replyDir_) == 0) replyTouched = true;
+            else projectChanges.push_back(change);
+        }
+        DiskChanges summary = summarizeChanges(projectChanges);
+        // CMake configured again (here or elsewhere): its description of the build has a new index. Our own
+        // load rewrites it too, which is why nothing is done during one.
+        if (replyTouched && !loading_ && latestReplyIndex(replyDir_) != loadedReplyIndex_) summary.full = true;
+        if (!summary.any()) return newui::SyncReturn::Ignored;
+        if (loading_) {   // the load in progress may or may not have seen these: redo them once it ends
+            refreshFull_ = refreshFull_ || summary.full;
+            refreshModified_.insert(summary.modified.begin(), summary.modified.end());
+        } else {
+            refresh(summary.full, std::move(summary.modified));
+        }
+        return newui::SyncReturn::Handled;
+    }
+
+    void ProjectExplorer::refresh(bool full, std::set<std::string> modified)
+    {
+        if (full) startWork();   // re-reads the CMake description and the folders; a file that did not change costs a stat
+        else refreshModified(std::move(modified));
+    }
+
+    void ProjectExplorer::refreshModified(std::set<std::string> modified)
+    {
+        std::vector<std::string> files;
+        for (const std::string& path : modified) {
+            if (index_->hasFile(path)) files.push_back(path);   // a stray file is not part of the project
+        }
+        if (files.empty() || loop_ == nullptr) return;
+        stopWork();
+        alive_->cancel.store(false);
+        loading_ = true;
+        worker_ = std::thread([this, files, index = index_, alive = alive_, loop = loop_]() {
+            for (const std::string& file : files) {
+                if (alive->cancel.load()) return;
+                index->updateFile(file);
+            }
+            auto done = std::make_shared<Found>();
+            done->final = true;
+            loop->post([this, alive, done]() {
+                if (alive->alive.load()) applyFound(done);
+            });
+        });
     }
 
     void ProjectExplorer::collectProblems()
     {
+        StallLog stall("collectProblems");
         using Badge = ExplorerNode::Badge;
         auto problems = std::make_shared<FileProblems>();
         const std::string rootKey = lowered(cpptools::ProjectIndex::normalizePath(root_));
@@ -996,6 +1268,7 @@ namespace CodeToolsVsix
     {
         stopWork();
         alive_->cancel.store(false);
+        loading_ = true;
 
         // The loop may not have been pumping when this was constructed (a plain newui app builds its views
         // first), so look again now; with none running the work falls back to this thread.
@@ -1057,6 +1330,7 @@ namespace CodeToolsVsix
             }
             const Clock::time_point cmakeStart = Clock::now();
             const BuildTree build = findBuildTree(root);
+            if (!build.dir.empty()) first->replyDir = build.dir + "/.cmake/api/v1";
             std::string buildNote;   // said beside the counts when the description is incomplete
             if (build.dir.empty()) {
                 first->note = "No CMake build folder found in this workspace.";
@@ -1099,12 +1373,17 @@ namespace CodeToolsVsix
 
             const std::vector<std::string> files = filesToIndex(root, first->model.get());
             stats.filesToIndex = files.size();
+            for (const std::string& known : index->files()) {   // a file deleted since the last pass
+                std::error_code existsEc;
+                if (!fs::exists(known, existsEc)) index->removeFile(known);
+            }
             index->setRoots({ root });
+            std::shared_ptr<const cmakemodel::CompileSettingsIndex> settings;   // how the build compiles each file
             if (first->model != nullptr) {
                 // What the build really compiles a file with: its target's include folders and definitions, added to the
                 // flags found the usual way (compile_commands.json), which may not cover a target (it did not cover
                 // the tests, the codegen library, or the generated headers) and so miss a -D or a -I.
-                auto settings = std::make_shared<const cmakemodel::CompileSettingsIndex>(*first->model);
+                settings = std::make_shared<const cmakemodel::CompileSettingsIndex>(*first->model);
                 index->setFlagsProvider([settings](const std::string& file) { return compileFlagsWithBuild(file, settings.get()).args; });
                 // Also handed to the editors, so their squiggles agree with this index. A delivery of its own: `first`
                 // went to the UI thread already, and is not to be written to from here.
@@ -1119,10 +1398,32 @@ namespace CodeToolsVsix
                 stats.cacheLoadMs = since(start);
             }
 
+            // A header no target lists is compiled as part of what includes it: give it that file's settings. Needs the
+            // include edges, so once from the cache (a header parsed with these settings last time is then up to date)
+            // and again after the files are parsed, for the ones that were new or changed.
+            std::set<std::string> borrowedHeaders;
+            auto borrowHeaders = [&]() -> std::vector<std::string> {
+                if (settings == nullptr) return {};
+                auto withHeaders = std::make_shared<cmakemodel::CompileSettingsIndex>(*settings);
+                std::vector<std::string> all;
+                borrowHeaderSettings(*index, *withHeaders, &all);
+                std::vector<std::string> fresh;
+                for (const std::string& header : all) {
+                    if (borrowedHeaders.insert(header).second) fresh.push_back(header);
+                }
+                if (fresh.empty()) return fresh;
+                index->setFlagsProvider([withHeaders](const std::string& file) { return compileFlagsWithBuild(file, withHeaders.get()).args; });
+                auto flagsSource = std::make_shared<Found>();
+                flagsSource->settings = withHeaders;
+                deliver(flagsSource);
+                return fresh;
+            };
+            borrowHeaders();
+
             const unsigned cores = std::thread::hardware_concurrency();
             stats.indexThreads = std::max(1u, std::min<unsigned>(cores > 1 ? cores - 1 : 1, static_cast<unsigned>(std::max<std::size_t>(files.size(), 1))));
             const Clock::time_point indexStart = Clock::now();
-            const cpptools::IndexProgress result = index->indexFiles(files,
+            cpptools::IndexProgress result = index->indexFiles(files,
                 [&](const cpptools::IndexProgress& progress) {
                     if (alive->cancel.load() || !alive->alive.load()) return false;
                     if (progress.done % 5 == 0 && progress.done != progress.total) {
@@ -1136,6 +1437,23 @@ namespace CodeToolsVsix
                 },
                 stats.indexThreads);
             if (alive->cancel.load()) return;
+            const std::vector<std::string> reread = borrowHeaders();
+            if (!reread.empty()) {   // their flags changed, so the index parses them again
+                const cpptools::IndexProgress again = index->indexFiles(reread,
+                    [&](const cpptools::IndexProgress& progress) {
+                        if (alive->cancel.load() || !alive->alive.load()) return false;
+                        auto update = std::make_shared<Found>();
+                        update->status = "Reading headers with the settings of what includes them (" + std::to_string(progress.done) + " of " +
+                                         std::to_string(progress.total) + ")";
+                        update->progress = progress.total > 0 ? static_cast<float>(progress.done) / static_cast<float>(progress.total) : 0.0f;
+                        deliver(update);
+                        return true;
+                    },
+                    stats.indexThreads);
+                result.parsed += again.parsed;
+                result.failed += again.failed;
+                if (alive->cancel.load()) return;
+            }
             stats.indexMs = since(indexStart);
             stats.filesToIndex = result.total;   // CMake lists a shared source once per target; the index counts it once
             if (!cache.empty()) index->save(cache);

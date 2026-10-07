@@ -247,3 +247,24 @@ TEST(CMakeModel, ReadsThisRepositorysOwnBuildTree) {
 
     EXPECT_FALSE(loadFileApi(build, "NoSuchConfig").ok());
 }
+
+TEST(CMakeModel, ABorrowedHeaderBuildsWithTheSettingsOfTheFileItWasBorrowedFrom) {
+    const Model model = loadFixture();
+    CompileSettingsIndex settings(model);
+    ASSERT_EQ(settings.find("C:/elsewhere/lonely.h"), nullptr);
+
+    settings.borrow("C:/elsewhere/lonely.h", "C:/proj/tools/main.cpp");
+
+    const CompileSettings* borrowed = settings.find("c:\\elsewhere\\LONELY.h");
+    ASSERT_NE(borrowed, nullptr) << "any slash, any case";
+    EXPECT_EQ(borrowed->target, "app");
+}
+
+TEST(CMakeModel, BorrowingFromAFileWithNoSettingsChangesNothing) {
+    const Model model = loadFixture();
+    CompileSettingsIndex settings(model);
+
+    settings.borrow("C:/elsewhere/lonely.h", "C:/elsewhere/nobody.cpp");
+
+    EXPECT_EQ(settings.find("C:/elsewhere/lonely.h"), nullptr);
+}

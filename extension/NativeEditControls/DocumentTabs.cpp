@@ -4,6 +4,9 @@
 #include <newui/layout.h>
 #include <newui/rootview.h>
 
+#include <newui/runloop.h>
+#include <newui/utils.h>
+
 #include <cwchar>
 #include <filesystem>
 
@@ -114,11 +117,112 @@ namespace CodeToolsVsix
 
     std::string DocumentTabs::titleFor(const std::wstring& path, bool dirty)
     {
+        return titleFor(path, dirty, DiskState::InSync);
+    }
+
+    std::string DocumentTabs::titleFor(const std::wstring& path, bool dirty, DiskState state)
+    {
         std::string title = wideToUtf8(std::filesystem::path(path).filename().wstring());
         if (title.empty()) {
             title = wideToUtf8(path);
         }
-        return dirty ? title + " *" : title;
+        if (dirty) title += " *";
+        if (state == DiskState::Changed) title += " (changed on disk)";
+        if (state == DiskState::Deleted) title += " (deleted)";
+        return title;
+    }
+
+    DocumentTabs::DiskStamp DocumentTabs::stampOf(const std::wstring& path)
+    {
+        DiskStamp stamp;
+        std::error_code ec;
+        const std::filesystem::path file(path);
+        if (!std::filesystem::is_regular_file(file, ec)) return stamp;
+        stamp.size = std::filesystem::file_size(file, ec);
+        stamp.time = static_cast<std::int64_t>(std::filesystem::last_write_time(file, ec).time_since_epoch().count());
+        stamp.exists = !ec;
+        return stamp;
+    }
+
+    DocumentTabs::DiskState DocumentTabs::diskStateAt(std::size_t index) const
+    {
+        return index < tabs_.size() ? tabs_[index].state : DiskState::InSync;
+    }
+
+    void DocumentTabs::watchTab(Tab& tab)
+    {
+        if (watcher_ == nullptr) {
+            newui::RunLoop& loop = newui::RunLoop::current();
+            if (!loop) return;   // no loop pumping (a test): nothing to deliver to
+            watcher_ = std::make_unique<newui::FileWatcher>(loop);
+            watcher_->onChanged.add(this, &DocumentTabs::handleDiskChanges);
+        }
+        newui::FileWatcher::Options options;
+        options.debounce = std::chrono::milliseconds(150);
+        tab.watchId = watcher_->watchFile(newui::wideToUtf8(tab.path), options);
+    }
+
+    void DocumentTabs::unwatchTab(Tab& tab)
+    {
+        if (watcher_ != nullptr && tab.watchId != newui::FileWatcher::kInvalidWatch) watcher_->unwatch(tab.watchId);
+        tab.watchId = newui::FileWatcher::kInvalidWatch;
+    }
+
+    newui::SyncReturn DocumentTabs::handleDiskChanges(newui::FileWatcher&, const newui::FileWatcher::Changes& changes)
+    {
+        applyDiskChanges(changes);
+        return newui::SyncReturn::Handled;
+    }
+
+    void DocumentTabs::applyDiskChanges(const newui::FileWatcher::Changes& changes)
+    {
+        if (applyingDiskChanges_) return;
+        applyingDiskChanges_ = true;
+        for (const newui::FileWatcher::Change& change : changes) {
+            const std::wstring path = newui::utf8ToWide(change.path);
+            for (Tab& tab : tabs_) {
+                if (samePath(tab.path, path)) {
+                    reactToDiskChange(tab);
+                    break;
+                }
+            }
+        }
+        applyingDiskChanges_ = false;
+        refreshTitles();
+    }
+
+    void DocumentTabs::editorSaved(NativeEditor* editor)
+    {
+        for (Tab& tab : tabs_) {
+            if (tab.editor.get() != editor) continue;
+            const std::wstring current = editor->currentPath();
+            if (!current.empty()) tab.path = current;   // a Save As: this is the file just written
+            tab.stamp = stampOf(tab.path);
+            tab.state = DiskState::InSync;
+        }
+        refreshTitles();
+    }
+
+    void DocumentTabs::reactToDiskChange(Tab& tab)
+    {
+        const DiskStamp now = stampOf(tab.path);
+        if (now == tab.stamp) return;   // the editor's own save, or already dealt with
+        if (!now.exists) {
+            tab.stamp = now;
+            tab.state = DiskState::Deleted;   // the text stays; saving writes it out again
+            return;
+        }
+        if (tab.editor->isDirty()) {
+            const bool reload = changedOnDiskHandler_ && changedOnDiskHandler_(tab.path);
+            if (!reload) {
+                tab.stamp = now;
+                tab.state = DiskState::Changed;
+                return;
+            }
+        }
+        const bool loaded = tab.editor->load(tab.path.c_str(), tab.path.size());
+        tab.stamp = now;
+        tab.state = loaded ? DiskState::InSync : DiskState::Changed;
     }
 
     NativeEditor* DocumentTabs::open(const std::wstring& path, DocumentType type)
@@ -154,6 +258,8 @@ namespace CodeToolsVsix
             close(tabs_.size() - 1);
             return nullptr;
         }
+        tabs_.back().stamp = stampOf(path);
+        watchTab(tabs_.back());
         refreshTitles();
         notifyActiveSource();
         return raw;
@@ -204,6 +310,7 @@ namespace CodeToolsVsix
         if (index >= tabs_.size()) {
             return false;
         }
+        unwatchTab(tabs_[index]);
         std::unique_ptr<NativeEditor> editor = std::move(tabs_[index].editor);
         tabs_.erase(tabs_.begin() + static_cast<std::ptrdiff_t>(index));
         newui::SubView* page = tabControl_->removeTab(index);
@@ -235,10 +342,20 @@ namespace CodeToolsVsix
         for (Tab& tab : tabs_) {
             // A Save As inside the editor moves the document to a new file; the tab follows it.
             const std::wstring current = tab.editor != nullptr ? tab.editor->currentPath() : std::wstring();
-            if (!current.empty()) {
+            if (!current.empty() && !samePath(current, tab.path)) {
+                unwatchTab(tab);
                 tab.path = current;
+                tab.stamp = stampOf(tab.path);
+                tab.state = DiskState::InSync;
+                watchTab(tab);
             }
-            tab.page->setTitle(titleFor(tab.path, tab.editor != nullptr && tab.editor->isDirty()));
+            const bool dirty = tab.editor != nullptr && tab.editor->isDirty();
+            if (tab.wasDirty && !dirty) {   // saved (or reloaded): the file is now what the editor holds
+                tab.stamp = stampOf(tab.path);
+                tab.state = DiskState::InSync;
+            }
+            tab.wasDirty = dirty;
+            tab.page->setTitle(titleFor(tab.path, dirty, tab.state));
         }
     }
 

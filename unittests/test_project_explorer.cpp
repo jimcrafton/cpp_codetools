@@ -21,9 +21,11 @@
 #include <any>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <set>
 #include <string>
 
 using namespace CodeToolsVsix;
@@ -765,4 +767,167 @@ TEST_F(ProjectExplorerTest, TheInfoButtonShowsHowLongThingsTookAndWhatIsWhere) {
     explorer_->modeControl()->setSelectedIndex(1);   // picking a view leaves the info
     EXPECT_FALSE(explorer_->infoShown());
     EXPECT_FALSE(hasRow(rows(), "Timing"));
+}
+
+namespace {
+    newui::FileWatcher::Change change(newui::FileWatcher::Action action, const std::string& path) {
+        newui::FileWatcher::Change result;
+        result.action = action;
+        result.path = path;
+        return result;
+    }
+}
+
+TEST(ProjectExplorerDiskChanges, EditingASourceOrHeaderIsAModification) {
+    using Action = newui::FileWatcher::Action;
+    const ProjectExplorer::DiskChanges summary = ProjectExplorer::summarizeChanges(
+        { change(Action::Modified, "C:/p/a.cpp"), change(Action::Modified, "C:/p/inc/b.H") });
+
+    EXPECT_FALSE(summary.full);
+    EXPECT_EQ(summary.modified, (std::set<std::string>{ "C:/p/a.cpp", "C:/p/inc/b.H" }));
+}
+
+TEST(ProjectExplorerDiskChanges, AFileComingGoingOrMovingNeedsAFullRefresh) {
+    using Action = newui::FileWatcher::Action;
+    EXPECT_TRUE(ProjectExplorer::summarizeChanges({ change(Action::Added, "C:/p/new.cpp") }).full);
+    EXPECT_TRUE(ProjectExplorer::summarizeChanges({ change(Action::Removed, "C:/p/readme.md") }).full);
+    EXPECT_TRUE(ProjectExplorer::summarizeChanges({ change(Action::Renamed, "C:/p/b.cpp") }).full);
+    EXPECT_TRUE(ProjectExplorer::summarizeChanges({ change(Action::Overflow, "C:/p") }).full);
+}
+
+TEST(ProjectExplorerDiskChanges, EditingCMakeInputsNeedsAFullRefresh) {
+    using Action = newui::FileWatcher::Action;
+    const ProjectExplorer::DiskChanges lists = ProjectExplorer::summarizeChanges({ change(Action::Modified, "C:/p/app/CMakeLists.txt") });
+    EXPECT_TRUE(lists.full);
+    EXPECT_TRUE(lists.modified.empty());
+    EXPECT_TRUE(ProjectExplorer::summarizeChanges({ change(Action::Modified, "C:/p/cmake/Tools.cmake") }).full);
+}
+
+TEST(ProjectExplorerDiskChanges, EditingAFileTheExplorerDoesNotShowIsNothing) {
+    using Action = newui::FileWatcher::Action;
+    EXPECT_FALSE(ProjectExplorer::summarizeChanges({ change(Action::Modified, "C:/p/docs/readme.md"),
+                                                     change(Action::Modified, "C:/p/docs") }).any());
+}
+
+TEST(ProjectExplorerWatchIgnores, DotBuildAndDependencyFoldersAreIgnored) {
+    EXPECT_TRUE(ProjectExplorer::watchIgnores("C:/p", "C:/p/.git/index"));
+    EXPECT_TRUE(ProjectExplorer::watchIgnores("C:/p", "C:/p/build/CMakeCache.txt"));
+    EXPECT_TRUE(ProjectExplorer::watchIgnores("C:/p", "C:/p/build-ninja/x/y.obj"));
+    EXPECT_TRUE(ProjectExplorer::watchIgnores("C:/p", "C:/p/3rdparty/newui/a.h"));
+    EXPECT_TRUE(ProjectExplorer::watchIgnores("C:/p", "C:/p/src/out"));   // a skipped folder itself
+}
+
+TEST(ProjectExplorerWatchIgnores, BuildOutputAndTempFilesAreIgnored) {
+    EXPECT_TRUE(ProjectExplorer::watchIgnores("C:/p", "C:/p/src/a.obj"));
+    EXPECT_TRUE(ProjectExplorer::watchIgnores("C:/p", "C:/p/src/a.cpp.tmp"));
+}
+
+TEST(ProjectExplorerWatchIgnores, ProjectFilesAreNot) {
+    EXPECT_FALSE(ProjectExplorer::watchIgnores("C:/p", "C:/p/src/a.cpp"));
+    EXPECT_FALSE(ProjectExplorer::watchIgnores("C:\p\\", "C:/p/CMakeLists.txt"));
+    EXPECT_FALSE(ProjectExplorer::watchIgnores("C:/p", "C:/p/docs/readme.md"));
+}
+
+TEST_F(ProjectExplorerTest, ARebuildKeepsTheOpenFoldersAndTheSelectionEvenWhenRowsShift) {
+    write("docs/guide.md", "g");
+    explorer_->setRoot(dir_.generic_string());
+    explorer_->setMode(ExplorerMode::Files);
+    ASSERT_TRUE(hasRow(rows(), "docs/"));
+    newui::TreeController& controller = explorer_->treeView()->controller();
+    controller.setExpanded({ 0 }, true);   // docs, the only folder
+    ASSERT_FALSE(rows({ 0 }).empty());
+    explorer_->treeView()->setSelectedPath(std::vector<std::size_t>{ 0, 0 });
+
+    write("adir/x.txt", "x");   // a new folder sorts before docs, so docs moves down a row
+    explorer_->setMode(ExplorerMode::Files);   // the same view again: a rebuild
+
+    EXPECT_TRUE(hasRow(rows(), "adir/"));
+    EXPECT_FALSE(controller.isExpanded({ 0 })) << "adir was never opened";
+    EXPECT_TRUE(controller.isExpanded({ 1 })) << "docs is still open, one row lower";
+    ASSERT_TRUE(explorer_->treeView()->selectedPath().has_value());
+    EXPECT_EQ(*explorer_->treeView()->selectedPath(), (std::vector<std::size_t>{ 1, 0 }));
+}
+
+TEST_F(ProjectExplorerTest, SwitchingViewsStartsWithEverythingClosed) {
+    write("docs/guide.md", "g");
+    explorer_->setRoot(dir_.generic_string());
+    explorer_->setMode(ExplorerMode::Files);
+    explorer_->treeView()->controller().setExpanded({ 0 }, true);
+
+    explorer_->setMode(ExplorerMode::Symbols);
+    explorer_->setMode(ExplorerMode::Files);
+
+    EXPECT_FALSE(explorer_->treeView()->controller().isExpanded({ 0 }));
+}
+
+TEST(ProjectExplorerReply, TheNewestIndexIsFoundByItsStampedName) {
+    const fs::path dir = fs::temp_directory_path() / ("reply_" + std::to_string(::GetCurrentProcessId()));
+    fs::create_directories(dir / "reply");
+    for (const char* name : { "index-2026-10-01T10-00-00-0000.json", "index-2026-10-06T09-30-00-0000.json",
+                              "codemodel-v2-abc.json", "index-2026-10-03T08-00-00-0000.json" }) {
+        std::ofstream(dir / "reply" / name) << "{}";
+    }
+
+    EXPECT_EQ(ProjectExplorer::latestReplyIndex(dir.generic_string()), "index-2026-10-06T09-30-00-0000.json");
+    EXPECT_EQ(ProjectExplorer::latestReplyIndex((dir / "nope").generic_string()), "");
+
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+}
+
+// A developer's profile of a real folder, skipped unless EXPLORER_PROFILE_ROOT names one: loads it the way the
+// explorer does (inline, so every UI-thread step shows up in the "took N ms on the UI thread" log lines) and
+// then times a rebuild of each view.
+TEST(ProjectExplorerProfile, ARealFolder) {
+    const char* root = std::getenv("EXPLORER_PROFILE_ROOT");
+    if (root == nullptr) GTEST_SKIP() << "set EXPLORER_PROFILE_ROOT to a folder to profile";
+    newui::RootView view(nullptr, newui::Rect(0, 0, 380, 700), "profile");
+    view.setLayout(std::make_unique<newui::FlexLayout>(newui::Orientation::Vertical));
+    ProjectExplorer explorer(view);
+    explorer.setBackground(false);
+    using Clock = std::chrono::steady_clock;
+    auto ms = [](Clock::time_point since) { return std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - since).count(); };
+    explorer.setMode(ExplorerMode::Files);
+    const auto start = Clock::now();
+    explorer.setRoot(root);
+    std::printf("PROFILE total load (job + UI steps, inline): %lld ms\n", static_cast<long long>(ms(start)));
+    const ProjectStats& stats = explorer.stats();
+    std::printf("PROFILE files %zu, parsed %zu, up to date %zu, failed %zu; cache load %.0f ms, index %.0f ms\n",
+                stats.filesToIndex, stats.parsed, stats.upToDate, stats.failed, stats.cacheLoadMs, stats.indexMs);
+    for (ExplorerMode mode : { ExplorerMode::Files, ExplorerMode::Symbols, ExplorerMode::Products, ExplorerMode::Analysis,
+                               ExplorerMode::Files, ExplorerMode::Symbols, ExplorerMode::Products, ExplorerMode::Analysis }) {
+        const auto began = Clock::now();
+        explorer.setMode(mode);
+        std::printf("PROFILE rebuild mode %d: %lld ms\n", static_cast<int>(mode), static_cast<long long>(ms(began)));
+    }
+}
+
+TEST_F(ProjectExplorerTest, ClickingAModeRebuildsTheTreeOnce) {
+    explorer_->setRoot(dir_.generic_string());
+    explorer_->setMode(ExplorerMode::Files);
+    int rebuilds = 0;
+    explorer_->model()->onChanged.add([&rebuilds](newui::Model&) {
+        ++rebuilds;
+        return newui::SyncReturn::Ignored;
+    });
+
+    explorer_->modeControl()->setSelectedIndex(1);   // what a click does
+
+    EXPECT_EQ(rebuilds, 1);
+}
+
+TEST_F(ProjectExplorerTest, ARevisitedViewShowsTheSameTreeAndANewIndexShowsWhatChanged) {
+    explorer_->setRoot(dir_.generic_string());
+    explorer_->setMode(ExplorerMode::Symbols);
+    const std::vector<std::string> first = rows();
+    ASSERT_FALSE(first.empty());
+
+    explorer_->setMode(ExplorerMode::Files);
+    explorer_->setMode(ExplorerMode::Symbols);   // from the kept tree
+    EXPECT_EQ(rows(), first);
+
+    write("c.h", "#pragma once\nclass Brandnew {};\n");
+    explorer_->setRoot(dir_.generic_string());   // a new index: the kept tree must not be reused
+    explorer_->setMode(ExplorerMode::Symbols);
+    EXPECT_TRUE(hasRow(rows(), "class Brandnew"));
 }

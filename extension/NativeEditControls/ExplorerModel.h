@@ -265,4 +265,5 @@ namespace CodeToolsVsix
 
     // Folders no explorer view shows: build output, fetched dependencies, tool caches (by folder name).
     bool isSkippedExplorerFolder(const std::string& name);
+    bool isSkippedExplorerFile(const std::string& name);   // build output and temp files
 }

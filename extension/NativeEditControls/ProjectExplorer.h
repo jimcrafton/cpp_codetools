@@ -3,6 +3,7 @@
 #include <newui/controllers.h>
 #include <newui/controls.h>
 #include <newui/delegate.h>
+#include <newui/filewatcher.h>
 #include <newui/runloop.h>
 #include <newui/segmentedcontrol.h>
 
@@ -12,6 +13,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -84,6 +86,23 @@ namespace CodeToolsVsix
         bool infoShown() const { return showInfo_; }
         const ProjectStats& stats() const { return stats_; }
 
+        // What a batch of disk changes asks of the explorer: `full` re-reads everything (a file was added,
+        // removed or renamed, CMake inputs changed, or events were lost); otherwise `modified` are the
+        // source and header files whose contents changed.
+        struct DiskChanges
+        {
+            bool full = false;
+            std::set<std::string> modified;
+            bool any() const { return full || !modified.empty(); }
+        };
+        static DiskChanges summarizeChanges(const newui::FileWatcher::Changes& changes);
+        // Whether a change at `path` under `root` is of no interest: inside a dot, build or dependency
+        // folder, or a build-output or temp file.
+        static bool watchIgnores(const std::string& root, const std::string& path);
+        // The newest CMake File API index in `replyDir` (its "reply" folder's parent: <build>/.cmake/api/v1), by
+        // file name; "" if there is none. A new one means CMake configured again.
+        static std::string latestReplyIndex(const std::string& replyDir);
+
         // What a double-click on the row at `path` does. False if the row opens nothing.
         bool activate(const std::vector<std::size_t>& path);
 
@@ -116,6 +135,7 @@ namespace CodeToolsVsix
         struct Found;
         struct FileProducts;
         struct FileProblems;
+        struct TreeState;
 
         newui::SyncReturn handleModeChanged(newui::SegmentedControl& sender);
         newui::SyncReturn handleAnalysisTabChanged(newui::SegmentedControl& sender);
@@ -148,6 +168,22 @@ namespace CodeToolsVsix
         void stopWork();
         void applyFound(const std::shared_ptr<Found>& found);
         void collectProblems();   // which files, and the folders above them, have errors or warnings
+
+        // Watching the root for changes on disk: a batch lands in handleDiskChanges() on the loop thread.
+        void startWatching();
+        newui::SyncReturn handleDiskChanges(newui::FileWatcher& sender, const newui::FileWatcher::Changes& changes);
+        // Brings the views up to date: `full` re-reads everything (startWork), otherwise only the
+        // `modified` files are re-parsed. Called when the batch is in and no load is running.
+        void refresh(bool full, std::set<std::string> modified);
+        void refreshModified(std::set<std::string> modified);
+        void watchReply(const std::string& replyDir);   // so a configure done elsewhere is noticed
+
+        // The rows open and the one selected, by name, so a rebuild of the same view can put them back.
+        TreeState saveTreeState();
+        void restoreTreeState(const TreeState& state, bool sameView);
+        void buildTree();   // the tree for the current mode, filter and data
+        // The tree for view `key`: the one built before from this index, or `build()`'s (kept, unless a load is running).
+        ExplorerNode cachedTree(const std::string& key, const std::function<ExplorerNode()>& build);
 
         newui::View* view_ = nullptr;                    // owned by the host
         newui::Label* rootName_ = nullptr;
@@ -201,6 +237,19 @@ namespace CodeToolsVsix
         std::string status_text_;
 
         bool background_ = true;
+        std::unique_ptr<newui::FileWatcher> watcher_;
+        newui::Connection watcherConnection_;
+        std::string pendingReplyDir_;          // the build's reply folder, found by the load and watched once it is done
+        std::string replyDir_;                 // <build>/.cmake/api/v1, watched for a new index
+        newui::FileWatcher::WatchId replyWatch_ = newui::FileWatcher::kInvalidWatch;
+        std::string loadedReplyIndex_;         // the index the model in cmake_ was read from
+        std::string treeViewKey_;              // which view the tree last showed (mode, filter, info)
+        // Trees built from a finished index, by view: showing one again costs a copy, not a rebuild. Dropped whenever the
+        // index changes.
+        std::map<std::string, std::shared_ptr<const ExplorerNode>> treeCache_;
+        bool loading_ = false;                 // startWork()'s job has not delivered its final result
+        bool refreshFull_ = false;             // changes that came in during a load, applied when it ends
+        std::set<std::string> refreshModified_;
         std::shared_ptr<Alive> alive_;
         std::thread worker_;
         newui::RunLoop::TimerHandle filterTimer_ = newui::RunLoop::kInvalidTimerHandle;

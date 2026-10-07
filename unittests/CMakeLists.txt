@@ -108,6 +108,7 @@ add_executable(nativeeditcontrols_tests
     test_settings.cpp
     test_explorer_model.cpp
     test_project_explorer.cpp
+    test_header_flags.cpp
     test_editor_file_kinds.cpp
     test_host_services.cpp
     test_problem_list.cpp

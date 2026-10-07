@@ -131,6 +131,11 @@ namespace cmakemodel
         // Null when no target claims the file.
         const CompileSettings* find(const std::string& path) const;
 
+        // Makes `header` build with the settings of `from` (a file the index finds settings for), whatever find() said
+        // of it before. For a header that no target lists or reaches, borrowing from a file that includes it. A no-op
+        // if `from` has none.
+        void borrow(const std::string& header, const std::string& from);
+
     private:
         std::vector<CompileSettings> settings_;
         std::map<std::string, std::size_t> bySource_;                        // canonical path -> settings_ index

@@ -532,11 +532,13 @@ namespace CodeToolsVsix
             else kids[parent->second].push_back(i);
         }
 
-        auto order = [&nodes](std::vector<std::size_t>& list) {
-            std::sort(list.begin(), list.end(), [&nodes](std::size_t a, std::size_t b) {
+        std::vector<std::string> sortKeys(nodes.size());   // each name lower-cased once, not on every comparison
+        for (std::size_t i = 0; i < nodes.size(); ++i) sortKeys[i] = lowered(nodes[i].text);
+        auto order = [&nodes, &sortKeys](std::vector<std::size_t>& list) {
+            std::sort(list.begin(), list.end(), [&nodes, &sortKeys](std::size_t a, std::size_t b) {
                 const int ra = rankOf(nodes[a].kind);
                 const int rb = rankOf(nodes[b].kind);
-                return ra != rb ? ra < rb : lowered(nodes[a].text) < lowered(nodes[b].text);
+                return ra != rb ? ra < rb : sortKeys[a] < sortKeys[b];
             });
         };
         std::function<ExplorerNode(std::size_t, int)> assemble = [&](std::size_t i, int depth) {
@@ -677,6 +679,11 @@ namespace CodeToolsVsix
     bool isSkippedExplorerFolder(const std::string& name)
     {
         return isSkippedFolder(name);
+    }
+
+    bool isSkippedExplorerFile(const std::string& name)
+    {
+        return isSkippedFile(name);
     }
 
     std::string formatByteSize(std::uint64_t bytes)

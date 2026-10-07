@@ -21,6 +21,7 @@
 #include "newui/splitter.h"
 #include "newui/subview.h"
 #include "newui/uicolormanager.h"
+#include "newui/utils.h"
 
 #include "../CppEditor.h"
 #include "../DesignerEditor.h"
@@ -170,6 +171,12 @@ int main(int argc, char** argv)
         return editor;
     });
     tabs->setName("testharnessDocumentTabs");
+    tabs->setChangedOnDiskHandler([&root](const std::wstring& path) {
+        const std::string text = newui::wideToUtf8(path) + "\n\nThis file was changed outside the editor and you have unsaved edits.\n"
+                                 "Reload it and lose your edits?";
+        return newui::Dialog::showMessageBox(root.windowHandle(), text, "codetools++ testharness",
+                                             newui::MessageBoxButtons::YesNo, newui::MessageBoxIcon::Warning) == newui::DialogResult::Yes;
+    });
     tabs->style().setBackgroundColor(newui::UIColorManager::colorFor(newui::UIColorRole::WindowBackground));
 
     auto* mainRow = new newui::Splitter(newui::Orientation::Horizontal);
@@ -213,7 +220,7 @@ int main(int argc, char** argv)
         {
             printf("testharness: save failed\n");
         }
-        tabs->refreshTitles();
+        tabs->editorSaved(editor);
     };
 
     // The explorer's Macros view follows the C++ file in the selected tab.
@@ -274,6 +281,21 @@ int main(int argc, char** argv)
     menuBar->setLayoutParams(std::make_unique<newui::FlexLayoutParams>(0.0f));
     root.addChild(menuBar);
     root.addChild(mainRow);
+
+    // A watchdog on the UI thread: it ticks every 50 ms, and a tick that comes much later means something held the
+    // thread (whatever it was) for about that long. Says so in the log.
+    app.runLoop().postIdle([]() {
+        using Clock = std::chrono::steady_clock;
+        auto last = std::make_shared<Clock::time_point>(Clock::now());
+        newui::RunLoop::current().postDelayed(std::chrono::milliseconds(50), [last]() {
+            const Clock::time_point now = Clock::now();
+            const auto gap = std::chrono::duration_cast<std::chrono::milliseconds>(now - *last).count();
+            *last = now;
+            if (gap > 250) log(cpptools::Severity::Warning, "UI thread unresponsive: " + std::to_string(gap) + " ms between ticks");
+            return false;   // repeats
+        });
+        return true;
+    });
 
     // A folder given on the command line is open from the start.
     if (argc > 1)
