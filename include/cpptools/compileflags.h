@@ -31,8 +31,7 @@ struct CompileFlags {
 CompileFlags compileFlagsFor(const std::string& filePath);
 
 // Whether compileFlagsFor() keeps each compile_commands.json opened between calls (valid while the file's modification
-// time is unchanged) instead of opening it again for every file. On by default; off is for troubleshooting, to rule the
-// kept copy out. Any thread.
+// time is unchanged) instead of opening it again for every file. On by default; the tests turn it off to compare the two. Any thread.
 void setCompileDatabaseCacheEnabled(bool enabled);
 
 // The part of compileFlagsFor() that turns one compile command into parse arguments: commandLine is

@@ -40,7 +40,6 @@ public class OptionsStorage
         { "CodeTools.explorer.hideNative", true },
         { "CodeTools.explorer.defaultView", "Symbols" },
         { "CodeTools.explorer.compileCommandsPaths", "build-ninja;build;out/build/*" },
-        { "CodeTools.explorer.cacheCompileDatabase", true },
         { "CodeTools.explorer.dimUnreferenced", true },
     };
 
@@ -269,10 +268,6 @@ public class OptionsStorage
                 return false;
             }
             _lastPushed[name] = text;
-        }
-        if (name.EndsWith("cacheCompileDatabase", StringComparison.Ordinal))
-        {
-            OutputWindowLogger.Write("options push " + name + " = " + text);
         }
         try
         {
