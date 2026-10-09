@@ -195,12 +195,12 @@ namespace CodeToolsVsix
 
         std::string cachePathFor(const std::string& root)
         {
-            const char* local = std::getenv("LOCALAPPDATA");
-            if (cacheFolderOverride().empty() && (local == nullptr || *local == '\0')) return std::string();
+            const std::string local = newui::SpecialFolders::localAppData();
+            if (cacheFolderOverride().empty() && local.empty()) return std::string();
             const std::size_t hash = std::hash<std::string>()(lowered(root));
             char name[32];
             std::snprintf(name, sizeof name, "%016llx.bin", static_cast<unsigned long long>(hash));
-            const fs::path folder = cacheFolderOverride().empty() ? fs::path(local) / "codetools++" / "index" : fs::path(cacheFolderOverride());
+            const fs::path folder = cacheFolderOverride().empty() ? fs::u8path(local) / "codetools++" / "index" : fs::path(cacheFolderOverride());
             std::error_code ec;
             fs::create_directories(folder, ec);
             return ec ? std::string() : (folder / name).string();
